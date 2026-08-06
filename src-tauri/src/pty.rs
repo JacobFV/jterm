@@ -233,7 +233,7 @@ pub fn pty_spawn(
 
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    cmd.env("TERM_PROGRAM", "Terminal++");
+    cmd.env("TERM_PROGRAM", "jterm");
     cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
 
     let child = pair

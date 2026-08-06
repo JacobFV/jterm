@@ -1,4 +1,4 @@
-//! Terminal++ — Tauri backend.
+//! jterm — Tauri backend.
 //!
 //! One file per concern:
 //!   - `files`         — reading and saving what editor panes have open
@@ -25,12 +25,12 @@ use store::Store;
 use window_chrome::MaximizeButtonBounds;
 
 /// Where session state lives, per platform convention:
-/// `~/.local/share/terminal-plus-plus`, `~/Library/Application Support/…`,
+/// `~/.local/share/jterm`, `~/Library/Application Support/…`,
 /// `%APPDATA%\…`.
 fn data_dir() -> PathBuf {
     dirs_next::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("terminal-plus-plus")
+        .join("jterm")
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -70,5 +70,5 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("error while running Terminal++");
+        .expect("error while running jterm");
 }

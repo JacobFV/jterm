@@ -307,7 +307,7 @@ mod tests {
 
     fn temp_store() -> (Arc<Store>, PathBuf) {
         let root = std::env::temp_dir().join(format!(
-            "tpp-test-{}-{:?}",
+            "jterm-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
         ));

@@ -3,7 +3,7 @@
   "app": {
     "windows": [
       {
-        "title": "Terminal++",
+        "title": "jterm",
         "width": 1100,
         "height": 700,
         "minWidth": 480,

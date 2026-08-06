@@ -71,7 +71,7 @@ struct SnapState {
     hovered: AtomicBool,
 }
 
-const SUBCLASS_ID: usize = 0x7470_7001; // "tpp" + 1
+const SUBCLASS_ID: usize = 0x6A74_6D01; // "jtm" + 1
 
 fn loword_signed(value: isize) -> i32 {
     (value & 0xFFFF) as u16 as i16 as i32

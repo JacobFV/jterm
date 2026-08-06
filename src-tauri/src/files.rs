@@ -71,7 +71,7 @@ pub fn file_write_text(path: String, contents: String) -> Result<(), String> {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| "untitled".into());
-    let temp = parent.join(format!(".{name}.tpp-tmp"));
+    let temp = parent.join(format!(".{name}.jterm-tmp"));
 
     let write = || -> std::io::Result<()> {
         let mut file = fs::File::create(&temp)?;
@@ -104,7 +104,7 @@ mod tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("tpp-files-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("jterm-files-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
         dir.join(name)
     }
@@ -126,7 +126,7 @@ mod tests {
         file_write_text(name.clone(), "first".into()).unwrap();
         file_write_text(name.clone(), "second".into()).unwrap();
         assert_eq!(file_read_text(name).unwrap().contents, "second");
-        assert!(!path.with_file_name(".twice.txt.tpp-tmp").exists());
+        assert!(!path.with_file_name(".twice.txt.jterm-tmp").exists());
         let _ = fs::remove_file(path);
     }
 

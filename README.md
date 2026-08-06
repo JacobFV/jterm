@@ -1,4 +1,4 @@
-# Terminal++
+# jterm
 
 A tabbed terminal with tmux-style splits, where a pane can also be a notepad, a
 browser, or a viewer.
@@ -9,8 +9,8 @@ other terminal loses that. This one writes it to disk as you type and types it
 back at the prompt when you reopen — never with a newline attached, so nothing
 runs on your behalf.
 
-**[Download](https://jacobfv.github.io/terminal-plus-plus/)** ·
-[Releases](https://github.com/JacobFV/terminal-plus-plus/releases)
+**[Download](https://jacobfv.github.io/jterm/)** ·
+[Releases](https://github.com/JacobFV/jterm/releases)
 
 ---
 
@@ -68,7 +68,7 @@ Two files, with deliberately different durability:
   chunk of `cargo build` output would make the terminal slow.
 
 Both live in the platform's data directory —
-`~/.local/share/terminal-plus-plus`, `~/Library/Application Support/…`,
+`~/.local/share/jterm`, `~/Library/Application Support/…`,
 `%APPDATA%\…`.
 
 The prompt line itself is reconstructed from your keystrokes, since the line

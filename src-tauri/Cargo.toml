@@ -1,18 +1,18 @@
 [package]
-name = "terminal-plus-plus"
+name = "jterm"
 version = "0.1.0"
 edition = "2021"
 description = "A tabbed terminal where a tab can also be a notepad or an editor."
-authors = ["Terminal++ contributors"]
+authors = ["jterm contributors"]
 license = "MIT"
-repository = "https://github.com/JacobFV/terminal-plus-plus"
+repository = "https://github.com/JacobFV/jterm"
 
 [lib]
-name = "terminal_plus_plus_lib"
+name = "jterm_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "terminal-plus-plus"
+name = "jterm"
 path = "src/main.rs"
 
 [build-dependencies]

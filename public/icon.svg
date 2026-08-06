@@ -1,7 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Terminal++">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="jterm">
   <rect x="24" y="24" width="976" height="976" rx="179" fill="#050505" />
-  <g fill="none" stroke="#f2cd6b" stroke-width="62" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M340 336 L534 512 L340 688" />
-  </g>
-  <rect x="600" y="630" width="160" height="58" rx="8" fill="#f2cd6b" />
+  <!-- The tittle of the j, drawn as a terminal block cursor: the letter and
+       the caret are the same object. -->
+  <rect x="557" y="178" width="150" height="172" rx="12" fill="#f2cd6b" />
+  <path
+    d="M 632 434 L 632 622 Q 632 782 502 782 Q 366 782 396 727"
+    fill="none"
+    stroke="#f2cd6b"
+    stroke-width="128"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
 </svg>

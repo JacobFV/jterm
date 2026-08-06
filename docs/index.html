@@ -3,293 +3,842 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Terminal++ — a terminal that remembers what you were typing</title>
+    <title>jterm — the command you didn't run is still there</title>
     <meta
       name="description"
-      content="A minimal tabbed terminal with tmux-style splits, where a pane can also be a notepad, a browser, or a viewer. Your unsubmitted command survives a crash."
+      content="A tabbed terminal with tmux-style splits, where a pane can also be a notepad, a browser, or a viewer. Your unsubmitted command survives a crash."
     />
     <link rel="icon" type="image/svg+xml" href="icon.svg" />
-    <meta property="og:title" content="Terminal++" />
+    <meta property="og:title" content="jterm" />
     <meta
       property="og:description"
-      content="A minimal tabbed terminal that remembers the command you had not run yet."
+      content="A terminal that remembers the command you had not run yet."
     />
+    <meta name="theme-color" content="#000000" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+
     <style>
-      /* The app's own tokens, so the page and the thing it ships look related. */
       :root {
-        --bg-0: #000;
-        --bg-1: #050505;
-        --bg-2: #0a0a0a;
-        --border-1: #1a1a1a;
-        --border-2: #292929;
-        --text-1: #ededed;
-        --text-2: #a8a8a8;
-        --text-3: #6b6b6b;
-        --brand: #f2cd6b;
-        --radius: 2px;
-        --mono: "JetBrains Mono", "SF Mono", "Cascadia Mono", Consolas,
-          "DejaVu Sans Mono", monospace;
-        --sans: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+        --bg: #000;
+        --bg-1: #08080a;
+        --bg-2: #101013;
+        --line: #1c1c20;
+        --line-2: #2c2c32;
+        --ink-1: #f2f2f0;
+        --ink-2: #a3a3a8;
+        --ink-3: #6a6a70;
+        --ink-4: #414147;
+        --gold: #f2cd6b;
+        --gold-dim: #8a713a;
+
+        --display: "Instrument Serif", Georgia, "Times New Roman", serif;
+        --sans: "Inter Tight", system-ui, -apple-system, "Segoe UI", sans-serif;
+        --mono: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
+
+        --gutter: clamp(20px, 5vw, 56px);
+        --measure: 1080px;
       }
 
-      * { box-sizing: border-box; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      html { scroll-behavior: smooth; }
 
       body {
-        margin: 0;
-        background: var(--bg-0);
-        color: var(--text-1);
+        background: var(--bg);
+        color: var(--ink-1);
         font-family: var(--sans);
-        font-size: 15px;
-        line-height: 1.6;
+        font-size: 16px;
+        line-height: 1.65;
         -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
       }
 
-      .wrap { max-width: 820px; margin: 0 auto; padding: 0 24px; }
+      .wrap { max-width: var(--measure); margin: 0 auto; padding: 0 var(--gutter); }
 
-      header { border-bottom: 1px solid var(--border-1); padding: 64px 0 48px; }
-
-      .brand { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
-      .brand img { width: 44px; height: 44px; }
-      .brand h1 { margin: 0; font-size: 26px; letter-spacing: -0.01em; font-weight: 600; }
-
-      .tagline { font-size: 19px; color: var(--text-2); margin: 0 0 8px; max-width: 62ch; }
-      .sub { color: var(--text-3); margin: 0; max-width: 62ch; }
-
-      h2 {
+      /* ── The fractal ────────────────────────────────────────────────
+         A <pre> of characters, repainted from an escape-time Julia set.
+         Fixed and behind everything, masked so it fades out before it can
+         compete with any text. */
+      .fractal-field {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        overflow: hidden;
+        pointer-events: none;
+        user-select: none;
+        /* Masked once, for the field as a whole, so the three layers fade
+           together instead of each cutting off at its own edge. */
+        -webkit-mask-image: radial-gradient(135% 100% at 62% 30%, #000 0%, #000 46%, transparent 88%);
+        mask-image: radial-gradient(135% 100% at 62% 30%, #000 0%, #000 46%, transparent 88%);
+      }
+      .fractal {
+        position: absolute;
+        inset: 0;
+        margin: 0;
         font-family: var(--mono);
-        font-size: 11px;
-        letter-spacing: 0.18em;
-        text-transform: uppercase;
-        color: var(--text-2);
-        font-weight: 500;
-        margin: 48px 0 16px;
+        white-space: pre;
+        color: var(--gold);
+        overflow: hidden;
+        will-change: contents;
       }
+      /* Three grains of the same idea. The fine layer is below the threshold
+         at which a character is a character, so it reads as film grain; the
+         coarse one is unmistakably typed. The middle sits where you can just
+         about make out the glyphs, which is where it stops looking like a
+         texture and starts looking drawn. */
+      .fractal[data-layer="noise"] { font-size: 7px;  line-height: 1.05; letter-spacing: 0.02em; opacity: 0.13; }
+      .fractal[data-layer="mid"]   { font-size: 13px; line-height: 1.06; letter-spacing: 0.07em; opacity: 0.24; }
+      .fractal[data-layer="read"]  { font-size: 30px; line-height: 1.1;  letter-spacing: 0.16em; opacity: 0.12; }
 
-      section { padding-bottom: 8px; }
+      /* Everything above the fractal. */
+      .layer { position: relative; z-index: 1; }
 
-      /* Downloads */
-      .downloads { display: grid; gap: 10px; }
+      /* ── Nav ─────────────────────────────────────────────────────── */
+      nav {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        background: rgba(0, 0, 0, 0.72);
+        border-bottom: 1px solid transparent;
+        transition: border-color 0.3s;
+      }
+      nav.stuck { border-bottom-color: var(--line); }
 
-      .dl {
+      .nav-inner {
+        max-width: var(--measure);
+        margin: 0 auto;
+        padding: 14px var(--gutter);
         display: flex;
         align-items: center;
-        gap: 14px;
-        padding: 14px 16px;
-        border: 1px solid var(--border-1);
-        border-radius: var(--radius);
+        gap: 18px;
+      }
+
+      .wordmark {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-family: var(--mono);
+        font-weight: 700;
+        font-size: 15px;
+        letter-spacing: -0.02em;
+        color: var(--ink-1);
+        text-decoration: none;
+      }
+      .wordmark img { width: 20px; height: 20px; }
+
+      .nav-links { margin-left: auto; display: flex; align-items: center; gap: 22px; }
+      .nav-links a {
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.04em;
+        color: var(--ink-3);
+        text-decoration: none;
+        transition: color 0.15s;
+      }
+      .nav-links a:hover { color: var(--ink-1); }
+
+      /* ── Hero ────────────────────────────────────────────────────── */
+      /* A scrim under the hero copy. The fractal is deliberately busiest
+         where the headline sits, so rather than clearing a hole in it — which
+         left an obvious empty patch — the text carries its own pool of dark
+         with it and the pattern still runs underneath. */
+      header::before {
+        content: "";
+        position: absolute;
+        inset: -4% -20% -2% -16%;
+        background: radial-gradient(
+          56% 58% at 30% 52%,
+          rgba(0, 0, 0, 0.93) 0%,
+          rgba(0, 0, 0, 0.78) 46%,
+          transparent 80%
+        );
+        pointer-events: none;
+        z-index: -1;
+      }
+
+      header {
+        position: relative;
+        min-height: min(92vh, 860px);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: clamp(56px, 12vh, 130px) 0 clamp(40px, 8vh, 90px);
+      }
+
+      .eyebrow {
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: var(--gold-dim);
+        margin-bottom: 26px;
+      }
+
+      h1 {
+        font-family: var(--display);
+        font-weight: 400;
+        font-size: clamp(44px, 8.2vw, 108px);
+        line-height: 0.98;
+        letter-spacing: -0.025em;
+        max-width: 15ch;
+        text-wrap: balance;
+      }
+      h1 em {
+        font-style: italic;
+        color: var(--gold);
+      }
+
+      .lede {
+        margin-top: 30px;
+        max-width: 58ch;
+        font-size: clamp(16px, 1.6vw, 19px);
+        color: var(--ink-2);
+        text-wrap: pretty;
+      }
+
+      /* ── Download ────────────────────────────────────────────────── */
+      .cta { margin-top: 44px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 20px; }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        padding: 15px 26px;
+        border-radius: 3px;
+        background: var(--gold);
+        color: #14100a;
+        font-family: var(--mono);
+        font-weight: 700;
+        font-size: 14px;
+        letter-spacing: -0.01em;
+        text-decoration: none;
+        border: 1px solid var(--gold);
+        transition: transform 0.14s cubic-bezier(0.2, 0.8, 0.3, 1), box-shadow 0.14s, background 0.14s;
+        box-shadow: 0 0 0 0 rgba(242, 205, 107, 0.4);
+      }
+      .btn:hover {
+        transform: translateY(-2px);
+        background: #fadd8f;
+        box-shadow: 0 10px 34px -12px rgba(242, 205, 107, 0.75);
+      }
+      .btn:active { transform: translateY(0); }
+      .btn .sz { font-weight: 400; opacity: 0.62; }
+
+      .alt-note { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
+      .alt-note a { color: var(--ink-2); text-underline-offset: 3px; }
+      .alt-note a:hover { color: var(--gold); }
+
+      /* All-platforms table, revealed on demand. */
+      details.all { margin-top: 40px; max-width: 720px; }
+      details.all > summary {
+        list-style: none;
+        cursor: pointer;
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.05em;
+        color: var(--ink-3);
+        padding: 8px 0;
+        border-top: 1px solid var(--line);
+        transition: color 0.15s;
+      }
+      details.all > summary::-webkit-details-marker { display: none; }
+      details.all > summary:hover { color: var(--ink-1); }
+      details.all > summary::before { content: "+ "; color: var(--gold-dim); }
+      details.all[open] > summary::before { content: "− "; }
+
+      .grid { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); margin-top: 14px; }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 16px;
+        align-items: center;
+        padding: 12px 16px;
         background: var(--bg-1);
         color: inherit;
         text-decoration: none;
-        transition: border-color 0.15s, background 0.15s;
+        transition: background 0.14s;
       }
-      .dl:hover { border-color: var(--border-2); background: var(--bg-2); }
-
-      .dl .os { font-weight: 500; min-width: 190px; }
-      .dl .file {
+      .row:hover { background: var(--bg-2); }
+      .row .os { font-family: var(--mono); font-size: 13px; }
+      .row .fname {
         font-family: var(--mono);
-        font-size: 12px;
-        color: var(--text-3);
+        font-size: 11px;
+        color: var(--ink-4);
+        justify-self: end;
+        max-width: 30ch;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        flex: 1;
       }
-      .dl .size { font-family: var(--mono); font-size: 12px; color: var(--text-3); }
+      .row .fsize { font-family: var(--mono); font-size: 11px; color: var(--ink-3); min-width: 6ch; text-align: right; }
 
-      .note {
-        border-left: 2px solid var(--brand);
-        padding: 2px 0 2px 14px;
-        color: var(--text-2);
-        font-size: 14px;
-        margin: 20px 0;
-      }
+      /* ── Sections ────────────────────────────────────────────────── */
+      section { padding: clamp(64px, 11vh, 128px) 0; border-top: 1px solid var(--line); }
 
-      ul { padding-left: 18px; color: var(--text-2); }
-      li { margin: 6px 0; }
-      li strong { color: var(--text-1); font-weight: 500; }
-
-      code {
+      .sec-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 44px; }
+      .sec-num {
         font-family: var(--mono);
-        font-size: 0.88em;
-        background: var(--bg-2);
-        border: 1px solid var(--border-1);
-        border-radius: var(--radius);
-        padding: 1px 5px;
+        font-size: 11px;
+        color: var(--gold-dim);
+        letter-spacing: 0.12em;
+      }
+      h2 {
+        font-family: var(--display);
+        font-weight: 400;
+        font-size: clamp(28px, 4vw, 46px);
+        line-height: 1.05;
+        letter-spacing: -0.02em;
       }
 
+      .features {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+        gap: 1px;
+        background: var(--line);
+        border: 1px solid var(--line);
+      }
+      .feature { background: var(--bg-1); padding: 28px 26px 30px; }
+      .feature h3 {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--gold);
+        margin-bottom: 12px;
+      }
+      .feature p { color: var(--ink-2); font-size: 14.5px; }
+
+      /* Keys */
+      .keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 0 48px; }
+      .key {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 11px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .key span { font-size: 14px; color: var(--ink-2); }
       kbd {
         font-family: var(--mono);
         font-size: 11px;
         background: var(--bg-2);
-        border: 1px solid var(--border-2);
+        border: 1px solid var(--line-2);
         border-bottom-width: 2px;
-        border-radius: var(--radius);
-        padding: 1px 6px;
-        color: var(--text-1);
+        border-radius: 3px;
+        padding: 3px 7px;
+        color: var(--ink-1);
+        white-space: nowrap;
       }
 
-      table { width: 100%; border-collapse: collapse; font-size: 14px; }
-      td { padding: 7px 0; border-bottom: 1px solid var(--border-1); color: var(--text-2); }
-      td:first-child { width: 200px; white-space: nowrap; }
-
-      a { color: var(--brand); }
+      .prose { max-width: 68ch; color: var(--ink-2); }
+      .prose p + p { margin-top: 18px; }
+      .prose strong { color: var(--ink-1); font-weight: 600; }
+      code {
+        font-family: var(--mono);
+        font-size: 0.87em;
+        background: var(--bg-2);
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        padding: 2px 6px;
+        color: var(--ink-1);
+      }
+      a { color: var(--gold); text-underline-offset: 3px; }
 
       footer {
-        margin-top: 64px;
-        padding: 24px 0 56px;
-        border-top: 1px solid var(--border-1);
-        color: var(--text-3);
-        font-size: 13px;
+        border-top: 1px solid var(--line);
+        padding: 40px 0 72px;
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--ink-4);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 24px;
+        align-items: center;
+      }
+      footer a { color: var(--ink-3); text-decoration: none; }
+      footer a:hover { color: var(--gold); }
+
+      @media (prefers-reduced-motion: reduce) {
+        html { scroll-behavior: auto; }
+        .btn { transition: none; }
       }
 
-      .muted { color: var(--text-3); font-size: 13px; }
+      @media (max-width: 640px) {
+        .row { grid-template-columns: 1fr auto; }
+        .row .fname { display: none; }
+        #fractal { font-size: 9px; opacity: 0.16; }
+      }
     </style>
   </head>
 
   <body>
-    <div class="wrap">
-      <header>
-        <div class="brand">
-          <img src="icon.svg" alt="" />
-          <h1>Terminal++</h1>
+    <div class="fractal-field" aria-hidden="true">
+      <pre class="fractal" data-layer="noise"></pre>
+      <pre class="fractal" data-layer="mid"></pre>
+      <pre class="fractal" data-layer="read"></pre>
+    </div>
+
+    <div class="layer">
+      <nav id="nav">
+        <div class="nav-inner">
+          <a class="wordmark" href="#top"><img src="icon.svg" alt="" />jterm</a>
+          <div class="nav-links">
+            <a href="#what">What it does</a>
+            <a href="#keys">Keys</a>
+            <a href="https://github.com/JacobFV/jterm">GitHub&nbsp;↗</a>
+          </div>
         </div>
-        <p class="tagline">
-          A tabbed terminal with tmux-style splits, where a pane can also be a notepad,
-          a browser, or a viewer.
-        </p>
-        <p class="sub">
-          It records the command you have typed but not run. Close the lid, lose power,
-          crash the machine — it is still at the prompt when you come back.
-        </p>
-      </header>
+      </nav>
 
-      <section>
-        <h2>Download</h2>
-        <div class="downloads" id="downloads">
-          <p class="muted" id="loading">Looking up the latest release…</p>
-        </div>
-        <p class="note">
-          These builds are not code-signed. On macOS, right-click the app and choose
-          <strong>Open</strong>, then Open again. On Windows, SmartScreen will offer
-          <strong>More info → Run anyway</strong>. On Linux the AppImage needs
-          <code>chmod +x</code> before it will run.
-        </p>
-      </section>
+      <div class="wrap" id="top">
+        <header>
+          <p class="eyebrow">Terminal · macOS · Windows · Linux</p>
+          <h1>The command you didn't run is <em>still there.</em></h1>
+          <p class="lede">
+            A tabbed terminal with tmux-style splits, where a pane can also be a notepad, a
+            browser, or a viewer. It records what you have typed but not submitted, so a
+            crash costs you a keystroke instead of a train of thought.
+          </p>
 
-      <section>
-        <h2>What it does</h2>
-        <ul>
-          <li>
-            <strong>Remembers unsubmitted input.</strong> The half-typed command at every
-            prompt is written to disk continuously and typed back in when you reopen —
-            never with a newline, so nothing runs on your behalf.
-          </li>
-          <li>
-            <strong>Splits like tmux.</strong> Split, zoom, navigate by direction, resize
-            from the keyboard, and drag a pane by its grip to rearrange the layout.
-          </li>
-          <li>
-            <strong>Tabs are not only terminals.</strong> A notepad with syntax
-            highlighting and save, a browser, and viewers for images, video, audio and
-            STL meshes — chosen automatically from what you opened.
-          </li>
-          <li>
-            <strong>Restores scrollback.</strong> Each pane's output is recorded as it
-            arrives, so a restored session shows what was on screen, not an empty shell.
-          </li>
-        </ul>
-      </section>
+          <div class="cta">
+            <a class="btn" id="primary-dl" href="https://github.com/JacobFV/jterm/releases/latest">
+              <span id="primary-label">Download</span>
+              <span class="sz" id="primary-size"></span>
+            </a>
+            <span class="alt-note" id="alt-note"></span>
+          </div>
 
-      <section>
-        <h2>Keys</h2>
-        <table>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Split right</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd></td><td>Split down</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd></td><td>Send EOF to the shell</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Zoom the focused pane</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+arrows</td><td>Move focus between panes</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+arrows</td><td>Resize the focused pane</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>T</kbd></td><td>New tab</td></tr>
-          <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd></td><td>Close pane</td></tr>
-          <tr><td><kbd>F11</kbd></td><td>Full screen</td></tr>
-        </table>
-        <p class="muted" style="margin-top: 14px">
-          On macOS, ⌘ stands in for Ctrl. Hold the <strong>+</strong> button in the tab bar
-          to open a notepad, a browser, or a file.
-        </p>
-      </section>
+          <details class="all">
+            <summary>All platforms and formats</summary>
+            <div class="grid" id="downloads">
+              <div class="row"><span class="os">Looking up the latest release…</span></div>
+            </div>
+          </details>
+        </header>
+      </div>
 
-      <section>
-        <h2>Source</h2>
-        <p class="sub">
-          Built with Tauri, React and xterm.js.
-          <a href="https://github.com/JacobFV/terminal-plus-plus">Read the code on GitHub</a>.
-        </p>
-      </section>
+      <div class="wrap">
+        <section id="what">
+          <div class="sec-head"><span class="sec-num">01</span><h2>What it does</h2></div>
+          <div class="features">
+            <div class="feature">
+              <h3>Remembers</h3>
+              <p>
+                The half-typed command at every prompt is mirrored from your keystrokes and
+                written to disk continuously — then typed back when you reopen. Never with a
+                newline, so nothing runs on your behalf.
+              </p>
+            </div>
+            <div class="feature">
+              <h3>Splits</h3>
+              <p>
+                Split, zoom, move focus by direction, resize from the keyboard, and drag a
+                pane by its grip to rearrange. Moving a pane never restarts the shell in it.
+              </p>
+            </div>
+            <div class="feature">
+              <h3>Opens more than shells</h3>
+              <p>
+                A notepad with syntax highlighting and save, a web pane, and viewers for
+                images, video, audio and STL meshes. The file you pick decides which.
+              </p>
+            </div>
+            <div class="feature">
+              <h3>Restores scrollback</h3>
+              <p>
+                Each pane's output is recorded as it arrives, so a recovered session shows
+                what was on screen rather than a bare prompt.
+              </p>
+            </div>
+          </div>
+        </section>
 
-      <footer>
-        MIT licensed · <a href="https://github.com/JacobFV/terminal-plus-plus/releases">All releases</a>
-      </footer>
+        <section id="keys">
+          <div class="sec-head"><span class="sec-num">02</span><h2>Keys</h2></div>
+          <div class="keys">
+            <div class="key"><span>Split right</span><kbd id="k-mod">Mod + D</kbd></div>
+            <div class="key"><span>Split down</span><kbd>Mod + Shift + D</kbd></div>
+            <div class="key"><span>Send EOF to the shell</span><kbd>Mod + Alt + D</kbd></div>
+            <div class="key"><span>Zoom the focused pane</span><kbd>Mod + Enter</kbd></div>
+            <div class="key"><span>Move focus between panes</span><kbd>Mod + Alt + ←↑↓→</kbd></div>
+            <div class="key"><span>Resize the focused pane</span><kbd>Mod + Shift + ←↑↓→</kbd></div>
+            <div class="key"><span>New tab</span><kbd>Mod + T</kbd></div>
+            <div class="key"><span>Close pane</span><kbd>Mod + Shift + W</kbd></div>
+            <div class="key"><span>Save, in a text pane</span><kbd>Mod + S</kbd></div>
+            <div class="key"><span>Full screen</span><kbd>F11</kbd></div>
+          </div>
+          <p class="prose" style="margin-top: 28px; font-size: 14px">
+            <span id="mod-note">Mod is Ctrl, and ⌘ on macOS.</span> Hold the
+            <strong>+</strong> in the tab bar for Notepad, Open file…, or Browser.
+          </p>
+        </section>
+
+        <section id="install">
+          <div class="sec-head"><span class="sec-num">03</span><h2>Before you open it</h2></div>
+          <div class="prose">
+            <p>
+              These builds are <strong>not code-signed</strong>. macOS will say the developer
+              cannot be verified — right-click the app and choose <strong>Open</strong>, then
+              Open again. Windows SmartScreen will offer <strong>More info → Run anyway</strong>.
+              A Linux AppImage needs <code>chmod +x</code> first.
+            </p>
+            <p>
+              <strong>Ctrl + D splits a pane</strong>, which takes the shell's end-of-file away
+              from you. <code>Ctrl + Alt + D</code> sends a literal EOF instead, and one line in
+              <code>src/lib/keymap.ts</code> gives the key back if you would rather have it.
+            </p>
+          </div>
+        </section>
+      </div>
+
+      <div class="wrap">
+        <footer>
+          <span>MIT licensed</span>
+          <a href="https://github.com/JacobFV/jterm">Source</a>
+          <a href="https://github.com/JacobFV/jterm/releases">All releases</a>
+          <span style="margin-left: auto">Tauri · xterm.js · CodeMirror</span>
+        </footer>
+      </div>
     </div>
 
     <script>
-      // Assets are looked up at page load rather than baked in at release time,
-      // so this page stays correct without being redeployed for every release.
-      // Tauri names its bundles after the version, which rules out the simpler
-      // `/releases/latest/download/<fixed-name>` redirect.
-      const REPO = "JacobFV/terminal-plus-plus";
+      /* ── Animated ASCII fractals, at three grains ────────────────────
+         Escape-time Julia sets, `z ← z² + c`, drawn as characters into <pre>
+         elements — a single text assignment per frame, which is far cheaper
+         than touching thousands of nodes and keeps the thing honest: it
+         really is ASCII, not a picture of some.
 
-      const PLATFORMS = [
-        { os: "macOS (Apple silicon)", test: (n) => n.endsWith(".dmg") && /aarch64|arm64/.test(n) },
-        { os: "macOS (Intel)", test: (n) => n.endsWith(".dmg") && /x64|x86_64/.test(n) },
-        { os: "Windows", test: (n) => n.endsWith(".msi") || n.endsWith("-setup.exe") },
-        // Linux is split by architecture: matching on the suffix alone would
-        // hand an arm64 machine the x86_64 build, or the reverse, depending
-        // only on which asset the API happened to list first.
-        { os: "Linux x86_64 (AppImage)", test: (n) => n.endsWith(".AppImage") && /amd64|x86_64/.test(n) },
-        { os: "Linux x86_64 (.deb)", test: (n) => n.endsWith(".deb") && /amd64|x86_64/.test(n) },
-        { os: "Linux x86_64 (.rpm)", test: (n) => n.endsWith(".rpm") && /x86_64/.test(n) },
-        { os: "Linux arm64 (AppImage)", test: (n) => n.endsWith(".AppImage") && /arm64|aarch64/.test(n) },
-        { os: "Linux arm64 (.deb)", test: (n) => n.endsWith(".deb") && /arm64|aarch64/.test(n) },
-        { os: "Linux arm64 (.rpm)", test: (n) => n.endsWith(".rpm") && /aarch64/.test(n) },
-      ];
+         Three layers rather than one, at different character sizes *and*
+         different zooms. Same size at three scales would just be the same
+         picture three times; giving each layer its own window onto the plane
+         means the fine one genuinely is noise, the coarse one genuinely is
+         legible glyphs, and they drift out of step because each turns at its
+         own rate.
 
-      function humanSize(bytes) {
-        const mb = bytes / (1024 * 1024);
-        return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
-      }
+         Deliberately frugal, because this is the background of a page whose
+         whole job is a download button: capped grids, ~20fps rather than 60,
+         and stopped outright when the tab is hidden or the reader has asked
+         for less motion. */
+      (function () {
+        const FPS = 20;
+        // Characters are about twice as tall as they are wide; sampling the
+        // plane at the same ratio keeps the sets from coming out stretched.
+        const CHAR_ASPECT = 0.52;
 
-      function fallback(message) {
-        document.getElementById("downloads").innerHTML =
-          `<p class="muted">${message} ` +
-          `<a href="https://github.com/${REPO}/releases/latest">Browse the latest release on GitHub</a>.</p>`;
-      }
+        const LAYERS = [
+          // Below the size at which a glyph is legible: pure grain. Wound
+          // tighter and turning fastest, so it shimmers rather than crawls.
+          { name: "noise", ramp: " .....::::----~~~~++++****####%%%%@@@@", iter: 30, band: 11, scale: 4.6, speed: 1.45, phase: 0.0, maxCols: 260, maxRows: 170, stipple: 11 },
+          // The middle grain, where you can just make the characters out.
+          { name: "mid",   ramp: " ...::--~~++**##%%@@", iter: 48, band: 18, scale: 3.0, speed: 1.0, phase: 2.1, maxCols: 190, maxRows: 80, stipple: 7 },
+          // Big enough to read every character. Zoomed furthest in and
+          // turning slowest, so it reads as a drawing rather than motion.
+          { name: "read",  ramp: " .:-=+*#%@", iter: 64, band: 30, scale: 2.1, speed: 0.5, phase: 4.2, maxCols: 90, maxRows: 44, stipple: 5 },
+        ];
 
-      fetch(`https://api.github.com/repos/${REPO}/releases/latest`)
-        .then((response) => {
-          if (!response.ok) throw new Error(String(response.status));
-          return response.json();
-        })
-        .then((release) => {
-          const assets = release.assets || [];
-          const rows = PLATFORMS.map((platform) => {
-            const asset = assets.find((candidate) => platform.test(candidate.name));
-            if (!asset) return "";
-            return `<a class="dl" href="${asset.browser_download_url}">
-                      <span class="os">${platform.os}</span>
-                      <span class="file">${asset.name}</span>
-                      <span class="size">${humanSize(asset.size)}</span>
-                    </a>`;
-          }).join("");
+        const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        let raf = 0;
+        let last = 0;
+        let t = 0;
+        let running = true;
 
-          if (!rows) {
-            fallback("No builds are attached to the latest release yet.");
+        /**
+         * The constant `c`, walked around just inside the Mandelbrot set's main
+         * cardioid.
+         *
+         * The usual demo orbit for this, `0.7885·e^{iθ}`, runs along the
+         * *boundary* of the set — every frame of it is a dendrite with almost
+         * nothing on screen. Parameterising the cardioid and stepping inside it
+         * gives connected Julia sets with real structure, and they change shape
+         * as θ turns rather than merely rotating.
+         */
+        function cAt(phase) {
+          const r = 0.96;
+          const mr = r * Math.cos(phase);
+          const mi = r * Math.sin(phase);
+          return [mr / 2 - (mr * mr - mi * mi) / 4, mi / 2 - (2 * mr * mi) / 4];
+        }
+
+        function measure(layer) {
+          const style = getComputedStyle(layer.el);
+          const probe = document.createElement("span");
+          probe.style.cssText =
+            "position:absolute;visibility:hidden;white-space:pre;font-family:" +
+            style.fontFamily + ";font-size:" + style.fontSize +
+            ";letter-spacing:" + style.letterSpacing;
+          probe.textContent = "0".repeat(100);
+          document.body.appendChild(probe);
+          const charWidth = probe.getBoundingClientRect().width / 100 || 7;
+          probe.remove();
+
+          const lineHeight = parseFloat(style.lineHeight) || 12;
+          // Capped: past this the per-frame cost stops buying visible detail.
+          layer.cols = Math.min(layer.maxCols, Math.max(16, Math.ceil(window.innerWidth / charWidth)));
+          layer.rows = Math.min(layer.maxRows, Math.max(10, Math.ceil(window.innerHeight / lineHeight)));
+        }
+
+        function draw(layer, time) {
+          const c = cAt(layer.phase + time * layer.speed);
+          const cr = c[0];
+          const ci = c[1];
+          const cols = layer.cols;
+          const rows = layer.rows;
+          const ramp = layer.ramp;
+          const top = ramp.length - 1;
+          const halfW = layer.scale / 2;
+          const halfH = ((layer.scale / 2) * (rows / cols)) / CHAR_ASPECT;
+
+          let out = "";
+          for (let y = 0; y < rows; y++) {
+            const zi0 = -halfH + (2 * halfH * y) / rows;
+            let line = "";
+            for (let x = 0; x < cols; x++) {
+              let zr = -halfW + (2 * halfW * x) / cols;
+              let zi = zi0;
+              let i = 0;
+              for (; i < layer.iter; i++) {
+                const a = zr * zr;
+                const b = zi * zi;
+                if (a + b > 4) break;
+                zi = 2 * zr * zi + ci;
+                zr = a - b + cr;
+              }
+              if (i === layer.iter) {
+                // The interior gets a sparse stipple rather than nothing.
+                // Left blank it is a large dead area, and it lands squarely
+                // behind the headline.
+                line += (x + y) % layer.stipple === 0 ? "·" : " ";
+              } else {
+                // The ramp is spent on the narrow band hugging the boundary,
+                // which is the part with any structure in it. Spread evenly
+                // across the whole range, almost every cell lands on the same
+                // two characters and the set vanishes into a flat wash.
+                line += ramp[Math.min(top, Math.floor((i / layer.band) * top))];
+              }
+            }
+            out += line + "\n";
+          }
+          layer.el.textContent = out;
+        }
+
+        const layers = LAYERS.map(function (spec) {
+          const el = document.querySelector('.fractal[data-layer="' + spec.name + '"]');
+          const layer = Object.assign({ el: el, cols: 0, rows: 0 }, spec);
+          measure(layer);
+          draw(layer, 0);
+          return layer;
+        }).filter(function (layer) { return layer.el; });
+
+        function frame(time) {
+          raf = requestAnimationFrame(frame);
+          if (time - last < 1000 / FPS) return;
+          last = time;
+          t += 0.006;
+          for (const layer of layers) draw(layer, t);
+        }
+
+        function start() { if (!raf && running) raf = requestAnimationFrame(frame); }
+        function stop() { cancelAnimationFrame(raf); raf = 0; }
+
+        if (!reduced) {
+          start();
+          document.addEventListener("visibilitychange", function () {
+            running = !document.hidden;
+            if (running) start();
+            else stop();
+          });
+        }
+
+        let resizeTimer;
+        window.addEventListener("resize", function () {
+          clearTimeout(resizeTimer);
+          resizeTimer = setTimeout(function () {
+            for (const layer of layers) {
+              measure(layer);
+              draw(layer, t);
+            }
+          }, 160);
+        });
+      })();
+
+      /* ── Nav hairline on scroll ─────────────────────────────────── */
+      (function () {
+        const nav = document.getElementById("nav");
+        const onScroll = function () {
+          nav.classList.toggle("stuck", window.scrollY > 8);
+        };
+        onScroll();
+        window.addEventListener("scroll", onScroll, { passive: true });
+      })();
+
+      /* ── Downloads ──────────────────────────────────────────────────
+         Assets are looked up at load rather than baked in, so this page
+         stays correct across releases without being redeployed. Tauri names
+         its bundles after the version, which rules out the simpler
+         `/releases/latest/download/<fixed-name>` redirect. */
+      (function () {
+        const REPO = "JacobFV/jterm";
+
+        const ROWS = [
+          { os: "macOS · Apple silicon", match: (n) => n.endsWith(".dmg") && /aarch64|arm64/.test(n) },
+          { os: "macOS · Intel", match: (n) => n.endsWith(".dmg") && /x64|x86_64/.test(n) },
+          { os: "Windows · installer", match: (n) => n.endsWith("-setup.exe") },
+          { os: "Windows · MSI", match: (n) => n.endsWith(".msi") },
+          { os: "Linux x86_64 · AppImage", match: (n) => n.endsWith(".AppImage") && /amd64|x86_64/.test(n) },
+          { os: "Linux x86_64 · .deb", match: (n) => n.endsWith(".deb") && /amd64|x86_64/.test(n) },
+          { os: "Linux x86_64 · .rpm", match: (n) => n.endsWith(".rpm") && /x86_64/.test(n) },
+          { os: "Linux arm64 · AppImage", match: (n) => n.endsWith(".AppImage") && /arm64|aarch64/.test(n) },
+          { os: "Linux arm64 · .deb", match: (n) => n.endsWith(".deb") && /arm64|aarch64/.test(n) },
+          { os: "Linux arm64 · .rpm", match: (n) => n.endsWith(".rpm") && /aarch64/.test(n) },
+        ];
+
+        function humanSize(bytes) {
+          return bytes >= 1048576
+            ? (bytes / 1048576).toFixed(1) + " MB"
+            : Math.round(bytes / 1024) + " KB";
+        }
+
+        /**
+         * Which build this visitor most likely wants.
+         *
+         * Architecture is the awkward part. `userAgentData` reports it, but
+         * only on Chromium and only asynchronously, and Safari deliberately
+         * reports every Mac as Intel. So Apple silicon is the default on
+         * macOS — it is the overwhelming majority of Macs now — and the Intel
+         * build is offered beside it rather than hidden behind a disclosure.
+         */
+        async function guess() {
+          const ua = navigator.userAgent;
+          let arch = "";
+          if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+            try {
+              const values = await navigator.userAgentData.getHighEntropyValues(["architecture"]);
+              arch = values.architecture || "";
+            } catch (error) {
+              /* Not available here; the UA string is the fallback. */
+            }
+          }
+
+          if (/Mac OS X|Macintosh/.test(ua)) {
+            const intel = arch === "x86";
+            return {
+              want: intel ? "macOS · Intel" : "macOS · Apple silicon",
+              label: intel ? "Download for macOS (Intel)" : "Download for macOS",
+              alt: intel
+                ? { text: "On Apple silicon?", want: "macOS · Apple silicon" }
+                : { text: "On an Intel Mac?", want: "macOS · Intel" },
+              mod: "⌘",
+            };
+          }
+
+          if (/Windows/.test(ua)) {
+            return {
+              want: "Windows · installer",
+              label: "Download for Windows",
+              alt: { text: "Prefer the MSI?", want: "Windows · MSI" },
+              mod: "Ctrl",
+            };
+          }
+
+          if (/Linux|X11|CrOS/.test(ua)) {
+            const arm = arch === "arm" || /aarch64|arm64/i.test(ua);
+            return {
+              want: arm ? "Linux arm64 · AppImage" : "Linux x86_64 · AppImage",
+              label: arm ? "Download for Linux (arm64)" : "Download for Linux",
+              alt: arm
+                ? { text: "Prefer a .deb?", want: "Linux arm64 · .deb" }
+                : { text: "Prefer a .deb?", want: "Linux x86_64 · .deb" },
+              mod: "Ctrl",
+            };
+          }
+
+          return { want: null, label: "See all downloads", alt: null, mod: "Ctrl" };
+        }
+
+        async function run() {
+          const me = await guess();
+          document.getElementById("k-mod").textContent = me.mod + " + D";
+          document.getElementById("mod-note").textContent =
+            me.mod === "⌘" ? "Mod is ⌘ on this Mac." : "Mod is Ctrl here, and ⌘ on macOS.";
+          // Named before the network call, not after: knowing the platform does
+          // not depend on the release, and an API that is slow or unreachable
+          // should still leave a button that says what it will get you.
+          document.getElementById("primary-label").textContent = me.label;
+
+          let release;
+          try {
+            const response = await fetch("https://api.github.com/repos/" + REPO + "/releases/latest");
+            if (!response.ok) throw new Error(String(response.status));
+            release = await response.json();
+          } catch (error) {
+            document.getElementById("downloads").innerHTML =
+              '<div class="row"><span class="os">Could not reach the GitHub API — ' +
+              '<a href="https://github.com/' +
+              REPO +
+              '/releases/latest">browse the release</a>.</span></div>';
             return;
           }
-          document.getElementById("downloads").innerHTML = rows;
-          document.title = `Terminal++ ${release.tag_name} — download`;
-        })
-        .catch(() => fallback("Could not reach the GitHub API."));
+
+          const assets = release.assets || [];
+          const found = [];
+          for (const row of ROWS) {
+            const asset = assets.find((candidate) => row.match(candidate.name));
+            if (asset) found.push({ os: row.os, asset: asset });
+          }
+
+          document.getElementById("downloads").innerHTML = found.length
+            ? found
+                .map(function (row) {
+                  return (
+                    '<a class="row" href="' +
+                    row.asset.browser_download_url +
+                    '"><span class="os">' +
+                    row.os +
+                    '</span><span class="fname">' +
+                    row.asset.name +
+                    '</span><span class="fsize">' +
+                    humanSize(row.asset.size) +
+                    "</span></a>"
+                  );
+                })
+                .join("")
+            : '<div class="row"><span class="os">No builds attached to this release yet.</span></div>';
+
+          const pick = found.find(function (row) {
+            return row.os === me.want;
+          });
+          if (pick) {
+            document.getElementById("primary-dl").href = pick.asset.browser_download_url;
+            document.getElementById("primary-size").textContent = humanSize(pick.asset.size);
+          }
+
+          const alt =
+            me.alt &&
+            found.find(function (row) {
+              return row.os === me.alt.want;
+            });
+          if (alt) {
+            document.getElementById("alt-note").innerHTML =
+              me.alt.text + ' <a href="' + alt.asset.browser_download_url + '">Get that instead</a>';
+          } else if (release.tag_name) {
+            document.getElementById("alt-note").textContent = "Latest release " + release.tag_name;
+          }
+
+          if (release.tag_name) document.title = "jterm " + release.tag_name + " — download";
+        }
+
+        run();
+      })();
     </script>
   </body>
 </html>

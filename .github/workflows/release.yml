@@ -110,7 +110,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ needs.verify.outputs.tag }}
-          releaseName: Terminal++ ${{ needs.verify.outputs.tag }}
+          releaseName: jterm ${{ needs.verify.outputs.tag }}
           # Written once, by the first job to arrive; the rest attach their
           # assets to the release it created.
           releaseBody: |
@@ -121,7 +121,7 @@ jobs:
             app and choose Open, then Open again. Windows SmartScreen will show
             "Windows protected your PC" — choose More info, then Run anyway.
 
-            See https://jacobfv.github.io/terminal-plus-plus/ for details.
+            See https://jacobfv.github.io/jterm/ for details.
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
