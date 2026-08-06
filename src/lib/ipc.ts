@@ -8,10 +8,33 @@
 
 import { isTauri } from "./tauri";
 
+type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+
+/**
+ * The IPC entry point, resolved once.
+ *
+ * This used to be a dynamic `import()` inside `call`, which put a module
+ * resolution and an extra turn of the microtask queue in front of *every*
+ * message — including the one carrying each keystroke to the shell. The module
+ * is cached after the first load, so it was never expensive, but the hot path
+ * of a terminal is not the place for work that can be done once.
+ */
+let invoke: Invoke | null = null;
+let loading: Promise<void> | null = null;
+
+function ready(): Promise<void> {
+  if (loading === null) {
+    loading = import("@tauri-apps/api/core").then((core) => {
+      invoke = core.invoke as Invoke;
+    });
+  }
+  return loading;
+}
+
 async function call<T>(command: string, args: Record<string, unknown>, fallback: T): Promise<T> {
   if (!isTauri()) return fallback;
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<T>(command, args);
+  if (invoke === null) await ready();
+  return invoke!<T>(command, args);
 }
 
 export interface SpawnInfo {

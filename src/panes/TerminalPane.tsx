@@ -262,37 +262,28 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
     /**
      * Repaint everything on screen.
      *
-     * Needed more often than it should be. A renderer swap leaves the canvas
-     * holding whatever it had, and the terminal has no reason of its own to
-     * redraw until the next byte arrives — so a pane whose shell has already
-     * printed its prompt and gone quiet can sit there blank until you type at
-     * it. That happens in practice: WebGL contexts are a limited resource, and
-     * opening a 3D model pane can take one away from a terminal.
+     * A terminal has no reason of its own to redraw until the next byte
+     * arrives, so a pane whose shell has printed its prompt and gone quiet can
+     * sit there showing nothing if a repaint was missed while it was being laid
+     * out. Cheap, and called at the two moments where that is possible.
      */
     const repaint = () => {
       if (term.rows > 0) term.refresh(0, term.rows - 1);
     };
 
-    // WebGL is a large speed-up for output-heavy work but is not available in
-    // every webview this ships to, and a failure here must not take the pane
-    // down — the DOM renderer is a correct fallback, only slower.
-    void import("@xterm/addon-webgl")
-      .then(({ WebglAddon }) => {
-        try {
-          const webgl = new WebglAddon();
-          webgl.onContextLoss(() => {
-            // Disposing hands rendering back to the DOM renderer, which starts
-            // from an empty canvas and must be told what is on screen.
-            webgl.dispose();
-            repaint();
-          });
-          term.loadAddon(webgl);
-          repaint();
-        } catch {
-          /* Fall back to the default renderer. */
-        }
-      })
-      .catch(() => {});
+    // No WebGL renderer, deliberately.
+    //
+    // It is a large speed-up for firehose output and it was loaded here at
+    // first. It has to go, because of how it interacts with the rest of this
+    // app on Linux: NVIDIA's driver forces WEBKIT_DISABLE_DMABUF_RENDERER (see
+    // src-tauri/src/main.rs), and a WebKit that has been pushed off its
+    // accelerated path is a bad host for a second GL surface — every keystroke
+    // has to make it through that path before the echo is visible. It also cost
+    // a bug earlier: contexts are a limited resource, so opening a 3D pane
+    // could take one away from a terminal and leave it blank.
+    //
+    // xterm's DOM renderer has none of those failure modes and is quick enough
+    // for anything short of `yes`. Correct on every platform beats fast on one.
 
     const safeFit = () => {
       if (host.clientWidth < 2 || host.clientHeight < 2) return;
