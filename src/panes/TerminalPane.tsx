@@ -51,6 +51,21 @@ const REPLAY_DEADLINE_MS = 3000;
  */
 const DRAFT_LOG_INTERVAL_MS = 1200;
 
+/**
+ * How often a visible shell is asked where it actually is.
+ *
+ * `cd` is not something a terminal can observe. The shell changes its own
+ * working directory and nothing is written to the pty about it — the only
+ * announcement is OSC 7, which shells emit *if their prompt is configured to*,
+ * and a stock bash is not. So the directory is read from the process itself
+ * (`/proc/<pid>/cwd` on Linux) on a timer, with OSC 7 still handled when it
+ * does arrive because it is the only mechanism that works on macOS and Windows.
+ *
+ * A `readlink` per visible pane per interval is cheap enough to be invisible
+ * and this is what keeps the file tree pointed at the directory you are in.
+ */
+const CWD_POLL_MS = 1500;
+
 function readTheme(): ITheme {
   const styles = getComputedStyle(document.documentElement);
   const token = (name: string) => styles.getPropertyValue(name).trim();
@@ -79,7 +94,7 @@ function readTheme(): ITheme {
   };
 }
 
-export function TerminalPane({ pane, focused, onMeta, onFocus }: PaneProps<TerminalPaneState>) {
+export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PaneProps<TerminalPaneState>) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -182,6 +197,30 @@ export function TerminalPane({ pane, focused, onMeta, onFocus }: PaneProps<Termi
     window.clearTimeout(pending.settle);
     pending.settle = window.setTimeout(fireReplay, REPLAY_SETTLE_MS);
   }, [fireReplay]);
+
+  /** Read the shell's real working directory and report it if it moved. */
+  const checkCwd = useCallback(() => {
+    if (exitedRef.current) return;
+    void pty.cwd(paneId).then((cwd) => {
+      if (!cwd || cwd === cwdRef.current) return;
+      cwdRef.current = cwd;
+      metaRef.current({ cwd });
+      void history.append(paneId, {
+        kind: "cwd",
+        at: new Date().toISOString(),
+        path: cwd,
+      });
+    });
+  }, [paneId]);
+
+  // Only while the pane is on screen: a backgrounded tab's directory is not
+  // being looked at, and it is re-read the moment it comes back.
+  useEffect(() => {
+    if (!visible) return;
+    checkCwd();
+    const timer = setInterval(checkCwd, CWD_POLL_MS);
+    return () => clearInterval(timer);
+  }, [visible, checkCwd]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -297,6 +336,9 @@ export function TerminalPane({ pane, focused, onMeta, onFocus }: PaneProps<Termi
           // a log that does not say so is worse than one that does.
           exact: draftRef.current.trusted,
         });
+        // `cd` is the most likely thing to have just happened; asking now makes
+        // the tree follow it immediately rather than up to a poll later.
+        window.setTimeout(checkCwd, 120);
       }
 
       // The unsubmitted line, on a timer. This is what makes the terminal's own
@@ -424,7 +466,7 @@ export function TerminalPane({ pane, focused, onMeta, onFocus }: PaneProps<Termi
       // cleanup also runs on an ordinary unmount, and killing a shell because
       // React re-rendered would be a very expensive bug.
     };
-  }, [paneId, armReplay, bumpReplay, cancelReplay, spawn]);
+  }, [paneId, armReplay, bumpReplay, cancelReplay, checkCwd, spawn]);
 
   // Focus follows the app's idea of the focused pane, not the DOM's, so
   // clicking a tab returns the caret to wherever it was in that tab.
