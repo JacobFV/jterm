@@ -1,0 +1,186 @@
+/* Must stay above the `@tailwind` directives: CSS requires `@import` to precede
+   every other statement, and PostCSS silently drops one that does not — which
+   costs the terminal its row layout and renders every glyph invisible. */
+@import "@xterm/xterm/css/xterm.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens.
+ *
+ * Lifted from `apps/navigator` so the two apps read as one family: a near-zero
+ * radius, separation by hairline rather than shadow, and a single accent that
+ * means state rather than category.
+ *
+ * The `--term-*` block below is the same palette expressed as the sixteen ANSI
+ * slots. It lives here rather than in the terminal component because the point
+ * of keeping it here is that the shell chrome and the terminal contents cannot
+ * drift apart: a theme change is one edit, not two.
+ */
+
+@layer base {
+  :root {
+    color-scheme: dark;
+
+    /* Surfaces, darkest to lightest. */
+    --bg-0: 0 0% 0%;
+    --bg-1: 0 0% 2%;
+    --bg-2: 0 0% 4%;
+    --bg-3: 0 0% 6%;
+
+    --border-1: 0 0% 10%;
+    --border-2: 0 0% 16%;
+
+    --text-1: 0 0% 93%;
+    --text-2: 0 0% 66%;
+    --text-3: 0 0% 42%;
+    --text-4: 0 0% 25%;
+
+    /* One accent. */
+    --brand: 45 86% 69%;
+    --brand-foreground: 44 100% 5%;
+    --warn: 38 63% 58%;
+    --danger: 0 100% 68%;
+
+    /* The tab strip is the titlebar, so this is also the window's chrome
+       height. Everything else measures against it. */
+    --head-height: 34px;
+    --radius: 2px;
+
+    --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Mono", "Consolas",
+      "DejaVu Sans Mono", monospace;
+
+    /* ── ANSI palette ──────────────────────────────────────────────────
+       Muted and low-chroma on purpose: a terminal that shouts in eight
+       saturated hues fights the hairline chrome around it. */
+    --term-bg: #000000;
+    --term-fg: #ededed;
+    --term-cursor: #f2cd6b;
+    --term-selection: rgba(242, 205, 107, 0.24);
+
+    --term-black: #1c1c1c;
+    --term-red: #e35a5a;
+    --term-green: #8bbf7a;
+    --term-yellow: #e0b155;
+    --term-blue: #6c9bd1;
+    --term-magenta: #b98cc7;
+    --term-cyan: #6fb3ae;
+    --term-white: #b8b8b8;
+
+    --term-bright-black: #545454;
+    --term-bright-red: #ff7a7a;
+    --term-bright-green: #a8dc96;
+    --term-bright-yellow: #f2cd6b;
+    --term-bright-blue: #8bb8ea;
+    --term-bright-magenta: #d3a8e0;
+    --term-bright-white: #ffffff;
+    --term-bright-cyan: #8fd2cc;
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+
+    --bg-0: 0 0% 100%;
+    --bg-1: 240 5% 97%;
+    --bg-2: 240 6% 93%;
+    --bg-3: 240 5% 90%;
+
+    --border-1: 240 5% 90%;
+    --border-2: 240 5% 84%;
+
+    --text-1: 240 6% 10%;
+    --text-2: 240 5% 26%;
+    --text-3: 240 4% 46%;
+    --text-4: 240 5% 65%;
+
+    --brand: 42 89% 40%;
+    --brand-foreground: 0 0% 100%;
+    --warn: 32 81% 37%;
+    --danger: 0 72% 51%;
+
+    --term-bg: #ffffff;
+    --term-fg: #1a1a1c;
+    --term-cursor: #a8760a;
+    --term-selection: rgba(168, 118, 10, 0.2);
+
+    --term-black: #2b2b2f;
+    --term-red: #c0392b;
+    --term-green: #3f7a35;
+    --term-yellow: #96690c;
+    --term-blue: #2f5fa8;
+    --term-magenta: #7d4a94;
+    --term-cyan: #2b7772;
+    --term-white: #8b8b90;
+
+    --term-bright-black: #5c5c62;
+    --term-bright-red: #d8503f;
+    --term-bright-green: #4d9440;
+    --term-bright-yellow: #b07f12;
+    --term-bright-blue: #3d75c4;
+    --term-bright-magenta: #945bad;
+    --term-bright-cyan: #349089;
+    --term-bright-white: #1a1a1c;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-surface-0 text-ink-1 font-sans antialiased;
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+::selection {
+  background: hsl(var(--brand) / 0.28);
+  color: hsl(var(--text-1));
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border-2));
+  border-radius: 0;
+}
+
+/* Mono, wide-tracked, small. The single strongest "this is an instrument"
+   signal, and free. */
+.pane-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: hsl(var(--text-2));
+  font-weight: 500;
+}
+
+/* The tab strip scrolls when tabs run out of room, but it is only 34px tall —
+   a scrollbar there would eat a fifth of the titlebar to show one. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* xterm renders its own scrollbar on the viewport; match the app's. */
+.xterm .xterm-viewport {
+  background-color: transparent !important;
+}

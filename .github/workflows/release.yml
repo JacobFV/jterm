@@ -1,0 +1,119 @@
+name: Release
+
+# Cutting a release is pushing a tag. Everything below follows from that, so
+# there is exactly one action to remember and no build step anybody has to run
+# on their own machine:
+#
+#     npm run version 1.2.3 && git commit -am "v1.2.3" && git tag v1.2.3 && git push --follow-tags
+on:
+  push:
+    tags: ["v*"]
+  # Useful for re-running a release whose upload failed, without moving a tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # The version lives in three files and the tag is a fourth claim about it.
+  # Finding out they disagree after four platforms have built is a waste of
+  # twenty minutes, so it is checked first and alone.
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pick
+        run: echo "tag=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+      - name: Versions agree with the tag
+        run: node scripts/check-version.mjs "${{ steps.pick.outputs.tag }}"
+
+  build:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Apple silicon and Intel are separate binaries, not one build with
+          # two names — a universal binary would double every download for
+          # everybody, so they ship apart.
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            label: macOS (Apple silicon)
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            label: macOS (Intel)
+          # Pinned to the oldest runner the toolchain still supports: the glibc
+          # a binary is built against is the *minimum* it will run on, so
+          # building on a newer Ubuntu would quietly drop older distributions.
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            label: Linux
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: Windows
+
+    runs-on: ${{ matrix.platform }}
+    name: ${{ matrix.label }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      - name: System dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            patchelf \
+            build-essential \
+            file
+
+      - run: npm ci
+
+      - run: npm test
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ needs.verify.outputs.tag }}
+          releaseName: Terminal++ ${{ needs.verify.outputs.tag }}
+          # Written once, by the first job to arrive; the rest attach their
+          # assets to the release it created.
+          releaseBody: |
+            Download the build for your platform below.
+
+            These binaries are **not code-signed**. macOS will say the app "cannot
+            be opened because the developer cannot be verified" — right-click the
+            app and choose Open, then Open again. Windows SmartScreen will show
+            "Windows protected your PC" — choose More info, then Run anyway.
+
+            See https://jacobfv.github.io/terminal-plus-plus/ for details.
+          releaseDraft: false
+          prerelease: false
+          args: --target ${{ matrix.target }}

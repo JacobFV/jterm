@@ -1,0 +1,55 @@
+[package]
+name = "terminal-plus-plus"
+version = "0.1.0"
+edition = "2021"
+description = "A tabbed terminal where a tab can also be a notepad or an editor."
+authors = ["Terminal++ contributors"]
+license = "MIT"
+repository = "https://github.com/JacobFV/terminal-plus-plus"
+
+[lib]
+name = "terminal_plus_plus_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "terminal-plus-plus"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+# xterm draws to a canvas, so there is no DOM selection for the platform to
+# copy; the app has to put the text on the clipboard itself.
+tauri-plugin-clipboard-manager = "2"
+# Handing a URL to the user's real browser, for the sites a browser pane cannot
+# embed. See src/panes/BrowserPane.tsx.
+tauri-plugin-opener = "2"
+# The native Open and Save dialogs behind file-backed panes.
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The PTY layer. `portable-pty` is what wezterm drives its own terminals with;
+# it wraps the three platforms' very different ideas of a pseudoterminal
+# (openpty, and ConPTY on Windows) behind one trait.
+portable-pty = "0.9"
+parking_lot = "0.12"
+dirs-next = "2"
+
+[target.'cfg(windows)'.dependencies]
+# Snap Layouts needs a WM_NCHITTEST subclass; see src/win32_snap.rs.
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
