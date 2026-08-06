@@ -101,6 +101,9 @@ export interface Tab {
 export interface Workspace {
   tabs: Tab[];
   activeTabId: string | null;
+  /** Whether the file tree is showing. Persisted: a sidebar that closes itself
+   *  on every launch is one the user has to reopen on every launch. */
+  sidebarOpen: boolean;
 }
 
 export const HOME_PAGE = "https://duckduckgo.com";
@@ -139,7 +142,7 @@ export function newTab(kind: PaneKind = "terminal", seed?: Partial<PaneState>): 
 
 export function emptyWorkspace(): Workspace {
   const tab = newTab("terminal");
-  return { tabs: [tab], activeTabId: tab.id };
+  return { tabs: [tab], activeTabId: tab.id, sidebarOpen: false };
 }
 
 /* ── Reading ─────────────────────────────────────────────────────────────── */
@@ -202,6 +205,7 @@ export function hostOf(url: string): string | null {
 
 export type Action =
   | { type: "restore"; workspace: Workspace }
+  | { type: "ui/sidebar"; open?: boolean }
   | { type: "tab/new"; kind: PaneKind }
   | { type: "tab/open"; kind: PaneKind; seed: Partial<PaneState> }
   | { type: "tab/close"; tabId: string }
@@ -228,16 +232,19 @@ export function reduce(state: Workspace, action: Action): Workspace {
     case "restore":
       return action.workspace;
 
+    case "ui/sidebar":
+      return { ...state, sidebarOpen: action.open ?? !state.sidebarOpen };
+
     case "tab/new": {
       const tab = newTab(action.kind);
-      return { tabs: [...state.tabs, tab], activeTabId: tab.id };
+      return { ...state, tabs: [...state.tabs, tab], activeTabId: tab.id };
     }
 
     // A new tab around something that already exists — a file that was just
     // chosen in the open dialog.
     case "tab/open": {
       const tab = newTab(action.kind, action.seed);
-      return { tabs: [...state.tabs, tab], activeTabId: tab.id };
+      return { ...state, tabs: [...state.tabs, tab], activeTabId: tab.id };
     }
 
     case "tab/close": {
@@ -248,14 +255,14 @@ export function reduce(state: Workspace, action: Action): Workspace {
         // Closing the last tab opens a fresh one rather than leaving a window
         // with nothing in it and no obvious way forward.
         const replacement = newTab("terminal");
-        return { tabs: [replacement], activeTabId: replacement.id };
+        return { ...state, tabs: [replacement], activeTabId: replacement.id };
       }
       const activeTabId =
         state.activeTabId === action.tabId
           ? // Focus falls to the neighbour on the right, as in every browser.
             tabs[Math.min(index, tabs.length - 1)].id
           : state.activeTabId;
-      return { tabs, activeTabId };
+      return { ...state, tabs, activeTabId };
     }
 
     case "tab/select":

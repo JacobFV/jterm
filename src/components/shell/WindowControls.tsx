@@ -5,7 +5,14 @@
  * `lib/platform.ts`. On Windows and Linux the app owes the user replacements,
  * and they live at the far right of the tab strip.
  *
- * The maximise button is unusual, and the reason is Windows 11 Snap Layouts.
+ * The two platforms get genuinely different buttons, because their desktops
+ * disagree about what a window button *is*. Windows draws full-height hit
+ * targets with hairline glyphs and a red close. GNOME draws small circles with
+ * a filled background, close included, and reserves red for the hover state.
+ * Drawing the Windows shape on Linux is the single thing that makes an app look
+ * most obviously foreign there, so this file branches rather than compromising.
+ *
+ * The maximise button is unusual on Windows, and the reason is Snap Layouts.
  * That flyout appears only when the OS hit-tests `HTMAXBUTTON`, so the backend
  * subclass reports this button's rectangle as non-client (see
  * `src-tauri/src/win32_snap.rs`). The cost is that the webview stops receiving
@@ -14,10 +21,9 @@
  * event instead. On Linux none of that applies and the plain handlers act.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Minus, Square, Copy, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isTauri } from "@/lib/tauri";
-import { usesNativeWindowChrome } from "@/lib/platform";
+import { isLinux, usesNativeWindowChrome } from "@/lib/platform";
 
 const HOVER_EVENT = "window-chrome://maximize-hover";
 
@@ -39,14 +45,47 @@ async function appWindow(): Promise<AppWindow | null> {
   return getCurrentWindow() as unknown as AppWindow;
 }
 
-function ControlButton({
-  title,
-  onClick,
-  danger = false,
-  forcedHover = false,
-  buttonRef,
-  children,
-}: {
+/* ── Glyphs ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Adwaita's symbolic set, traced rather than approximated with a generic icon
+ * font. They are three strokes; getting them slightly wrong is exactly what
+ * reads as "not a real GNOME app".
+ */
+function MinimiseGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable="false">
+      <path d="M4 9.5h8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function MaximiseGlyph({ maximized }: { maximized: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable="false">
+      {maximized ? (
+        <>
+          <rect x="3.2" y="5.2" width="7.6" height="7.6" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.4" />
+          <path d="M5.6 5.1V4.6A1.4 1.4 0 0 1 7 3.2h5.4A1.4 1.4 0 0 1 13.8 4.6V10a1.4 1.4 0 0 1-1.4 1.4h-.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        </>
+      ) : (
+        <rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      )}
+    </svg>
+  );
+}
+
+function CloseGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable="false">
+      <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+
+interface ButtonProps {
   title: string;
   onClick: () => void;
   danger?: boolean;
@@ -54,7 +93,10 @@ function ControlButton({
   forcedHover?: boolean;
   buttonRef?: React.Ref<HTMLButtonElement>;
   children: React.ReactNode;
-}) {
+}
+
+/** GNOME: a small filled circle, close included, red only on hover. */
+function GtkButton({ title, onClick, danger = false, buttonRef, children }: ButtonProps) {
   return (
     <button
       ref={buttonRef}
@@ -62,8 +104,26 @@ function ControlButton({
       title={title}
       aria-label={title}
       onClick={onClick}
-      // Full-height hit targets: the strip is the titlebar, so these should be
-      // as forgiving to hit as the system buttons they replace.
+      className={cn(
+        "inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full",
+        "bg-white/[0.08] text-ink-1 transition-colors",
+        danger ? "hover:bg-danger hover:text-white" : "hover:bg-white/[0.16]",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Windows: full-height hit targets, no background until hover. */
+function WinButton({ title, onClick, danger = false, forcedHover = false, buttonRef, children }: ButtonProps) {
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
       className={cn(
         "inline-flex h-full w-11 items-center justify-center text-ink-3",
         danger ? "hover:bg-danger hover:text-white" : "hover:bg-surface-2 hover:text-ink-1",
@@ -79,7 +139,12 @@ export function WindowControls() {
   const [maximized, setMaximized] = useState(false);
   const [available, setAvailable] = useState(false);
   const [snapHover, setSnapHover] = useState(false);
+  const [gtk, setGtk] = useState(false);
   const maximizeRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    setGtk(isLinux());
+  }, []);
 
   useEffect(() => {
     if (!isTauri() || usesNativeWindowChrome()) return;
@@ -129,7 +194,9 @@ export function WindowControls() {
   }, []);
 
   useEffect(() => {
-    if (!available) return;
+    // Only Windows hit-tests the button natively; on Linux publishing its
+    // rectangle would be a message a minute for nobody to read.
+    if (!available || gtk) return;
     publishRect();
     const node = maximizeRef.current;
     if (node === null) return;
@@ -140,11 +207,11 @@ export function WindowControls() {
       observer.disconnect();
       window.removeEventListener("resize", publishRect);
     };
-  }, [available, publishRect]);
+  }, [available, gtk, publishRect]);
 
   // Hover state for a region the OS owns. Never arrives outside Windows.
   useEffect(() => {
-    if (!available) return;
+    if (!available || gtk) return;
     let disposed = false;
     let unlisten: (() => void) | null = null;
     void (async () => {
@@ -159,7 +226,7 @@ export function WindowControls() {
       disposed = true;
       unlisten?.();
     };
-  }, [available]);
+  }, [available, gtk]);
 
   if (!available) return null;
 
@@ -167,22 +234,29 @@ export function WindowControls() {
     void appWindow().then((win) => (win === null ? undefined : run(win)));
   };
 
+  const Button = gtk ? GtkButton : WinButton;
+
   return (
-    <div className="ml-1 flex shrink-0 items-stretch border-l border-border">
-      <ControlButton title="Minimise" onClick={act((win) => win.minimize())}>
-        <Minus className="h-3.5 w-3.5" />
-      </ControlButton>
-      <ControlButton
+    <div
+      className={cn(
+        "flex shrink-0 items-center",
+        gtk ? "gap-[9px] pl-3 pr-3.5" : "ml-1 items-stretch border-l border-border",
+      )}
+    >
+      <Button title="Minimise" onClick={act((win) => win.minimize())}>
+        <MinimiseGlyph />
+      </Button>
+      <Button
         title={maximized ? "Restore" : "Maximise"}
         onClick={act((win) => win.toggleMaximize())}
         forcedHover={snapHover}
         buttonRef={maximizeRef}
       >
-        {maximized ? <Copy className="h-3 w-3 -scale-x-100" /> : <Square className="h-3 w-3" />}
-      </ControlButton>
-      <ControlButton title="Close" danger onClick={act((win) => win.close())}>
-        <X className="h-3.5 w-3.5" />
-      </ControlButton>
+        <MaximiseGlyph maximized={maximized} />
+      </Button>
+      <Button title="Close" danger onClick={act((win) => win.close())}>
+        <CloseGlyph />
+      </Button>
     </div>
   );
 }

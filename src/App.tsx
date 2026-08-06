@@ -16,15 +16,18 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
+import { FileTree } from "@/components/shell/FileTree";
 import { PaneGrid } from "@/components/shell/PaneGrid";
+import { SettingsDialog } from "@/components/shell/SettingsDialog";
 import { ResizeHandles } from "@/components/shell/ResizeHandles";
 import { TabStrip } from "@/components/shell/TabStrip";
 import { readClipboard, writeClipboard } from "@/lib/clipboard";
-import { dialog, scrollback as scrollbackApi, session } from "@/lib/ipc";
+import { dialog, fs, history as historyApi, scrollback as scrollbackApi, session } from "@/lib/ipc";
 import { kindForPath } from "@/lib/filetypes";
 import { resolve, type ActionId } from "@/lib/keymap";
 import {
   configurePersistence,
+  flushPersistence,
   installFlushTriggers,
   markDirty,
 } from "@/lib/persist";
@@ -52,6 +55,8 @@ export function App() {
   const initialRef = useRef<Workspace>(emptyWorkspace());
   const [workspace, dispatch] = useReducer(reduce, initialRef.current);
   const [loaded, setLoaded] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sidebarRoot, setSidebarRoot] = useState<string | null>(null);
 
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
@@ -71,6 +76,7 @@ export function App() {
       // Anything on disk or in the window belonging to a pane that no longer
       // exists is from a session that ended badly. Nothing else will clean it.
       void scrollbackApi.prune(live);
+      void historyApi.prune(live);
       setLoaded(true);
     })();
   }, []);
@@ -97,6 +103,33 @@ export function App() {
     if (loaded) markDirty();
   }, [workspace, loaded]);
 
+  /* ── The file tree's root ─────────────────────────────────────────── */
+
+  // Whatever directory the focused terminal is in. A notepad or a browser has
+  // no opinion, so the tree simply stays where it was rather than jumping to
+  // home every time focus crosses a pane that is not a shell.
+  const focusedCwd = (() => {
+    const tab = activeTab(workspace);
+    const pane = tab ? tab.panes[tab.focusedPaneId] : null;
+    return pane?.kind === "terminal" ? pane.cwd : undefined;
+  })();
+
+  // Tracked separately from `sidebarRoot` so that walking up the tree by hand
+  // is not undone on the next render — the root only follows the shell when
+  // the shell has actually moved.
+  const syncedCwd = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (focusedCwd && focusedCwd !== syncedCwd.current) {
+      syncedCwd.current = focusedCwd;
+      setSidebarRoot(focusedCwd);
+    }
+  }, [focusedCwd]);
+
+  useEffect(() => {
+    if (!workspace.sidebarOpen || sidebarRoot !== null) return;
+    void fs.home().then((home) => setSidebarRoot((current) => current ?? home));
+  }, [workspace.sidebarOpen, sidebarRoot]);
+
   /* ── Opening a file ───────────────────────────────────────────────── */
 
   /**
@@ -106,12 +139,14 @@ export function App() {
    * `kindForPath`. That keeps "what opens a `.stl`" in one place, shared with
    * every other route a file could arrive by.
    */
+  const openPath = useCallback((path: string) => {
+    dispatch({ type: "tab/open", kind: kindForPath(path), seed: { path } as Partial<PaneState> });
+  }, []);
+
   const openFile = useCallback(async () => {
     const path = await dialog.open();
-    if (!path) return;
-    const kind = kindForPath(path);
-    dispatch({ type: "tab/open", kind, seed: { path } as Partial<PaneState> });
-  }, []);
+    if (path) openPath(path);
+  }, [openPath]);
 
   /* ── Closing things ───────────────────────────────────────────────── */
 
@@ -153,6 +188,57 @@ export function App() {
     },
     [confirmDiscard],
   );
+
+  /* ── Closing the window ───────────────────────────────────────────── */
+
+  /**
+   * Ask before the window takes unsaved buffers with it.
+   *
+   * Terminals and viewers are not asked about: a shell can be started again and
+   * a file reopened. A notepad that has never been saved exists only in the
+   * session snapshot, and closing the window is the one moment where the user
+   * plainly means to stop — so it is the one moment worth interrupting.
+   *
+   * The snapshot is flushed either way. Answering "close anyway" should still
+   * leave everything recoverable on the next launch; the prompt is about the
+   * *file* the buffer was never written to, not about losing the text.
+   */
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+
+    void (async () => {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const win = getCurrentWindow();
+      const stop = await win.onCloseRequested(async (event) => {
+        const unsaved = workspaceRef.current.tabs.flatMap((tab) =>
+          Object.values(tab.panes).filter((pane) => pane.kind === "notepad" && pane.dirty),
+        );
+        if (unsaved.length === 0) return;
+
+        // Held open while the question is asked; without this the window is
+        // already gone by the time the answer arrives.
+        event.preventDefault();
+        const names = unsaved.map((pane) => paneLabel(pane)).join(", ");
+        const leave = await dialog.confirm(
+          `${names} ${unsaved.length === 1 ? "has" : "have"} unsaved changes. Close jterm anyway?`,
+          "Unsaved changes",
+        );
+        if (leave) {
+          await flushPersistence();
+          await win.destroy();
+        }
+      });
+      if (disposed) stop();
+      else unlisten = stop;
+    })();
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   /* ── Keyboard ─────────────────────────────────────────────────────── */
 
@@ -308,10 +394,26 @@ export function App() {
         onClose={(tabId) => void closeTab(tabId)}
         onNew={(kind) => dispatch({ type: "tab/new", kind })}
         onOpenFile={() => void openFile()}
+        sidebarOpen={workspace.sidebarOpen}
+        onToggleSidebar={() => dispatch({ type: "ui/sidebar" })}
+        onOpenSettings={() => setSettingsOpen(true)}
         onReorder={(tabId, toIndex) => dispatch({ type: "tab/reorder", tabId, toIndex })}
       />
 
-      <div className="relative min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1">
+        {workspace.sidebarOpen ? (
+          <div className="w-[220px] shrink-0 border-r border-border">
+            {sidebarRoot ? (
+              <FileTree
+                root={sidebarRoot}
+                onOpen={openPath}
+                onRootChange={setSidebarRoot}
+              />
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="relative min-h-0 flex-1">
         {loaded
           ? tabs.map((tab) => {
               const isActive = tab.id === workspace.activeTabId;
@@ -337,7 +439,21 @@ export function App() {
               );
             })
           : null}
+        </div>
       </div>
+
+      {settingsOpen ? (
+        <SettingsDialog
+          onClose={() => setSettingsOpen(false)}
+          onImported={(snapshot) => {
+            const restored = decode(snapshot);
+            if (!restored) return;
+            loadContent(restored.content);
+            dispatch({ type: "restore", workspace: restored.workspace });
+            setSettingsOpen(false);
+          }}
+        />
+      ) : null}
 
       <ResizeHandles />
     </div>

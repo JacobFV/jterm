@@ -21,6 +21,10 @@
     "opener:allow-open-url",
     "dialog:allow-open",
     "dialog:allow-save",
-    "dialog:allow-ask"
+    "dialog:allow-ask",
+    "core:window:allow-destroy",
+    "dialog:allow-confirm",
+    "dialog:allow-message",
+    "opener:allow-open-path"
   ]
 }

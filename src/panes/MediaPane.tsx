@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { ExternalLink } from "lucide-react";
-import { assetUrl, openExternal } from "@/lib/ipc";
+import { assetUrl, openPath } from "@/lib/ipc";
 import { fileName, isAudio } from "@/lib/filetypes";
 import type { MediaPaneState } from "@/state/workspace";
 import type { PaneProps } from "./types";
@@ -45,7 +45,7 @@ export function MediaPane({ pane, visible, onFocus }: PaneProps<MediaPaneState>)
           type="button"
           title="Open in your default player"
           aria-label="Open in your default player"
-          onClick={() => void openExternal(`file://${pane.path}`)}
+          onClick={() => void openPath(pane.path)}
           className="inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-hairline-strong px-1.5 text-[10px] text-ink-2 hover:bg-surface-2 hover:text-ink-1"
         >
           <ExternalLink className="h-3 w-3" />

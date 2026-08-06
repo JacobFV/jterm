@@ -85,7 +85,10 @@ export function decode(json: string | null | undefined): Snapshot | null {
     }
   }
 
-  return { workspace: { tabs, activeTabId }, content };
+  return {
+    workspace: { tabs, activeTabId, sidebarOpen: rawWorkspace.sidebarOpen === true },
+    content,
+  };
 }
 
 function decodeTab(raw: unknown): Tab | null {

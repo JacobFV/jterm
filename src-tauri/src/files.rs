@@ -93,6 +93,77 @@ pub fn file_write_text(path: String, contents: String) -> Result<(), String> {
     })
 }
 
+/* ── Browsing ────────────────────────────────────────────────────────────── */
+
+#[derive(Serialize)]
+pub struct DirEntryInfo {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    /// True for names beginning with a dot. Reported rather than filtered, so
+    /// the sidebar can offer to show them without a second round trip.
+    pub hidden: bool,
+}
+
+/// A directory a file tree is about to draw.
+///
+/// Capped, because a tree pane that opens `/nix/store` should show a truncated
+/// list rather than spend a second serialising a hundred thousand names into
+/// an IPC message nobody will scroll through.
+const MAX_ENTRIES: usize = 4096;
+
+#[tauri::command]
+pub fn dir_list(path: String) -> Result<Vec<DirEntryInfo>, String> {
+    let dir = PathBuf::from(&path);
+    let entries = fs::read_dir(&dir).map_err(|err| format!("cannot open {}: {err}", show(&dir)))?;
+
+    let mut out: Vec<DirEntryInfo> = Vec::new();
+    for entry in entries.flatten() {
+        if out.len() >= MAX_ENTRIES {
+            break;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        // `file_type` does not follow symlinks, so a link to a directory would
+        // read as a plain file and refuse to expand.
+        let is_dir = entry
+            .metadata()
+            .map(|meta| meta.is_dir())
+            .unwrap_or_else(|_| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false));
+        out.push(DirEntryInfo {
+            hidden: name.starts_with('.'),
+            path: entry.path().to_string_lossy().into_owned(),
+            name,
+            is_dir,
+        });
+    }
+
+    // Directories first, then case-insensitive by name — the order every file
+    // manager uses, and the one people scan for without thinking.
+    out.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(out)
+}
+
+/// Where to root a file tree when nothing else has said.
+#[tauri::command]
+pub fn dir_home() -> String {
+    dirs_next::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// The parent of a directory, for walking up out of the tree's root.
+#[tauri::command]
+pub fn dir_parent(path: String) -> Option<String> {
+    PathBuf::from(path)
+        .parent()
+        .map(|parent| parent.to_string_lossy().into_owned())
+}
+
 fn show(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())

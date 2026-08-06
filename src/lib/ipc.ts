@@ -80,6 +80,18 @@ export async function assetUrl(path: string): Promise<string> {
   return convertFileSrc(path);
 }
 
+/**
+ * Hand a local path to whatever the desktop opens it with.
+ *
+ * Not `openExternal`: the opener plugin restricts `openUrl` by scheme, and a
+ * `file://` URL is refused there. Paths have their own command.
+ */
+export async function openPath(path: string): Promise<void> {
+  if (!isTauri()) return;
+  const { openPath: open } = await import("@tauri-apps/plugin-opener");
+  await open(path);
+}
+
 /** Hand a URL to the user's real browser. */
 export async function openExternal(url: string): Promise<void> {
   if (!isTauri()) {
@@ -90,6 +102,64 @@ export async function openExternal(url: string): Promise<void> {
   await openUrl(url);
 }
 
+export interface DirEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  hidden: boolean;
+}
+
+export const fs = {
+  list: async (path: string): Promise<DirEntry[]> => {
+    // Rust names these in snake_case; renaming at the boundary keeps the rest
+    // of the frontend from having to know that.
+    const raw = await call<{ name: string; path: string; is_dir: boolean; hidden: boolean }[]>(
+      "dir_list",
+      { path },
+      [],
+    );
+    return raw.map((entry) => ({
+      name: entry.name,
+      path: entry.path,
+      isDir: entry.is_dir,
+      hidden: entry.hidden,
+    }));
+  },
+
+  parent: (path: string): Promise<string | null> => call("dir_parent", { path }, null),
+
+  home: (): Promise<string> => call("dir_home", {}, "/"),
+};
+
+export interface ExportSummary {
+  path: string;
+  lines: number;
+  bytes: number;
+}
+
+/**
+ * The JSONL every terminal writes, and the single file the whole session folds
+ * into. See `src-tauri/src/history.rs` for the format.
+ */
+export const history = {
+  append: (id: string, record: unknown) =>
+    call("history_append", { id, record: JSON.stringify(record) }, undefined),
+
+  read: (id: string): Promise<string> => call("history_read", { id }, ""),
+
+  drop: (id: string) => call("history_drop", { id }, undefined),
+
+  prune: (keep: string[]) => call("history_prune", { keep }, undefined),
+
+  path: (id: string): Promise<string> => call("history_path", { id }, ""),
+
+  export: (path: string): Promise<ExportSummary | null> =>
+    call("history_export", { path }, null),
+
+  /** Returns the restored session snapshot, or null if the file carried none. */
+  import: (path: string): Promise<string | null> => call("history_import", { path }, null),
+};
+
 export const dialog = {
   /** Returns the chosen path, or null if the dialog was dismissed. */
   open: async (): Promise<string | null> => {
@@ -99,10 +169,31 @@ export const dialog = {
     return typeof chosen === "string" ? chosen : null;
   },
 
+  /** Open, restricted to one extension — used for importing a session file. */
+  openFiltered: async (name: string, extensions: string[]): Promise<string | null> => {
+    if (!isTauri()) return null;
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const chosen = await open({ multiple: false, directory: false, filters: [{ name, extensions }] });
+    return typeof chosen === "string" ? chosen : null;
+  },
+
   save: async (defaultPath?: string): Promise<string | null> => {
     if (!isTauri()) return null;
     const { save } = await import("@tauri-apps/plugin-dialog");
     return (await save(defaultPath ? { defaultPath } : {})) ?? null;
+  },
+
+  /** A yes/no the caller must not proceed past without an answer. */
+  confirm: async (message: string, title: string): Promise<boolean> => {
+    if (!isTauri()) return true;
+    const { ask } = await import("@tauri-apps/plugin-dialog");
+    return ask(message, { title, kind: "warning" });
+  },
+
+  notify: async (message: string, title: string): Promise<void> => {
+    if (!isTauri()) return;
+    const { message: show } = await import("@tauri-apps/plugin-dialog");
+    await show(message, { title });
   },
 
   /** Ask before throwing away unsaved work. */

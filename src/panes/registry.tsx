@@ -25,7 +25,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { pty, scrollback } from "@/lib/ipc";
+import { history, pty, scrollback } from "@/lib/ipc";
 import { dropContent } from "@/state/content";
 import type { PaneKind, PaneState } from "@/state/workspace";
 import { BrowserPane } from "./BrowserPane";
@@ -61,6 +61,7 @@ export const PANE_KINDS: PaneKindDef[] = [
     dispose: (paneId) => {
       void pty.kill(paneId);
       void scrollback.drop(paneId);
+      void history.drop(paneId);
     },
   },
   { kind: "notepad", label: "Notepad", icon: FileText, Component: NotepadPane },

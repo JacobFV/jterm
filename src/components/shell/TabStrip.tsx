@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, X } from "lucide-react";
+import { PanelLeft, Plus, Settings as SettingsIcon, X } from "lucide-react";
 
 import { MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,16 @@ const DRAG_THRESHOLD_PX = 4;
 /** How long the new-tab button must be held before it offers the other kinds. */
 const LONG_PRESS_MS = 400;
 
+/**
+ * Bare strip kept to the left of the first tab, purely to grab the window by.
+ *
+ * With a tab hard against the corner there is nowhere left to pick the window
+ * up from except the thin gap above it. On macOS this is *added to* the traffic
+ * light inset rather than replacing it, because that region belongs to the
+ * system buttons and clicking near them should not be a gamble.
+ */
+const WINDOW_GRAB_INSET_PX = 14;
+
 interface TabStripProps {
   tabs: Tab[];
   activeTabId: string | null;
@@ -35,6 +45,9 @@ interface TabStripProps {
   /** Show the file chooser and open whatever comes back. */
   onOpenFile: () => void;
   onReorder: (tabId: string, toIndex: number) => void;
+  sidebarOpen: boolean;
+  onToggleSidebar: () => void;
+  onOpenSettings: () => void;
 }
 
 export function TabStrip({
@@ -45,12 +58,17 @@ export function TabStrip({
   onNew,
   onOpenFile,
   onReorder,
+  sidebarOpen,
+  onToggleSidebar,
+  onOpenSettings,
 }: TabStripProps) {
   // macOS keeps its native traffic lights, which float over the top-left of the
   // webview. Without this the first tab sits underneath them.
   const [leadingInset, setLeadingInset] = useState(0);
   useEffect(() => {
-    setLeadingInset(usesNativeWindowChrome() ? MACOS_TRAFFIC_LIGHT_INSET_PX : 0);
+    setLeadingInset(
+      (usesNativeWindowChrome() ? MACOS_TRAFFIC_LIGHT_INSET_PX : 0) + WINDOW_GRAB_INSET_PX,
+    );
   }, []);
 
   const tabRefs = useRef(new Map<string, HTMLDivElement>());
@@ -100,11 +118,10 @@ export function TabStrip({
       data-tauri-drag-region
       className="relative z-40 flex h-head shrink-0 cursor-default select-none items-stretch border-b border-border bg-surface-1"
     >
-      {/* Reserved for the macOS traffic lights; zero everywhere else. Draggable,
-          so the area around the system buttons still moves the window. */}
-      {leadingInset > 0 ? (
-        <div data-tauri-drag-region className="shrink-0" style={{ width: leadingInset }} />
-      ) : null}
+      {/* Room for the macOS traffic lights, plus a bare strip on every platform
+          that exists only to be grabbed. Draggable, so the area around the
+          system buttons still moves the window. */}
+      <div data-tauri-drag-region className="shrink-0" style={{ width: leadingInset }} />
 
       {/* Takes all the room left over by the window controls, so the tabs have
           something to spread into. The drag spacer below shares this box rather
@@ -183,8 +200,53 @@ export function TabStrip({
         <div data-tauri-drag-region className="min-w-0 flex-1 basis-0" />
       </div>
 
+      {/* App chrome, stacked with the window buttons at the right end. Naked —
+          no border, no fill — so they read as part of the titlebar rather than
+          as a toolbar that happens to live in it. */}
+      <div className="flex shrink-0 items-center gap-0.5 pl-1 pr-1">
+        <ChromeButton
+          label={sidebarOpen ? "Hide the file tree" : "Show the file tree"}
+          active={sidebarOpen}
+          onClick={onToggleSidebar}
+        >
+          <PanelLeft className="h-3.5 w-3.5" />
+        </ChromeButton>
+        <ChromeButton label="Settings" onClick={onOpenSettings}>
+          <SettingsIcon className="h-3.5 w-3.5" />
+        </ChromeButton>
+      </div>
+
       <WindowControls />
     </div>
+  );
+}
+
+function ChromeButton({
+  label,
+  onClick,
+  active = false,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  active?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-6 w-6 items-center justify-center rounded-sm",
+        active ? "text-brand" : "text-ink-4 hover:text-ink-1",
+        "hover:bg-surface-2",
+      )}
+    >
+      {children}
+    </button>
   );
 }
 

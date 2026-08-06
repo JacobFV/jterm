@@ -2,6 +2,7 @@
 //!
 //! One file per concern:
 //!   - `files`         — reading and saving what editor panes have open
+//!   - `history`       — the JSONL every terminal leaves behind, and export/import
 //!   - `pty`           — a pseudoterminal per terminal pane
 //!   - `store`         — session snapshots and scrollback on disk
 //!   - `window_chrome` — the native half of the custom titlebar
@@ -11,6 +12,7 @@
 //! opener plugin's job.
 
 pub mod files;
+pub mod history;
 pub mod pty;
 pub mod store;
 #[cfg(windows)]
@@ -60,6 +62,16 @@ pub fn run() {
             store::scrollback_prune,
             files::file_read_text,
             files::file_write_text,
+            files::dir_list,
+            files::dir_parent,
+            files::dir_home,
+            history::history_append,
+            history::history_read,
+            history::history_drop,
+            history::history_prune,
+            history::history_export,
+            history::history_import,
+            history::history_path,
             window_chrome::set_maximize_button_rect,
         ])
         .setup(|app| {

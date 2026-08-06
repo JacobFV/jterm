@@ -36,3 +36,18 @@ export function isMacOS(): boolean {
 export function usesNativeWindowChrome(): boolean {
   return isMacOS();
 }
+
+export function isWindows(): boolean {
+  return /Windows/.test(userAgent());
+}
+
+/**
+ * Linux, for the purpose of deciding which window buttons to draw.
+ *
+ * Everything that is not macOS or Windows is treated as Linux here: the app
+ * only ships to three platforms, and a wrong guess costs the shape of three
+ * buttons rather than anything that matters.
+ */
+export function isLinux(): boolean {
+  return !isMacOS() && !isWindows();
+}

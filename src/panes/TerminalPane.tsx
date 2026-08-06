@@ -24,7 +24,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 
 import { applyInput, draftFrom, emptyDraft, replayBytes, type Draft } from "@/lib/draft";
-import { pty, scrollback as scrollbackApi } from "@/lib/ipc";
+import { history, pty, scrollback as scrollbackApi } from "@/lib/ipc";
 import { scanOsc } from "@/lib/osc";
 import { ready as ptyBusReady, subscribePty } from "@/lib/ptyBus";
 import { registerTerminal } from "@/lib/terminals";
@@ -42,6 +42,14 @@ import type { PaneProps } from "./types";
 const REPLAY_SETTLE_MS = 180;
 /** Give up waiting for a prompt that never comes. */
 const REPLAY_DEADLINE_MS = 3000;
+
+/**
+ * How long typing must pause before the unsubmitted line is written to the
+ * terminal's log. A record per keystroke would make the log mostly prefixes of
+ * itself, and the crash-recovery snapshot already covers the last few hundred
+ * milliseconds far more cheaply.
+ */
+const DRAFT_LOG_INTERVAL_MS = 1200;
 
 function readTheme(): ITheme {
   const styles = getComputedStyle(document.documentElement);
@@ -81,6 +89,10 @@ export function TerminalPane({ pane, focused, onMeta, onFocus }: PaneProps<Termi
   const oscCarryRef = useRef("");
   const exitedRef = useRef(false);
   const replayRef = useRef<{ text: string; settle: number; deadline: number } | null>(null);
+  /** Where the shell was when the last command was submitted, for the log. */
+  const cwdRef = useRef<string | undefined>(pane.cwd);
+  /** Coalesces draft records; every keystroke would be a line per character. */
+  const draftLogTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Read once: the pane's id and its restored state are fixed for the lifetime
   // of this component, and the effect below must not re-run when a title or a
@@ -103,7 +115,17 @@ export function TerminalPane({ pane, focused, onMeta, onFocus }: PaneProps<Termi
       rows: term.rows,
       cwd,
     });
-    if (info) metaRef.current({ cwd: info.cwd, exited: false });
+    if (info) {
+      cwdRef.current = info.cwd;
+      metaRef.current({ cwd: info.cwd, exited: false });
+      void history.append(paneId, {
+        kind: "spawn",
+        at: new Date().toISOString(),
+        shell: info.shell,
+        cwd: info.cwd,
+        pid: info.pid,
+      });
+    }
   }, [paneId]);
 
   /** Send the pending draft to the shell, once and once only. */
@@ -255,10 +277,39 @@ export function TerminalPane({ pane, focused, onMeta, onFocus }: PaneProps<Termi
       }
       cancelReplay();
       void pty.write(paneId, data);
-      if (!altScreenRef.current) {
-        draftRef.current = applyInput(draftRef.current, data);
-        updateContent(paneId, { draft: draftRef.current.text });
+      if (altScreenRef.current) return;
+
+      // Recorded before the input is applied: `applyInput` clears the line on
+      // Enter, so afterwards there is nothing left to write down.
+      const submitting = data.includes("\r") || data.includes("\n");
+      const submitted = draftRef.current.text;
+
+      draftRef.current = applyInput(draftRef.current, data);
+      updateContent(paneId, { draft: draftRef.current.text });
+
+      if (submitting && submitted.trim()) {
+        void history.append(paneId, {
+          kind: "command",
+          at: new Date().toISOString(),
+          text: submitted,
+          cwd: cwdRef.current,
+          // The mirror loses track after tab completion or history recall, and
+          // a log that does not say so is worse than one that does.
+          exact: draftRef.current.trusted,
+        });
       }
+
+      // The unsubmitted line, on a timer. This is what makes the terminal's own
+      // file a complete record rather than only a list of what ran.
+      if (draftLogTimer.current !== null) clearTimeout(draftLogTimer.current);
+      draftLogTimer.current = setTimeout(() => {
+        draftLogTimer.current = null;
+        void history.append(paneId, {
+          kind: "draft",
+          at: new Date().toISOString(),
+          text: draftRef.current.text,
+        });
+      }, DRAFT_LOG_INTERVAL_MS);
     });
 
     const binarySub = term.onBinary((data) => {
@@ -284,6 +335,14 @@ export function TerminalPane({ pane, focused, onMeta, onFocus }: PaneProps<Termi
 
         const scan = scanOsc(chunk, oscCarryRef.current);
         oscCarryRef.current = scan.carry;
+        if (scan.cwd && scan.cwd !== cwdRef.current) {
+          cwdRef.current = scan.cwd;
+          void history.append(paneId, {
+            kind: "cwd",
+            at: new Date().toISOString(),
+            path: scan.cwd,
+          });
+        }
         if (scan.cwd || scan.title) {
           metaRef.current({
             ...(scan.cwd ? { cwd: scan.cwd } : {}),
@@ -295,6 +354,11 @@ export function TerminalPane({ pane, focused, onMeta, onFocus }: PaneProps<Termi
         exitedRef.current = true;
         cancelReplay();
         metaRef.current({ exited: true });
+        void history.append(paneId, {
+          kind: "exit",
+          at: new Date().toISOString(),
+          code,
+        });
         term.write(
           `\r\n\x1b[2m[process exited${code === null ? "" : ` with ${code}`}] — press Enter to start a new shell\x1b[0m\r\n`,
         );
@@ -345,6 +409,7 @@ export function TerminalPane({ pane, focused, onMeta, onFocus }: PaneProps<Termi
     return () => {
       disposed = true;
       cancelReplay();
+      if (draftLogTimer.current !== null) clearTimeout(draftLogTimer.current);
       observer.disconnect();
       cancelAnimationFrame(frame);
       unregister();

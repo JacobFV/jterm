@@ -224,6 +224,17 @@ impl Store {
         let _ = fs::remove_file(self.scrollback_path(id));
     }
 
+    /// Replace a pane's recorded output wholesale, as an import does.
+    ///
+    /// The live recorder is dropped first — it holds an open handle and its own
+    /// idea of the file's length, and writing underneath it would leave the two
+    /// disagreeing and append the next chunk at the wrong offset.
+    pub fn replace_scrollback(&self, id: &str, bytes: &[u8]) {
+        self.recorders.lock().remove(id);
+        let _ = fs::create_dir_all(self.root.join("scrollback"));
+        let _ = fs::write(self.scrollback_path(id), bytes);
+    }
+
     /// Delete logs for tabs the snapshot no longer mentions.
     ///
     /// Run at startup: a tab closed during a crash never got its own delete,
