@@ -53,7 +53,14 @@ jobs:
           # building on a newer Ubuntu would quietly drop older distributions.
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            label: Linux
+            label: Linux (x86_64)
+          # Native arm64, not cross-compiled: Tauri's Linux bundling shells out
+          # to tools that expect to be running on the target architecture.
+          # Arm Linux desktops are no longer unusual — the machine this was
+          # developed on is one.
+          - platform: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            label: Linux (arm64)
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             label: Windows

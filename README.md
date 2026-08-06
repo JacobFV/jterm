@@ -119,8 +119,8 @@ npm run version 0.2.0
 git commit -am "v0.2.0" && git tag v0.2.0 && git push --follow-tags
 ```
 
-That builds macOS (Apple silicon and Intel), Windows and Linux, and attaches the
-installers to the release. Builds are **not code-signed** — macOS wants
+That builds macOS (Apple silicon and Intel), Windows, and Linux on both x86_64
+and arm64, and attaches the installers to the release. Builds are **not code-signed** — macOS wants
 right-click → Open, and Windows SmartScreen wants More info → Run anyway.
 
 ## Layout

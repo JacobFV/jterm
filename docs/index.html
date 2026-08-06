@@ -243,9 +243,15 @@
         { os: "macOS (Apple silicon)", test: (n) => n.endsWith(".dmg") && /aarch64|arm64/.test(n) },
         { os: "macOS (Intel)", test: (n) => n.endsWith(".dmg") && /x64|x86_64/.test(n) },
         { os: "Windows", test: (n) => n.endsWith(".msi") || n.endsWith("-setup.exe") },
-        { os: "Linux (AppImage)", test: (n) => n.endsWith(".AppImage") },
-        { os: "Linux (Debian/Ubuntu)", test: (n) => n.endsWith(".deb") },
-        { os: "Linux (Fedora/RHEL)", test: (n) => n.endsWith(".rpm") },
+        // Linux is split by architecture: matching on the suffix alone would
+        // hand an arm64 machine the x86_64 build, or the reverse, depending
+        // only on which asset the API happened to list first.
+        { os: "Linux x86_64 (AppImage)", test: (n) => n.endsWith(".AppImage") && /amd64|x86_64/.test(n) },
+        { os: "Linux x86_64 (.deb)", test: (n) => n.endsWith(".deb") && /amd64|x86_64/.test(n) },
+        { os: "Linux x86_64 (.rpm)", test: (n) => n.endsWith(".rpm") && /x86_64/.test(n) },
+        { os: "Linux arm64 (AppImage)", test: (n) => n.endsWith(".AppImage") && /arm64|aarch64/.test(n) },
+        { os: "Linux arm64 (.deb)", test: (n) => n.endsWith(".deb") && /arm64|aarch64/.test(n) },
+        { os: "Linux arm64 (.rpm)", test: (n) => n.endsWith(".rpm") && /aarch64/.test(n) },
       ];
 
       function humanSize(bytes) {
