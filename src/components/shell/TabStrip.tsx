@@ -9,16 +9,25 @@
  * the explicit spacer, never on a tab or a button. An element carrying the
  * attribute swallows the press in order to move the window, so putting it on an
  * interactive child would make that child unclickable.
+ *
+ * A tab drag means two different things depending on where the pointer goes.
+ * Kept inside the strip it reorders, live, as every browser does. Taken below
+ * the strip it becomes an offer to graft the tab into the workspace as a split
+ * — the strip stops reordering and starts reporting the pointer upwards, and
+ * `Workspace` decides which pane and which edge that lands on, since it is the
+ * one that knows where the panes are.
  */
 
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { PanelLeft, Plus, Settings as SettingsIcon, X } from "lucide-react";
 
 import { MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
 import { cn } from "@/lib/utils";
-import { NEW_PANE_MENU, paneKind } from "@/panes/registry";
+import { NEW_PANE_MENU } from "@/panes/registry";
 import { type PaneKind, type Tab, focusedPane, tabLabel } from "@/state/workspace";
+import { Menu, MenuItem, useMenu } from "./Menu";
+import { PaneMenu, type PaneMenuActions } from "./PaneMenu";
+import type { TabDrag } from "./Workspace";
 import { WindowControls } from "./WindowControls";
 
 /** Movement before a press on a tab counts as a drag rather than a click. */
@@ -45,9 +54,19 @@ interface TabStripProps {
   /** Show the file chooser and open whatever comes back. */
   onOpenFile: () => void;
   onReorder: (tabId: string, toIndex: number) => void;
+  /** What a tab's kind icon offers — the same menu a split pane's header has,
+   *  aimed at whichever pane that tab is focused on. It lives here too because
+   *  a tab holding one pane draws no header of its own. */
+  paneMenu: PaneMenuActions;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
   onOpenSettings: () => void;
+  /** Where a tab dragged below the strip currently is, or `null` when the
+   *  gesture is over or has come back inside the strip. */
+  onDragOverWorkspace: (drag: TabDrag | null) => void;
+  /** Released over the workspace. True if the tab was actually grafted in —
+   *  in which case it no longer exists and must not then be selected. */
+  onDropInWorkspace: (tabId: string) => boolean;
 }
 
 export function TabStrip({
@@ -58,9 +77,12 @@ export function TabStrip({
   onNew,
   onOpenFile,
   onReorder,
+  paneMenu,
   sidebarOpen,
   onToggleSidebar,
   onOpenSettings,
+  onDragOverWorkspace,
+  onDropInWorkspace,
 }: TabStripProps) {
   // macOS keeps its native traffic lights, which float over the top-left of the
   // webview. Without this the first tab sits underneath them.
@@ -72,21 +94,60 @@ export function TabStrip({
   }, []);
 
   const tabRefs = useRef(new Map<string, HTMLDivElement>());
+  const stripRef = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
+  /**
+   * Set when a drag ended by grafting the tab into the workspace.
+   *
+   * A release still produces a `click` on the tab, and that click would select
+   * a tab that the graft has just dissolved — leaving `activeTabId` pointing at
+   * nothing and the window blank. So the next click is swallowed.
+   */
+  const suppressClick = useRef(false);
 
   const beginTabDrag = (tabId: string) => (event: React.PointerEvent) => {
+    // Cleared here rather than only when a click consumes it. A release with
+    // pointer capture held does not always produce a click, and a flag left
+    // standing would swallow the first click of whatever gesture came next.
+    suppressClick.current = false;
     if (event.button !== 0) return;
-    const origin = event.clientX;
+    const origin = { x: event.clientX, y: event.clientY };
     const node = event.currentTarget as HTMLElement;
     let armed = false;
+    let overWorkspace = false;
 
+    // Listened for on the window rather than on the tab. Until the drag arms
+    // there is no pointer capture, so a movement that leaves the tab before it
+    // has travelled the threshold — a flick towards the workspace, or simply a
+    // quick hand — would otherwise be delivered to whatever is now under the
+    // pointer and the gesture would never start at all.
     const move = (moveEvent: PointerEvent) => {
       if (!armed) {
-        if (Math.abs(moveEvent.clientX - origin) < DRAG_THRESHOLD_PX) return;
+        // Both axes: a tab dragged straight down towards the workspace has not
+        // moved sideways at all, and would otherwise never arm.
+        if (
+          Math.abs(moveEvent.clientX - origin.x) < DRAG_THRESHOLD_PX &&
+          Math.abs(moveEvent.clientY - origin.y) < DRAG_THRESHOLD_PX
+        ) {
+          return;
+        }
         armed = true;
         node.setPointerCapture(moveEvent.pointerId);
         setDragging(tabId);
       }
+
+      // Below the strip the gesture stops being about tab order.
+      const bottom = stripRef.current?.getBoundingClientRect().bottom ?? 0;
+      if (moveEvent.clientY > bottom) {
+        overWorkspace = true;
+        onDragOverWorkspace({ tabId, x: moveEvent.clientX, y: moveEvent.clientY });
+        return;
+      }
+      if (overWorkspace) {
+        overWorkspace = false;
+        onDragOverWorkspace(null);
+      }
+
       // Reorder live: the tab under the pointer trades places with this one, so
       // the strip always shows the order a release would commit to.
       const over = tabs.findIndex((tab) => {
@@ -99,22 +160,31 @@ export function TabStrip({
     };
 
     const finish = (upEvent: PointerEvent) => {
-      node.removeEventListener("pointermove", move);
-      node.removeEventListener("pointerup", finish);
-      node.removeEventListener("pointercancel", finish);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
       if (armed) node.releasePointerCapture(upEvent.pointerId);
       setDragging(null);
+
+      if (overWorkspace) {
+        // Cancels rather than drops: a pointer that was taken away rather than
+        // released is not a decision.
+        const dropped = upEvent.type === "pointerup" && onDropInWorkspace(tabId);
+        onDragOverWorkspace(null);
+        if (dropped) suppressClick.current = true;
+      }
     };
 
-    node.addEventListener("pointermove", move);
-    node.addEventListener("pointerup", finish);
-    node.addEventListener("pointercancel", finish);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
   };
 
   return (
     // `select-none` and the default cursor because this row is chrome: dragging
     // the window must not paint a text selection across the tabs.
     <div
+      ref={stripRef}
       data-tauri-drag-region
       className="relative z-40 flex h-head shrink-0 cursor-default select-none items-stretch border-b border-border bg-surface-1"
     >
@@ -131,7 +201,6 @@ export function TabStrip({
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           const pane = focusedPane(tab);
-          const Icon = pane ? paneKind(pane.kind).icon : null;
           return (
             <div
               key={tab.id}
@@ -154,20 +223,33 @@ export function TabStrip({
                 dragging === tab.id && "opacity-60",
               )}
             >
+              {/* Outside the select button rather than in it: it is a control
+                  of its own, and a button inside a button is neither valid nor
+                  clickable. */}
+              {pane ? (
+                <PaneMenu
+                  tabs={tabs}
+                  tabId={tab.id}
+                  pane={pane}
+                  actions={paneMenu}
+                  muted={!isActive}
+                />
+              ) : null}
               <button
                 type="button"
-                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-                onClick={() => onSelect(tab.id)}
+                className="flex min-w-0 flex-1 items-center text-left"
+                onClick={() => {
+                  if (suppressClick.current) {
+                    suppressClick.current = false;
+                    return;
+                  }
+                  onSelect(tab.id);
+                }}
                 aria-current={isActive}
                 title={tabLabel(tab)}
               >
-                {Icon ? (
-                  <Icon
-                    className={cn("h-3 w-3 shrink-0", isActive ? "text-ink-2" : "text-ink-4")}
-                  />
-                ) : null}
                 <span
-                  className={cn("truncate text-[11px]", isActive ? "text-ink-1" : "text-ink-3")}
+                  className={cn("truncate text-[length:var(--fs-11)]", isActive ? "text-ink-1" : "text-ink-3")}
                 >
                   {tabLabel(tab)}
                 </span>
@@ -265,22 +347,9 @@ function NewTabButton({
   onNew: (kind: PaneKind) => void;
   onOpenFile: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  // Where to draw the menu, in viewport coordinates. It cannot be positioned
-  // relative to this button: the tab list scrolls horizontally, and a scroll
-  // container clips on *both* axes, so a menu absolutely positioned inside it
-  // is cut off at the bottom of the strip and never seen.
-  const [anchor, setAnchor] = useState<{ left: number; top: number } | null>(null);
+  const menu = useMenu();
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openedByHold = useRef(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  const reveal = () => {
-    const bounds = wrapRef.current?.getBoundingClientRect();
-    if (bounds) setAnchor({ left: bounds.left, top: bounds.bottom });
-    setOpen(true);
-  };
 
   const cancelHold = () => {
     if (holdTimer.current !== null) {
@@ -291,38 +360,20 @@ function NewTabButton({
 
   useEffect(() => cancelHold, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (event: MouseEvent) => {
-      const target = event.target as globalThis.Node;
-      if (wrapRef.current?.contains(target) || menuRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   return (
-    <div ref={wrapRef} className="relative flex shrink-0 items-stretch">
+    <div ref={menu.wrapRef} className="relative flex shrink-0 items-stretch">
       <button
         type="button"
         title="New tab — hold for other kinds"
         aria-label="New tab"
         aria-haspopup="menu"
-        aria-expanded={open}
+        aria-expanded={menu.open}
         onPointerDown={() => {
           openedByHold.current = false;
           cancelHold();
           holdTimer.current = setTimeout(() => {
             openedByHold.current = true;
-            reveal();
+            menu.reveal();
           }, LONG_PRESS_MS);
         }}
         onPointerUp={cancelHold}
@@ -331,7 +382,7 @@ function NewTabButton({
           event.preventDefault();
           cancelHold();
           openedByHold.current = true;
-          reveal();
+          menu.reveal();
         }}
         onClick={() => {
           // A press that became a hold already did something; the click that
@@ -347,34 +398,22 @@ function NewTabButton({
         <Plus className="h-3.5 w-3.5" />
       </button>
 
-      {open && anchor
-        ? createPortal(
-            <div
-              ref={menuRef}
-              role="menu"
-              style={{ left: anchor.left, top: anchor.top }}
-              className="fixed z-50 min-w-[168px] border border-hairline-strong bg-surface-2 py-1 shadow-lg"
-            >
-              {NEW_PANE_MENU.map((choice) => (
-                <button
-                  key={choice.action === "open" ? "open" : choice.kind}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setOpen(false);
-                    if (choice.action === "open") onOpenFile();
-                    else onNew(choice.kind);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] text-ink-2 hover:bg-surface-3 hover:text-ink-1"
-                >
-                  <choice.icon className="h-3.5 w-3.5 shrink-0 text-ink-3" />
-                  {choice.label}
-                </button>
-              ))}
-            </div>,
-            document.body,
-          )
-        : null}
+      {menu.anchor ? (
+        <Menu anchor={menu.anchor} menuRef={menu.menuRef}>
+          {NEW_PANE_MENU.map((choice) => (
+            <MenuItem
+              key={choice.action === "open" ? "open" : choice.kind}
+              icon={choice.icon}
+              label={choice.label}
+              onSelect={() => {
+                menu.close();
+                if (choice.action === "open") onOpenFile();
+                else onNew(choice.kind);
+              }}
+            />
+          ))}
+        </Menu>
+      ) : null}
     </div>
   );
 }

@@ -57,6 +57,8 @@ pub fn run() {
             store::session_save,
             store::session_load,
             store::session_dir,
+            store::settings_save,
+            store::settings_load,
             store::scrollback_read,
             store::scrollback_drop,
             store::scrollback_prune,

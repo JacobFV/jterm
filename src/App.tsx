@@ -17,12 +17,24 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { FileTree } from "@/components/shell/FileTree";
-import { PaneGrid } from "@/components/shell/PaneGrid";
-import { SettingsDialog } from "@/components/shell/SettingsDialog";
+import type { PaneMenuActions } from "@/components/shell/PaneMenu";
 import { ResizeHandles } from "@/components/shell/ResizeHandles";
 import { TabStrip } from "@/components/shell/TabStrip";
+import {
+  Workspace as PaneWorkspace,
+  type TabDrag,
+  type TabDropTarget,
+} from "@/components/shell/Workspace";
 import { readClipboard, writeClipboard } from "@/lib/clipboard";
-import { dialog, fs, history as historyApi, scrollback as scrollbackApi, session } from "@/lib/ipc";
+import {
+  SESSION_IMPORTED_EVENT,
+  dialog,
+  fs,
+  history as historyApi,
+  listen,
+  scrollback as scrollbackApi,
+  session,
+} from "@/lib/ipc";
 import { kindForPath } from "@/lib/filetypes";
 import { resolve, type ActionId } from "@/lib/keymap";
 import {
@@ -31,12 +43,15 @@ import {
   installFlushTriggers,
   markDirty,
 } from "@/lib/persist";
+import { openSettingsWindow } from "@/lib/settingsWindow";
 import { isTauri } from "@/lib/tauri";
 import { terminalHandle } from "@/lib/terminals";
+import { useSettings } from "@/lib/useSettings";
 import { disposePane } from "@/panes/registry";
 import { loadContent, onContentChange, snapshotContent } from "@/state/content";
 import { decode, encode } from "@/state/snapshot";
-import type { Direction } from "@/state/tree";
+import { getSettings, type FileOpenTarget } from "@/state/settings";
+import { type Direction, splitPlacement } from "@/state/tree";
 import {
   type PaneKind,
   type PaneState,
@@ -55,8 +70,8 @@ export function App() {
   const initialRef = useRef<Workspace>(emptyWorkspace());
   const [workspace, dispatch] = useReducer(reduce, initialRef.current);
   const [loaded, setLoaded] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarRoot, setSidebarRoot] = useState<string | null>(null);
+  const settings = useSettings();
 
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
@@ -79,6 +94,32 @@ export function App() {
       void historyApi.prune(live);
       setLoaded(true);
     })();
+  }, []);
+
+  /**
+   * A session imported from the settings window.
+   *
+   * The import itself happens over there — it is a file operation, and that is
+   * where the file controls are. But the workspace it replaces lives here, so
+   * the settings window announces the restored snapshot rather than trying to
+   * apply it, and this is the window that acts on it.
+   */
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let disposed = false;
+    void listen<string>(SESSION_IMPORTED_EVENT, (snapshot) => {
+      const restored = decode(snapshot);
+      if (!restored) return;
+      loadContent(restored.content);
+      dispatch({ type: "restore", workspace: restored.workspace });
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else stop = unlisten;
+    });
+    return () => {
+      disposed = true;
+      stop?.();
+    };
   }, []);
 
   /* ── Persistence ──────────────────────────────────────────────────── */
@@ -133,20 +174,47 @@ export function App() {
   /* ── Opening a file ───────────────────────────────────────────────── */
 
   /**
-   * Ask for a file and open it in whichever pane suits it.
+   * Open a file in whichever pane suits it, wherever the user asked files to go.
    *
-   * The dialog decides nothing about the kind of pane: the extension does, in
-   * `kindForPath`. That keeps "what opens a `.stl`" in one place, shared with
-   * every other route a file could arrive by.
+   * Two decisions, kept apart. *What* opens it is the extension's business, in
+   * `kindForPath`, so "what opens a `.stl`" is answered in one place for every
+   * route a file can arrive by. *Where* it opens is the user's, in settings: a
+   * tab of its own, or a split beside whatever is focused, on the side they
+   * chose. `target` overrides that for the one caller that means something
+   * specific — the tab strip's `Open file…`, which says "tab" on the label.
+   *
+   * Settings are read at the moment of the click rather than closed over, so
+   * this callback survives a preference change without being rebuilt.
    */
-  const openPath = useCallback((path: string) => {
-    dispatch({ type: "tab/open", kind: kindForPath(path), seed: { path } as Partial<PaneState> });
+  const openPath = useCallback((path: string, target?: FileOpenTarget) => {
+    const settings = getSettings();
+    const kind = kindForPath(path);
+    const seed = { path } as Partial<PaneState>;
+    const tab = activeTab(workspaceRef.current);
+
+    if ((target ?? settings.openFilesIn) === "pane" && tab) {
+      const { axis, before } = splitPlacement(settings.openPaneDirection);
+      dispatch({
+        type: "pane/split",
+        tabId: tab.id,
+        paneId: tab.focusedPaneId,
+        axis,
+        before,
+        kind,
+        seed,
+      });
+      return;
+    }
+    dispatch({ type: "tab/open", kind, seed });
   }, []);
 
-  const openFile = useCallback(async () => {
-    const path = await dialog.open();
-    if (path) openPath(path);
-  }, [openPath]);
+  const openFile = useCallback(
+    async (target?: FileOpenTarget) => {
+      const path = await dialog.open();
+      if (path) openPath(path, target);
+    },
+    [openPath],
+  );
 
   /* ── Closing things ───────────────────────────────────────────────── */
 
@@ -188,6 +256,91 @@ export function App() {
     },
     [confirmDiscard],
   );
+
+  /* ── Changing what a pane is ──────────────────────────────────────── */
+
+  /**
+   * Swap a pane for a different kind of pane, in place.
+   *
+   * A replacement is a close and an open at once, so it owes the same duties as
+   * closing: ask before an unsaved buffer goes, and hand back the shell, the
+   * scrollback file and the draft that the pane owned. The reducer mints a new
+   * id for the pane that arrives, which is what makes disposing of the old one
+   * safe to do first.
+   */
+  const replacePane = useCallback(
+    async (tabId: string, paneId: string, kind: PaneKind, seed?: Partial<PaneState>) => {
+      const tab = workspaceRef.current.tabs.find((candidate) => candidate.id === tabId);
+      const pane = tab?.panes[paneId];
+      if (!pane) return;
+      // Picking the kind a pane already is means "leave it alone", not "start
+      // it again". The menu lists every kind including the current one, and a
+      // shell that is halfway through something is far too expensive to lose to
+      // a slip of the mouse. A file always goes through, since choosing one is
+      // a request for that file.
+      if (pane.kind === kind && seed === undefined) return;
+      if (!(await confirmDiscard([pane]))) return;
+      disposePane(pane);
+      dispatch({ type: "pane/replace", tabId, paneId, kind, seed });
+    },
+    [confirmDiscard],
+  );
+
+  const paneMenu = useMemo<PaneMenuActions>(
+    () => ({
+      onReplace: (tabId, paneId, kind) => void replacePane(tabId, paneId, kind),
+      onReplaceWithFile: (tabId, paneId) =>
+        void dialog.open().then((path) => {
+          if (path) {
+            void replacePane(tabId, paneId, kindForPath(path), { path } as Partial<PaneState>);
+          }
+        }),
+      // Nothing is destroyed by this one, so it needs no confirmation and no
+      // disposal — see `tab/absorb`.
+      onAbsorbTab: (tabId, paneId, sourceTabId) =>
+        dispatch({
+          type: "tab/absorb",
+          sourceTabId,
+          targetTabId: tabId,
+          targetPaneId: paneId,
+        }),
+    }),
+    [replacePane],
+  );
+
+  /* ── Dragging a tab into the workspace ────────────────────────────── */
+
+  /**
+   * A tab dragged below the strip becomes a split.
+   *
+   * The work is split three ways because no one part knows enough on its own:
+   * the strip owns the pointer, the workspace owns the pane rectangles and so
+   * is the only thing that can say *where* a drop would land, and only this
+   * component can dispatch. So the strip reports where the pointer is, the
+   * workspace reports back what that means, and the release turns the latest
+   * answer into an action.
+   */
+  const [tabDrag, setTabDrag] = useState<TabDrag | null>(null);
+  const tabDropRef = useRef<TabDropTarget | null>(null);
+
+  const noteTabDropTarget = useCallback((target: TabDropTarget | null) => {
+    tabDropRef.current = target;
+  }, []);
+
+  const dropTabInWorkspace = useCallback((sourceTabId: string): boolean => {
+    const target = tabDropRef.current;
+    // Released over nothing in particular — the sidebar, the gap, its own
+    // workspace. The tab stays a tab.
+    if (target === null) return false;
+    dispatch({
+      type: "tab/graft",
+      sourceTabId,
+      targetTabId: target.tabId,
+      targetPaneId: target.paneId,
+      edge: target.edge,
+    });
+    return true;
+  }, []);
 
   /* ── Closing the window ───────────────────────────────────────────── */
 
@@ -322,6 +475,10 @@ export function App() {
           void toggleFullscreen();
           return;
 
+        case "window.settings":
+          void openSettingsWindow();
+          return;
+
         case "terminal.eof":
           // The way back to end-of-file, which splitting on Mod+D took away.
           if (paneId) terminalHandle(paneId)?.send("\x04");
@@ -393,16 +550,24 @@ export function App() {
         onSelect={(tabId) => dispatch({ type: "tab/select", tabId })}
         onClose={(tabId) => void closeTab(tabId)}
         onNew={(kind) => dispatch({ type: "tab/new", kind })}
-        onOpenFile={() => void openFile()}
+        // The label says "Open file…" under a new-tab button, so it makes a tab
+        // whatever the preference says.
+        onOpenFile={() => void openFile("tab")}
+        paneMenu={paneMenu}
         sidebarOpen={workspace.sidebarOpen}
         onToggleSidebar={() => dispatch({ type: "ui/sidebar" })}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => void openSettingsWindow()}
         onReorder={(tabId, toIndex) => dispatch({ type: "tab/reorder", tabId, toIndex })}
+        onDragOverWorkspace={setTabDrag}
+        onDropInWorkspace={dropTabInWorkspace}
       />
 
       <div className="flex min-h-0 flex-1">
         {workspace.sidebarOpen ? (
-          <div className="w-[220px] shrink-0 border-r border-border">
+          <div
+            className="shrink-0 border-r border-border"
+            style={{ width: settings.sidebarWidth }}
+          >
             {sidebarRoot ? (
               <FileTree
                 root={sidebarRoot}
@@ -414,46 +579,19 @@ export function App() {
         ) : null}
 
         <div className="relative min-h-0 flex-1">
-        {loaded
-          ? tabs.map((tab) => {
-              const isActive = tab.id === workspace.activeTabId;
-              return (
-                <div
-                  key={tab.id}
-                  className="absolute inset-0"
-                  style={{
-                    // Hidden, not unmounted, and not `display: none` — see the
-                    // note at the top of `PaneGrid`.
-                    visibility: isActive ? "visible" : "hidden",
-                    pointerEvents: isActive ? "auto" : "none",
-                    zIndex: isActive ? 1 : 0,
-                  }}
-                >
-                  <PaneGrid
-                    tab={tab}
-                    active={isActive}
-                    dispatch={dispatch}
-                    onClosePane={(paneId) => void closePane(tab.id, paneId)}
-                  />
-                </div>
-              );
-            })
-          : null}
+          {loaded ? (
+            <PaneWorkspace
+              tabs={tabs}
+              activeTabId={workspace.activeTabId}
+              dispatch={dispatch}
+              onClosePane={(tabId, paneId) => void closePane(tabId, paneId)}
+              paneMenu={paneMenu}
+              tabDrag={tabDrag}
+              onTabDropTarget={noteTabDropTarget}
+            />
+          ) : null}
         </div>
       </div>
-
-      {settingsOpen ? (
-        <SettingsDialog
-          onClose={() => setSettingsOpen(false)}
-          onImported={(snapshot) => {
-            const restored = decode(snapshot);
-            if (!restored) return;
-            loadContent(restored.content);
-            dispatch({ type: "restore", workspace: restored.workspace });
-            setSettingsOpen(false);
-          }}
-        />
-      ) : null}
 
       <ResizeHandles />
     </div>

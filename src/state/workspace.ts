@@ -20,6 +20,7 @@ import {
   type Node,
   clampRatio,
   countPanes,
+  graftTree,
   hasPane,
   layout,
   leaf,
@@ -27,9 +28,11 @@ import {
   neighbor,
   paneIds,
   removePane,
+  repointPane,
   resizeTarget,
   setRatio as setRatioInTree,
   splitPane as splitInTree,
+  substituteTree,
 } from "./tree";
 
 export type PaneKind = "terminal" | "notepad" | "browser" | "image" | "media" | "model";
@@ -214,7 +217,41 @@ export type Action =
   | { type: "tab/selectIndex"; index: number }
   | { type: "tab/reorder"; tabId: string; toIndex: number }
   | { type: "tab/rename"; tabId: string; title: string | undefined }
-  | { type: "pane/split"; tabId: string; paneId: string; axis: Axis; kind: PaneKind }
+  | {
+      type: "tab/graft";
+      sourceTabId: string;
+      targetTabId: string;
+      targetPaneId: string;
+      /** Which side of the target pane the tab lands on. Never `center`: a tab
+       *  has no single pane to swap with. */
+      edge: Exclude<DropEdge, "center">;
+    }
+  | {
+      /** A whole tab moved into one pane's slot, the pane leaving as a tab. */
+      type: "tab/absorb";
+      sourceTabId: string;
+      targetTabId: string;
+      targetPaneId: string;
+    }
+  | {
+      type: "pane/split";
+      tabId: string;
+      paneId: string;
+      axis: Axis;
+      kind: PaneKind;
+      /** Put the new pane above or to the left, rather than after. */
+      before?: boolean;
+      /** What the new pane starts as — a file's path, a URL. */
+      seed?: Partial<PaneState>;
+    }
+  | {
+      /** One pane traded for a different kind of pane, in place. */
+      type: "pane/replace";
+      tabId: string;
+      paneId: string;
+      kind: PaneKind;
+      seed?: Partial<PaneState>;
+    }
   | { type: "pane/close"; tabId: string; paneId: string }
   | { type: "pane/focus"; tabId: string; paneId: string }
   | { type: "pane/focusDirection"; tabId: string; direction: Direction }
@@ -297,20 +334,151 @@ export function reduce(state: Workspace, action: Action): Workspace {
         title: action.title?.trim() ? action.title.trim() : undefined,
       }));
 
+    /**
+     * A tab dropped into another tab's workspace.
+     *
+     * The whole tab arrives, not its panes one by one: the source tab's split
+     * tree is grafted in beside the pane it was dropped on, so a tab that was
+     * three panes in an L shape is still three panes in an L shape, now filling
+     * half of somewhere else. Flattening them into siblings would be easier and
+     * would throw away the arrangement the user had already made.
+     *
+     * The source tab then ceases to exist, which is what makes this a move
+     * rather than a copy. Its panes keep their ids, so nothing about the shells
+     * behind them changes — see `Workspace` for why that is more than a
+     * bookkeeping detail.
+     */
+    case "tab/graft": {
+      // A tab cannot be dropped into itself: the graft would need the tree it
+      // is being inserted into as its own subtree.
+      if (action.sourceTabId === action.targetTabId) return state;
+      const source = state.tabs.find((tab) => tab.id === action.sourceTabId);
+      const target = state.tabs.find((tab) => tab.id === action.targetTabId);
+      if (!source || !target) return state;
+      if (!hasPane(target.root, action.targetPaneId)) return state;
+
+      const axis: Axis = action.edge === "left" || action.edge === "right" ? "x" : "y";
+      const before = action.edge === "left" || action.edge === "top";
+      const merged: Tab = {
+        ...target,
+        root: graftTree(target.root, action.targetPaneId, axis, source.root, newId(), before),
+        // Pane ids are minted, never reused, so the two maps cannot collide.
+        panes: { ...target.panes, ...source.panes },
+        // Focus follows what was dragged, which is the thing being looked at.
+        focusedPaneId: source.focusedPaneId,
+        // Both tabs' zooms are dropped: the drop is a request to see the two
+        // sets of panes together, and a zoom is the opposite of that.
+        zoomedPaneId: null,
+      };
+
+      return {
+        ...state,
+        tabs: state.tabs
+          .filter((tab) => tab.id !== action.sourceTabId)
+          .map((tab) => (tab.id === action.targetTabId ? merged : tab)),
+        activeTabId: action.targetTabId,
+      };
+    }
+
+    /**
+     * Another tab's panes, moved into one pane's slot.
+     *
+     * The exchange is deliberately even: the source tab's tree takes the pane's
+     * place, and the pane it displaced leaves as a tab of its own, standing
+     * where the source tab stood. Nothing is created and nothing is destroyed,
+     * so choosing the wrong thing from a menu costs a second trip rather than a
+     * shell that was in the middle of something. Every pane keeps its id, which
+     * is what stops any of this from reaching the processes behind them.
+     */
+    case "tab/absorb": {
+      // A tab cannot be moved into one of its own panes: the tree would have to
+      // contain itself.
+      if (action.sourceTabId === action.targetTabId) return state;
+      const source = state.tabs.find((tab) => tab.id === action.sourceTabId);
+      const target = state.tabs.find((tab) => tab.id === action.targetTabId);
+      if (!source || !target) return state;
+      const displaced = target.panes[action.targetPaneId];
+      if (!displaced || !hasPane(target.root, action.targetPaneId)) return state;
+
+      const merged: Tab = {
+        ...target,
+        root: substituteTree(target.root, action.targetPaneId, source.root),
+        panes: { ...omit(target.panes, action.targetPaneId), ...source.panes },
+        focusedPaneId: source.focusedPaneId,
+        // The move is a request to see the arrangement it makes, and a zoom is
+        // the opposite of that.
+        zoomedPaneId: null,
+      };
+      const evicted: Tab = {
+        id: newId(),
+        root: leaf(newId(), displaced.id),
+        panes: { [displaced.id]: displaced },
+        focusedPaneId: displaced.id,
+        zoomedPaneId: null,
+      };
+
+      return {
+        ...state,
+        // Written in place rather than removed and appended, so the strip does
+        // not reshuffle around a change that happened somewhere else.
+        tabs: state.tabs.map((tab) =>
+          tab.id === action.targetTabId
+            ? merged
+            : tab.id === action.sourceTabId
+              ? evicted
+              : tab,
+        ),
+        activeTabId: action.targetTabId,
+      };
+    }
+
     case "pane/split":
       return mapTab(state, action.tabId, (tab) => {
         if (!hasPane(tab.root, action.paneId)) return tab;
-        const pane = newPane(action.kind, inheritFrom(tab.panes[action.paneId], action.kind));
+        const pane = newPane(action.kind, {
+          ...inheritFrom(tab.panes[action.paneId], action.kind),
+          ...action.seed,
+        });
         return {
           ...tab,
-          root: splitInTree(tab.root, action.paneId, action.axis, pane.id, {
-            split: newId(),
-            leaf: newId(),
-          }),
+          root: splitInTree(
+            tab.root,
+            action.paneId,
+            action.axis,
+            pane.id,
+            { split: newId(), leaf: newId() },
+            action.before ?? false,
+          ),
           panes: { ...tab.panes, [pane.id]: pane },
           focusedPaneId: pane.id,
           // A split is a request to see both halves, so it always unzooms.
           zoomedPaneId: null,
+        };
+      });
+
+    /**
+     * One pane traded for a different kind of pane, in place.
+     *
+     * The replacement gets a new id rather than inheriting the old one. Ids are
+     * how everything outside the reducer finds a pane's belongings — its pty,
+     * its scrollback file, its draft text — so reusing one would hand a fresh
+     * notepad the previous terminal's log. Releasing those belongings is the
+     * caller's job, for the same reason it is in `pane/close`.
+     */
+    case "pane/replace":
+      return mapTab(state, action.tabId, (tab) => {
+        if (!hasPane(tab.root, action.paneId)) return tab;
+        const pane = newPane(action.kind, action.seed);
+        return {
+          ...tab,
+          root: repointPane(tab.root, action.paneId, pane.id),
+          panes: { ...omit(tab.panes, action.paneId), [pane.id]: pane },
+          focusedPaneId:
+            tab.focusedPaneId === action.paneId ? pane.id : tab.focusedPaneId,
+          // A zoomed pane that is replaced stays zoomed: the new pane is filling
+          // the same slot, and dropping the zoom would be an unasked-for change
+          // of layout on top of the one that was asked for.
+          zoomedPaneId: tab.zoomedPaneId === action.paneId ? pane.id : tab.zoomedPaneId,
         };
       });
 
@@ -430,6 +598,12 @@ function inheritFrom(source: PaneState | undefined, kind: PaneKind): Partial<Pan
     return { cwd: source.cwd } as Partial<PaneState>;
   }
   return {};
+}
+
+function omit(panes: Record<string, PaneState>, paneId: string): Record<string, PaneState> {
+  const next = { ...panes };
+  delete next[paneId];
+  return next;
 }
 
 function mapTab(state: Workspace, tabId: string, change: (tab: Tab) => Tab): Workspace {

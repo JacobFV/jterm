@@ -1,7 +1,14 @@
 /**
- * Every keyboard shortcut, in one table.
+ * Every keyboard shortcut, in one table — and the user's changes to it.
  *
  * `Mod` is Command on macOS and Control everywhere else.
+ *
+ * The table below is the *default*. Settings may override any row, and an
+ * override of `""` means the action is deliberately unbound. Overrides arrive
+ * through `setKeyOverrides` rather than by importing the settings store, which
+ * keeps this module free of any dependency on where a preference is kept — it
+ * is a lookup table, and the one thing a lookup table must not do is wait for
+ * a disk read before it can answer.
  *
  * ── A note on Mod+D ──────────────────────────────────────────────────────
  * Splitting on `Mod+D` is borrowed from iTerm2, where it is `Cmd+D` and costs
@@ -10,8 +17,9 @@
  * or leave a Python REPL. Binding it here takes that away.
  *
  * It is bound anyway, because it was asked for, and the loss is made good
- * rather than ignored: `Mod+Alt+D` sends a literal EOF to the shell. If the
- * trade is not worth it, `SPLIT_RIGHT` below is the one line to change.
+ * rather than ignored: `Mod+Alt+D` sends a literal EOF to the shell. Anyone who
+ * disagrees with the trade can now simply rebind it in Settings, which is a
+ * better answer than the one this comment used to give.
  */
 
 import { isMacOS } from "./platform";
@@ -34,15 +42,20 @@ export type ActionId =
   | "pane.growUp"
   | "pane.growDown"
   | "window.fullscreen"
+  | "window.settings"
   | "terminal.eof"
   | "edit.copy"
   | "edit.paste";
 
-interface Spec {
+/** Headings the shortcut list is grouped under, in the order they appear. */
+export type ActionGroup = "Tabs" | "Panes" | "Window" | "Terminal";
+
+export interface Spec {
   id: ActionId;
   /** `Mod`, `Shift`, `Alt`, `Ctrl` and a key name, joined by `+`. */
   keys: string;
   label: string;
+  group: ActionGroup;
 }
 
 const SPLIT_RIGHT = "Mod+D";
@@ -57,31 +70,47 @@ const COPY = isMacOS() ? "Mod+C" : "Mod+Shift+C";
 const PASTE = isMacOS() ? "Mod+V" : "Mod+Shift+V";
 
 export const BINDINGS: Spec[] = [
-  { id: "tab.new", keys: "Mod+T", label: "New tab" },
-  { id: "tab.next", keys: "Ctrl+Tab", label: "Next tab" },
-  { id: "tab.prev", keys: "Ctrl+Shift+Tab", label: "Previous tab" },
+  { id: "tab.new", keys: "Mod+T", label: "New tab", group: "Tabs" },
+  { id: "tab.next", keys: "Ctrl+Tab", label: "Next tab", group: "Tabs" },
+  { id: "tab.prev", keys: "Ctrl+Shift+Tab", label: "Previous tab", group: "Tabs" },
 
-  { id: "pane.splitRight", keys: SPLIT_RIGHT, label: "Split right" },
-  { id: "pane.splitDown", keys: SPLIT_DOWN, label: "Split down" },
-  { id: "pane.close", keys: "Mod+Shift+W", label: "Close pane" },
-  { id: "pane.zoom", keys: "Mod+Enter", label: "Zoom pane" },
+  { id: "pane.splitRight", keys: SPLIT_RIGHT, label: "Split right", group: "Panes" },
+  { id: "pane.splitDown", keys: SPLIT_DOWN, label: "Split down", group: "Panes" },
+  { id: "pane.close", keys: "Mod+Shift+W", label: "Close pane", group: "Panes" },
+  { id: "pane.zoom", keys: "Mod+Enter", label: "Zoom pane", group: "Panes" },
 
-  { id: "pane.focusLeft", keys: "Mod+Alt+ArrowLeft", label: "Focus pane left" },
-  { id: "pane.focusRight", keys: "Mod+Alt+ArrowRight", label: "Focus pane right" },
-  { id: "pane.focusUp", keys: "Mod+Alt+ArrowUp", label: "Focus pane up" },
-  { id: "pane.focusDown", keys: "Mod+Alt+ArrowDown", label: "Focus pane down" },
+  { id: "pane.focusLeft", keys: "Mod+Alt+ArrowLeft", label: "Focus pane left", group: "Panes" },
+  { id: "pane.focusRight", keys: "Mod+Alt+ArrowRight", label: "Focus pane right", group: "Panes" },
+  { id: "pane.focusUp", keys: "Mod+Alt+ArrowUp", label: "Focus pane up", group: "Panes" },
+  { id: "pane.focusDown", keys: "Mod+Alt+ArrowDown", label: "Focus pane down", group: "Panes" },
 
-  { id: "pane.growLeft", keys: "Mod+Shift+ArrowLeft", label: "Grow pane left" },
-  { id: "pane.growRight", keys: "Mod+Shift+ArrowRight", label: "Grow pane right" },
-  { id: "pane.growUp", keys: "Mod+Shift+ArrowUp", label: "Grow pane up" },
-  { id: "pane.growDown", keys: "Mod+Shift+ArrowDown", label: "Grow pane down" },
+  { id: "pane.growLeft", keys: "Mod+Shift+ArrowLeft", label: "Grow pane left", group: "Panes" },
+  { id: "pane.growRight", keys: "Mod+Shift+ArrowRight", label: "Grow pane right", group: "Panes" },
+  { id: "pane.growUp", keys: "Mod+Shift+ArrowUp", label: "Grow pane up", group: "Panes" },
+  { id: "pane.growDown", keys: "Mod+Shift+ArrowDown", label: "Grow pane down", group: "Panes" },
 
-  { id: "window.fullscreen", keys: "F11", label: "Full screen" },
-  { id: "terminal.eof", keys: "Mod+Alt+D", label: "Send EOF to the shell" },
+  { id: "window.fullscreen", keys: "F11", label: "Full screen", group: "Window" },
+  { id: "window.settings", keys: "Mod+,", label: "Settings", group: "Window" },
 
-  { id: "edit.copy", keys: COPY, label: "Copy" },
-  { id: "edit.paste", keys: PASTE, label: "Paste" },
+  { id: "terminal.eof", keys: "Mod+Alt+D", label: "Send EOF to the shell", group: "Terminal" },
+  { id: "edit.copy", keys: COPY, label: "Copy", group: "Terminal" },
+  { id: "edit.paste", keys: PASTE, label: "Paste", group: "Terminal" },
 ];
+
+export const ACTION_IDS: ActionId[] = BINDINGS.map((spec) => spec.id);
+
+/**
+ * Shortcuts the settings list shows but does not let you edit.
+ *
+ * `Mod+1` … `Mod+9` is one action taking an argument rather than nine actions,
+ * so it has no single chord to rebind — but leaving it out of the list
+ * altogether would make the list look wrong to anyone who uses it.
+ */
+export const FIXED_BINDINGS: { keys: string; label: string; group: ActionGroup }[] = [
+  { keys: "Mod+1…9", label: "Select tab by number", group: "Tabs" },
+];
+
+/* ── Overrides ───────────────────────────────────────────────────────────── */
 
 interface Chord {
   key: string;
@@ -91,11 +120,19 @@ interface Chord {
   alt: boolean;
 }
 
+/**
+ * The key half of a chord, in the one spelling everything else compares
+ * against. `event.key` for the space bar is a single space, which would
+ * otherwise be indistinguishable from the separator in a stored binding.
+ */
+function normalizeKey(key: string): string {
+  return key === " " ? "space" : key.toLowerCase();
+}
+
 function parse(keys: string): Chord {
   const parts = keys.split("+");
-  const key = parts[parts.length - 1].toLowerCase();
   return {
-    key,
+    key: normalizeKey(parts[parts.length - 1]),
     mod: parts.includes("Mod"),
     ctrl: parts.includes("Ctrl"),
     shift: parts.includes("Shift"),
@@ -103,7 +140,48 @@ function parse(keys: string): Chord {
   };
 }
 
-const PARSED = BINDINGS.map((spec) => ({ ...spec, chord: parse(spec.keys) }));
+interface Active {
+  id: ActionId;
+  keys: string;
+  /** `null` when the action has been deliberately unbound. */
+  chord: Chord | null;
+}
+
+let overrides: Partial<Record<ActionId, string>> = {};
+let active: Active[] = compile();
+
+function compile(): Active[] {
+  return BINDINGS.map((spec) => {
+    const keys = overrides[spec.id] ?? spec.keys;
+    return { id: spec.id, keys, chord: keys ? parse(keys) : null };
+  });
+}
+
+/**
+ * Replace the user's bindings wholesale.
+ *
+ * Wholesale rather than one at a time because that is the shape the settings
+ * file has: anything absent from the map is back to its default, which is also
+ * how a "reset" is expressed — by removing the key rather than storing the
+ * default under it.
+ */
+export function setKeyOverrides(next: Partial<Record<ActionId, string>>): void {
+  overrides = next;
+  active = compile();
+}
+
+/** The chord in force for an action: the user's if they set one, else ours. */
+export function keysFor(id: ActionId): string {
+  const override = overrides[id];
+  if (override !== undefined) return override;
+  return BINDINGS.find((binding) => binding.id === id)?.keys ?? "";
+}
+
+export function defaultKeysFor(id: ActionId): string {
+  return BINDINGS.find((binding) => binding.id === id)?.keys ?? "";
+}
+
+/* ── Matching ────────────────────────────────────────────────────────────── */
 
 function matches(chord: Chord, event: KeyboardEvent): boolean {
   const mod = isMacOS() ? event.metaKey : event.ctrlKey;
@@ -117,7 +195,7 @@ function matches(chord: Chord, event: KeyboardEvent): boolean {
   if (chord.shift !== event.shiftKey) return false;
   if (chord.alt !== event.altKey) return false;
 
-  const key = event.key.toLowerCase();
+  const key = normalizeKey(event.key);
   // `event.code` is the fallback for layouts where a modifier changes `key`.
   return key === chord.key || event.code.toLowerCase() === `key${chord.key}`;
 }
@@ -134,14 +212,77 @@ export function resolve(event: KeyboardEvent): { id: ActionId; index?: number } 
     return { id: "tab.byIndex", index: Number(event.key) - 1 };
   }
 
-  for (const binding of PARSED) {
-    if (matches(binding.chord, event)) return { id: binding.id };
+  for (const binding of active) {
+    if (binding.chord !== null && matches(binding.chord, event)) return { id: binding.id };
   }
   return null;
 }
 
+/* ── Recording a new one ─────────────────────────────────────────────────── */
+
+/**
+ * The chord a key press describes, written the way this file stores them.
+ *
+ * Returns `null` for a press that cannot stand on its own: a bare modifier,
+ * which arrives while the user is still reaching for the real key, and `+`,
+ * which is the separator and so cannot also be a key name.
+ */
+export function chordFromEvent(event: KeyboardEvent): string | null {
+  const key = event.key;
+  if (key === "Control" || key === "Shift" || key === "Alt" || key === "Meta") return null;
+  if (key === "+") return null;
+
+  const parts: string[] = [];
+  if (isMacOS()) {
+    if (event.metaKey) parts.push("Mod");
+    if (event.ctrlKey) parts.push("Ctrl");
+  } else if (event.ctrlKey) {
+    parts.push("Mod");
+  }
+  if (event.shiftKey) parts.push("Shift");
+  if (event.altKey) parts.push("Alt");
+
+  parts.push(key === " " ? "Space" : key.length === 1 ? key.toUpperCase() : key);
+  return parts.join("+");
+}
+
+/** Whether two written chords would be triggered by the same key press. */
+export function sameChord(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const first = parse(a);
+  const second = parse(b);
+  return (
+    first.key === second.key &&
+    first.mod === second.mod &&
+    first.ctrl === second.ctrl &&
+    first.shift === second.shift &&
+    first.alt === second.alt
+  );
+}
+
+/**
+ * The action `keys` is already taken by, if any.
+ *
+ * Two actions on one chord is not an error the app can resolve at the moment
+ * the key is pressed — `resolve` would simply pick whichever came first in the
+ * table, which is arbitrary. So it is resolved at the moment the binding is
+ * made instead, which is the only point where the user is present to be told.
+ */
+export function conflictingAction(keys: string, except: ActionId): ActionId | null {
+  for (const spec of BINDINGS) {
+    if (spec.id === except) continue;
+    if (sameChord(keysFor(spec.id), keys)) return spec.id;
+  }
+  return null;
+}
+
+export function labelFor(id: ActionId): string {
+  return BINDINGS.find((binding) => binding.id === id)?.label ?? id;
+}
+
 /** Human-readable form for menus and the shortcut sheet. */
 export function displayKeys(keys: string): string {
+  if (!keys) return "—";
   const glyphs: Record<string, string> = isMacOS()
     ? { Mod: "⌘", Shift: "⇧", Alt: "⌥", Ctrl: "⌃" }
     : { Mod: "Ctrl", Shift: "Shift", Alt: "Alt", Ctrl: "Ctrl" };
@@ -152,13 +293,11 @@ export function displayKeys(keys: string): string {
     ArrowDown: "↓",
     Enter: "↵",
     Tab: "⇥",
+    Escape: "Esc",
+    Space: "Space",
   };
   return keys
     .split("+")
-    .map((part) => glyphs[part] ?? names[part] ?? part.toUpperCase())
+    .map((part) => glyphs[part] ?? names[part] ?? (part.length === 1 ? part.toUpperCase() : part))
     .join(isMacOS() ? "" : "+");
-}
-
-export function keysFor(id: ActionId): string {
-  return BINDINGS.find((binding) => binding.id === id)?.keys ?? "";
 }

@@ -49,8 +49,26 @@
     --head-height: 34px;
     --radius: 2px;
 
-    --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Mono", "Consolas",
+    /* Named separately from `--font-mono` so a family chosen in Settings can
+       be put *in front of* the built-in stack rather than replacing it — a
+       misspelt font should cost you the font, not the glyphs. */
+    --font-mono-default: "JetBrains Mono", "SF Mono", "Cascadia Mono", "Consolas",
       "DejaVu Sans Mono", monospace;
+    --font-mono: var(--font-mono-default);
+
+    /* The interface's type scale. Every size in the chrome is computed from
+       `--ui-font-size` rather than inherited from it, so a size set here is the
+       size on screen and nothing compounds down the tree. `lib/appearance.ts`
+       overwrites all of these together; the values below are what the first
+       paint uses, before the settings file has been read. */
+    --ui-font-size: 12.5px;
+    --fs-9: 9px;
+    --fs-10: 10px;
+    --fs-105: 10.5px;
+    --fs-11: 11px;
+    --fs-12: 12px;
+    --fs-125: 12.5px;
+    --fs-13: 13px;
 
     /* ── ANSI palette ──────────────────────────────────────────────────
        Muted and low-chroma on purpose: a terminal that shouts in eight
@@ -130,7 +148,7 @@
 
   body {
     @apply bg-surface-0 text-ink-1 font-sans antialiased;
-    font-size: 12.5px;
+    font-size: var(--ui-font-size);
     line-height: 1.45;
   }
 }
@@ -163,7 +181,7 @@ body,
    signal, and free. */
 .pane-title {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   line-height: 1;
   letter-spacing: 0.18em;
   text-transform: uppercase;

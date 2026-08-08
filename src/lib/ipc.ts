@@ -68,6 +68,16 @@ export const session = {
   dir: (): Promise<string> => call("session_dir", {}, ""),
 };
 
+/**
+ * The preferences file, which is not the session file — see `state/settings.ts`
+ * for why the two are kept apart. Saving also announces the change to every
+ * open window; the backend does that, not this side.
+ */
+export const settings = {
+  save: (json: string) => call("settings_save", { json }, undefined),
+  load: (): Promise<string | null> => call("settings_load", {}, null),
+};
+
 export const scrollback = {
   read: (id: string): Promise<string> => call("scrollback_read", { id }, ""),
   drop: (id: string) => call("scrollback_drop", { id }, undefined),
@@ -239,6 +249,23 @@ export async function listen<T>(
   const { listen: tauriListen } = await import("@tauri-apps/api/event");
   return tauriListen<T>(event, (message) => handler(message.payload));
 }
+
+/** Say something to every window, this one included. */
+export async function emitAll(event: string, payload: unknown): Promise<void> {
+  if (!isTauri()) return;
+  const { emit } = await import("@tauri-apps/api/event");
+  await emit(event, payload);
+}
+
+/** Raised by the backend after the settings file has been rewritten. */
+export const SETTINGS_CHANGED_EVENT = "settings://changed";
+
+/**
+ * Raised by the settings window after an import, carrying the restored
+ * snapshot. The main window is the one holding the workspace, so it is the one
+ * that has to act on it.
+ */
+export const SESSION_IMPORTED_EVENT = "session://imported";
 
 export interface PtyData {
   id: string;

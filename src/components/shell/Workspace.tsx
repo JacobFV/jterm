@@ -1,8 +1,9 @@
 /**
- * The panes inside one tab.
+ * Every pane in the window, in one flat list.
  *
- * The single most important thing here is what is *not* happening: the panes
- * are not rendered inside the split tree. They are rendered from a flat list,
+ * The single most important thing here is what is *not* happening: panes are
+ * not rendered inside the split tree, and they are not rendered inside their
+ * tab either. They are rendered from one flat list covering every tab at once,
  * always in the same order, absolutely positioned from rectangles the tree is
  * asked to compute. Rendering the tree directly would be the obvious approach
  * and would be a serious bug — moving a pane would move its component in the
@@ -10,7 +11,16 @@
  * destroyed every time someone dragged a pane. This way a rearrangement is a
  * change of `style`, and the process behind the pane never notices.
  *
- * The same reasoning drives two smaller decisions:
+ * Flattening *across* tabs is what earns the second half of that. A tab dropped
+ * into the workspace hands its panes to another tab, and if each tab owned a
+ * container those panes would change parents — which React implements by
+ * tearing the old one down and building a new one. The shell would survive
+ * (nothing here kills it) but the terminal in front of it would not: the
+ * scrollback on screen would be gone, and `pty_spawn` would refuse the second
+ * spawn into a live id, leaving a pane wired to nothing. With one list, moving
+ * a pane between tabs changes which rectangle it is given. That is all.
+ *
+ * Two smaller decisions follow from the same reasoning:
  *
  *   - Panes in inactive tabs keep their rectangles and are hidden with
  *     `visibility`, not `display: none`. A `display: none` pane measures 0×0,
@@ -21,13 +31,14 @@
  *     unchanged.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GripVertical, Minimize2, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { paneKind } from "@/panes/registry";
 import { type Action, type Tab, paneLabel } from "@/state/workspace";
-import { type DropEdge, type Rect, countPanes, layout } from "@/state/tree";
+import { type DropEdge, type Layout, type Rect, countPanes, layout } from "@/state/tree";
+import { PaneMenu, type PaneMenuActions } from "./PaneMenu";
 
 /** Height of the strip above each pane. Only drawn when a tab has splits. */
 const HEADER_PX = 22;
@@ -36,67 +47,152 @@ const DIVIDER_PX = 9;
 /**
  * How much of a pane's width or height counts as its edge for dropping.
  *
- * A drop in the middle swaps the two panes instead of re-splitting, so this is
- * also the size of the "swap" target: large enough to hit deliberately, small
- * enough that aiming at an edge is not accidentally a swap.
+ * A pane dropped in the middle swaps with the pane under it instead of
+ * re-splitting, so this is also the size of the "swap" target: large enough to
+ * hit deliberately, small enough that aiming at an edge is not accidentally a
+ * swap. A *tab* dropped in the middle has nothing to swap with, so for that
+ * gesture the whole pane is edges.
  */
 const EDGE_ZONE = 0.28;
 
-interface DragState {
+interface PaneDrag {
   paneId: string;
   target: { paneId: string; edge: DropEdge } | null;
 }
 
-interface PaneGridProps {
-  tab: Tab;
-  /** Whether this tab is the one on screen. */
-  active: boolean;
+/** A tab being dragged out of the strip and over the workspace. */
+export interface TabDrag {
+  tabId: string;
+  x: number;
+  y: number;
+}
+
+/** Where a dragged tab would be grafted in. */
+export interface TabDropTarget {
+  tabId: string;
+  paneId: string;
+  edge: Exclude<DropEdge, "center">;
+}
+
+interface WorkspaceProps {
+  tabs: Tab[];
+  activeTabId: string | null;
   dispatch: (action: Action) => void;
   /** Closing may need to ask about unsaved work, which is the app's business
    *  rather than the layout's. */
-  onClosePane: (paneId: string) => void;
+  onClosePane: (tabId: string, paneId: string) => void;
+  /** What a pane's kind icon offers. Replacing a pane closes the old one, which
+   *  is the app's business for the same reason closing is. */
+  paneMenu: PaneMenuActions;
+  tabDrag: TabDrag | null;
+  /** Reported upwards because the release happens in the tab strip, which
+   *  cannot work out where in here the pointer was. */
+  onTabDropTarget: (target: TabDropTarget | null) => void;
 }
 
-export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) {
-  const hostRef = useRef<HTMLDivElement | null>(null);
-  const [drag, setDrag] = useState<DragState | null>(null);
-  const [dividerNode, setDividerNode] = useState<string | null>(null);
+interface Placement {
+  tab: Tab;
+  rect: Rect;
+}
 
-  const { panes, dividers } = layout(tab.root);
-  const split = countPanes(tab.root) > 1;
-  const zoomed = tab.zoomedPaneId;
+export function Workspace({
+  tabs,
+  activeTabId,
+  dispatch,
+  onClosePane,
+  paneMenu,
+  tabDrag,
+  onTabDropTarget,
+}: WorkspaceProps) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [paneDrag, setPaneDrag] = useState<PaneDrag | null>(null);
+  const [dividerNode, setDividerNode] = useState<string | null>(null);
+  const [tabDrop, setTabDrop] = useState<TabDropTarget | null>(null);
+
+  const layouts = useMemo(
+    () => new Map<string, Layout>(tabs.map((tab) => [tab.id, layout(tab.root)])),
+    [tabs],
+  );
+
+  /** Which tab a pane belongs to and where it sits, for every pane there is. */
+  const placements = useMemo(() => {
+    const out = new Map<string, Placement>();
+    for (const tab of tabs) {
+      for (const box of layouts.get(tab.id)?.panes ?? []) {
+        out.set(box.paneId, { tab, rect: box.rect });
+      }
+    }
+    return out;
+  }, [tabs, layouts]);
+
+  const order = useStableOrder(placements);
+
+  const active = useMemo(
+    () => tabs.find((tab) => tab.id === activeTabId) ?? null,
+    [tabs, activeTabId],
+  );
+  const activePanes = useMemo(
+    () => (active === null ? [] : (layouts.get(active.id)?.panes ?? [])),
+    [active, layouts],
+  );
 
   const rectOf = useCallback(
-    (paneId: string) => panes.find((pane) => pane.paneId === paneId)?.rect ?? null,
-    [panes],
+    (paneId: string) => placements.get(paneId)?.rect ?? null,
+    [placements],
   );
 
   /** Pointer position as a fraction of the grid, for hit-testing. */
-  const toFraction = useCallback((event: PointerEvent | React.PointerEvent) => {
+  const toFraction = useCallback((clientX: number, clientY: number) => {
     const host = hostRef.current;
     if (host === null) return null;
     const bounds = host.getBoundingClientRect();
     if (bounds.width < 1 || bounds.height < 1) return null;
     return {
-      x: ((event.clientX - bounds.left) / bounds.width) * 100,
-      y: ((event.clientY - bounds.top) / bounds.height) * 100,
+      x: ((clientX - bounds.left) / bounds.width) * 100,
+      y: ((clientY - bounds.top) / bounds.height) * 100,
     };
   }, []);
 
+  /* ── A tab being dragged in from the strip ────────────────────────── */
+
+  // Worked out in an effect rather than during render because it has to measure
+  // the DOM, and a render is not a moment at which the DOM can be trusted to
+  // have caught up. Tab drags are a human-speed gesture; the extra pass is free.
+  useEffect(() => {
+    let next: TabDropTarget | null = null;
+
+    // Dropping a tab into its own workspace is asking for the tab to contain
+    // itself, so it is simply not a target.
+    if (tabDrag !== null && active !== null && tabDrag.tabId !== active.id) {
+      const point = toFraction(tabDrag.x, tabDrag.y);
+      const hit = point === null ? null : dropTarget(activePanes, point, null, false);
+      if (hit !== null && hit.edge !== "center") {
+        next = { tabId: active.id, paneId: hit.paneId, edge: hit.edge };
+      }
+    }
+
+    setTabDrop(next);
+    onTabDropTarget(next);
+  }, [tabDrag, active, activePanes, toFraction, onTabDropTarget]);
+
   /* ── Dragging a pane onto another ─────────────────────────────────── */
 
-  const beginPaneDrag = (paneId: string) => (event: React.PointerEvent) => {
+  const beginPaneDrag = (tabId: string, paneId: string) => (event: React.PointerEvent) => {
     if (event.button !== 0) return;
     event.preventDefault();
     const grip = event.currentTarget as HTMLElement;
     grip.setPointerCapture(event.pointerId);
-    setDrag({ paneId, target: null });
+    setPaneDrag({ paneId, target: null });
+
+    // A pane only ever moves within its own tab, so the panes it can be dropped
+    // on are that tab's — not whatever happens to be on screen.
+    const within = layouts.get(tabId)?.panes ?? [];
 
     const move = (moveEvent: PointerEvent) => {
-      const point = toFraction(moveEvent);
+      const point = toFraction(moveEvent.clientX, moveEvent.clientY);
       if (point === null) return;
-      setDrag((current) =>
-        current === null ? current : { ...current, target: dropTarget(panes, point, current.paneId) },
+      setPaneDrag((current) =>
+        current === null ? current : { ...current, target: dropTarget(within, point, current.paneId, true) },
       );
     };
 
@@ -105,11 +201,11 @@ export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) 
       grip.removeEventListener("pointermove", move);
       grip.removeEventListener("pointerup", finish);
       grip.removeEventListener("pointercancel", finish);
-      setDrag((current) => {
+      setPaneDrag((current) => {
         if (current?.target) {
           dispatch({
             type: "pane/move",
-            tabId: tab.id,
+            tabId,
             paneId: current.paneId,
             targetPaneId: current.target.paneId,
             edge: current.target.edge,
@@ -127,7 +223,8 @@ export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) 
   /* ── Dragging a divider ───────────────────────────────────────────── */
 
   const beginDividerDrag =
-    (nodeId: string, axis: "x" | "y", area: Rect) => (event: React.PointerEvent) => {
+    (tabId: string, nodeId: string, axis: "x" | "y", area: Rect) =>
+    (event: React.PointerEvent) => {
       if (event.button !== 0) return;
       event.preventDefault();
       const handle = event.currentTarget as HTMLElement;
@@ -135,13 +232,13 @@ export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) 
       setDividerNode(nodeId);
 
       const move = (moveEvent: PointerEvent) => {
-        const point = toFraction(moveEvent);
+        const point = toFraction(moveEvent.clientX, moveEvent.clientY);
         if (point === null) return;
         const ratio =
           axis === "x"
             ? (point.x - area.left) / area.width
             : (point.y - area.top) / area.height;
-        dispatch({ type: "pane/ratio", tabId: tab.id, nodeId, ratio });
+        dispatch({ type: "pane/ratio", tabId, nodeId, ratio });
       };
 
       const finish = () => {
@@ -157,18 +254,30 @@ export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) 
       handle.addEventListener("pointercancel", finish);
     };
 
-  const dropRect = drag?.target
-    ? previewRect(rectOf(drag.target.paneId), drag.target.edge)
-    : null;
+  /* ── Where a drop would land ──────────────────────────────────────── */
+
+  const dropRect = paneDrag?.target
+    ? previewRect(rectOf(paneDrag.target.paneId), paneDrag.target.edge)
+    : tabDrop !== null
+      ? previewRect(rectOf(tabDrop.paneId), tabDrop.edge)
+      : null;
+
+  const dividers = active === null ? [] : (layouts.get(active.id)?.dividers ?? []);
 
   return (
     <div ref={hostRef} className="relative h-full w-full overflow-hidden bg-surface-0">
-      {panes.map(({ paneId, rect }) => {
+      {order.map((paneId) => {
+        const placement = placements.get(paneId);
+        if (placement === undefined) return null;
+        const { tab, rect } = placement;
         const pane = tab.panes[paneId];
         if (!pane) return null;
+
         const definition = paneKind(pane.kind);
-        const isZoomed = zoomed === paneId;
+        const onScreen = tab.id === activeTabId;
+        const isZoomed = tab.zoomedPaneId === paneId;
         const focused = tab.focusedPaneId === paneId;
+        const split = countPanes(tab.root) > 1;
         const box = isZoomed ? { left: 0, top: 0, width: 100, height: 100 } : rect;
 
         return (
@@ -178,14 +287,18 @@ export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) 
               "absolute overflow-hidden",
               // A pane being dragged is dimmed rather than lifted: it stays
               // where it is, and the highlight shows where it would land.
-              drag?.paneId === paneId && "opacity-40",
+              paneDrag?.paneId === paneId && "opacity-40",
             )}
             style={{
               left: `${box.left}%`,
               top: `${box.top}%`,
               width: `${box.width}%`,
               height: `${box.height}%`,
-              zIndex: isZoomed ? 20 : 1,
+              // Hidden, not unmounted, and not `display: none` — see the note
+              // at the top of this file.
+              visibility: onScreen ? "visible" : "hidden",
+              pointerEvents: onScreen ? "auto" : "none",
+              zIndex: onScreen ? (isZoomed ? 20 : 1) : 0,
             }}
           >
             <div
@@ -207,17 +320,31 @@ export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) 
                     type="button"
                     title="Drag to rearrange"
                     aria-label={`Move ${paneLabel(pane)}`}
-                    onPointerDown={beginPaneDrag(paneId)}
+                    onPointerDown={beginPaneDrag(tab.id, paneId)}
                     className="shrink-0 cursor-grab touch-none px-0.5 text-ink-4 hover:text-ink-2 active:cursor-grabbing"
                   >
                     <GripVertical className="h-3 w-3" />
                   </button>
-                  <definition.icon
-                    className={cn("h-3 w-3 shrink-0", focused ? "text-ink-2" : "text-ink-4")}
-                  />
+                  {/* Only for the tab on screen. The menu is drawn in a portal
+                      to escape this container's clipping, which also means the
+                      `visibility: hidden` above does not reach it — a menu left
+                      open on a tab you have switched away from would hang over
+                      the one you switched to. Unmounting takes it with the tab.
+                      Hidden panes keep the icon so the header does not shift. */}
+                  {onScreen ? (
+                    <PaneMenu
+                      tabs={tabs}
+                      tabId={tab.id}
+                      pane={pane}
+                      actions={paneMenu}
+                      muted={!focused}
+                    />
+                  ) : (
+                    <definition.icon className="h-3 w-3 shrink-0 text-ink-4" />
+                  )}
                   <span
                     className={cn(
-                      "min-w-0 flex-1 truncate font-mono text-[10px]",
+                      "min-w-0 flex-1 truncate font-mono text-[length:var(--fs-10)]",
                       focused ? "text-ink-2" : "text-ink-4",
                     )}
                     title={paneLabel(pane)}
@@ -239,7 +366,7 @@ export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) 
                     type="button"
                     title="Close pane"
                     aria-label={`Close ${paneLabel(pane)}`}
-                    onClick={() => onClosePane(paneId)}
+                    onClick={() => onClosePane(tab.id, paneId)}
                     className="shrink-0 rounded-sm p-0.5 text-ink-4 hover:bg-surface-2 hover:text-ink-1"
                   >
                     <X className="h-3 w-3" />
@@ -250,12 +377,12 @@ export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) 
               <div className="min-h-0 flex-1">
                 <definition.Component
                   pane={pane}
-                  focused={active && focused}
+                  focused={onScreen && focused}
                   // "On screen for the user": its tab is up and it is not
                   // hidden behind a zoomed sibling. A media pane mutes itself
                   // on this; nothing should be playing out of a tab you cannot
                   // see.
-                  visible={active && (zoomed === null || isZoomed)}
+                  visible={onScreen && (tab.zoomedPaneId === null || isZoomed)}
                   onFocus={() => dispatch({ type: "pane/focus", tabId: tab.id, paneId })}
                   onMeta={(patch) =>
                     dispatch({ type: "pane/meta", tabId: tab.id, paneId, patch })
@@ -268,8 +395,9 @@ export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) 
       })}
 
       {/* Dividers sit over the seam rather than between the panes, so the
-          rectangles above still meet exactly. */}
-      {zoomed === null
+          rectangles above still meet exactly. Only the tab on screen has any:
+          the others are not there to be dragged. */}
+      {active !== null && active.zoomedPaneId === null
         ? dividers.map((divider) => {
             const horizontal = divider.axis === "x";
             const position = horizontal
@@ -278,7 +406,12 @@ export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) 
             return (
               <div
                 key={divider.nodeId}
-                onPointerDown={beginDividerDrag(divider.nodeId, divider.axis, divider.rect)}
+                onPointerDown={beginDividerDrag(
+                  active.id,
+                  divider.nodeId,
+                  divider.axis,
+                  divider.rect,
+                )}
                 className={cn(
                   "absolute z-10 touch-none",
                   horizontal ? "cursor-col-resize" : "cursor-row-resize",
@@ -313,7 +446,7 @@ export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) 
           })
         : null}
 
-      {/* Where the dragged pane would land. */}
+      {/* Where the dragged pane — or the dragged tab — would land. */}
       {dropRect ? (
         <div
           className="pointer-events-none absolute z-30 border-2 border-brand bg-brand/10"
@@ -329,11 +462,46 @@ export function PaneGrid({ tab, active, dispatch, onClosePane }: PaneGridProps) 
   );
 }
 
-/** Which pane is under the pointer, and which of its edges. */
+/**
+ * The same pane ids, in an order that never changes.
+ *
+ * The flat list's *order* is load bearing, not just its membership. React moves
+ * DOM nodes to match a reordered keyed list, and an `<iframe>` that is moved in
+ * the DOM reloads the page inside it — so a browser pane would navigate back to
+ * its home page every time a tab was reordered or a pane was dropped. New panes
+ * are therefore appended and never inserted, and the list only ever shrinks
+ * where a pane has genuinely gone.
+ */
+function useStableOrder(placements: Map<string, unknown>): string[] {
+  const previous = useRef<string[]>([]);
+
+  const kept = previous.current.filter((paneId) => placements.has(paneId));
+  const known = new Set(kept);
+  const added: string[] = [];
+  for (const paneId of placements.keys()) {
+    if (!known.has(paneId)) added.push(paneId);
+  }
+
+  const next =
+    added.length === 0 && kept.length === previous.current.length ? previous.current : [...kept, ...added];
+  previous.current = next;
+  return next;
+}
+
+/**
+ * Which pane is under the pointer, and which of its edges.
+ *
+ * `allowCenter` is what separates the two gestures this serves. Dragging a pane
+ * onto the middle of another swaps them, which is useful when the split you
+ * have is the split you want and only the contents are in the wrong order.
+ * Dragging a *tab* there has no such meaning — there is no single pane to swap
+ * with — so for that the pane is divided into four edges and nothing else.
+ */
 function dropTarget(
   panes: { paneId: string; rect: Rect }[],
   point: { x: number; y: number },
-  dragged: string,
+  dragged: string | null,
+  allowCenter: boolean,
 ): { paneId: string; edge: DropEdge } | null {
   const hit = panes.find(
     ({ rect }) =>
@@ -355,7 +523,7 @@ function dropTarget(
   const [edge, distance] = distances.reduce((best, entry) =>
     entry[1] < best[1] ? entry : best,
   );
-  return { paneId: hit.paneId, edge: distance > EDGE_ZONE ? "center" : edge };
+  return { paneId: hit.paneId, edge: allowCenter && distance > EDGE_ZONE ? "center" : edge };
 }
 
 /** The highlight shown for a pending drop. */

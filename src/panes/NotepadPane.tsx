@@ -268,11 +268,11 @@ export function NotepadPane({ pane, focused, onMeta, onFocus }: PaneProps<Notepa
   return (
     <div className="flex h-full w-full flex-col bg-surface-0" onMouseDown={onFocus}>
       <div className="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-surface-1 px-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-3">
+        <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-10)] text-ink-3">
           {path ? path : "Unsaved note"}
         </span>
         {pane.dirty ? (
-          <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.14em] text-warn">
+          <span className="shrink-0 font-mono text-[length:var(--fs-9)] uppercase tracking-[0.14em] text-warn">
             unsaved
           </span>
         ) : null}
@@ -281,7 +281,7 @@ export function NotepadPane({ pane, focused, onMeta, onFocus }: PaneProps<Notepa
           title={path ? `Save to ${fileName(path)}` : "Save as…"}
           aria-label="Save"
           onClick={() => void save()}
-          className="inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-hairline-strong px-1.5 text-[10px] text-ink-2 hover:bg-surface-2 hover:text-ink-1"
+          className="inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-hairline-strong px-1.5 text-[length:var(--fs-10)] text-ink-2 hover:bg-surface-2 hover:text-ink-1"
         >
           <Save className="h-3 w-3" />
           Save
@@ -291,7 +291,7 @@ export function NotepadPane({ pane, focused, onMeta, onFocus }: PaneProps<Notepa
       {error || readOnlyReason ? (
         <p
           className={cn(
-            "shrink-0 border-b border-border px-2 py-1 font-mono text-[10px]",
+            "shrink-0 border-b border-border px-2 py-1 font-mono text-[length:var(--fs-10)]",
             error ? "text-danger" : "text-warn",
           )}
         >

@@ -144,7 +144,7 @@ export function BrowserPane({ pane, focused, onMeta, onFocus }: PaneProps<Browse
             }
           }}
           className={cn(
-            "min-w-0 flex-1 rounded-sm border border-transparent bg-surface-2 px-2 py-1 font-mono text-[11px] text-ink-2 outline-none",
+            "min-w-0 flex-1 rounded-sm border border-transparent bg-surface-2 px-2 py-1 font-mono text-[length:var(--fs-11)] text-ink-2 outline-none",
             "focus:border-hairline-strong focus:text-ink-1",
             focused && "text-ink-1",
           )}
@@ -168,7 +168,7 @@ export function BrowserPane({ pane, focused, onMeta, onFocus }: PaneProps<Browse
 
         {status === "refused" ? (
           <div className="absolute inset-x-0 bottom-0 border-t border-hairline-strong bg-surface-2 px-3 py-2">
-            <p className="text-[11px] text-ink-2">
+            <p className="text-[length:var(--fs-11)] text-ink-2">
               {displayHost(url) ?? "This site"} did not load in a pane — many sites refuse
               to be embedded.{" "}
               <button

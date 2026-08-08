@@ -135,7 +135,17 @@ function WinButton({ title, onClick, danger = false, forcedHover = false, button
   );
 }
 
-export function WindowControls() {
+/**
+ * `maximize` is not merely cosmetic on Windows.
+ *
+ * The maximise button publishes its rectangle to a single app-wide slot that
+ * the main window's subclass hit-tests Snap Layouts against. A second window
+ * drawing its own maximise button would overwrite that slot and move the main
+ * window's snap region to wherever the second window's button happened to be.
+ * The settings window therefore does without one — which is also what a window
+ * of that shape wants anyway.
+ */
+export function WindowControls({ maximize = true }: { maximize?: boolean }) {
   const [maximized, setMaximized] = useState(false);
   const [available, setAvailable] = useState(false);
   const [snapHover, setSnapHover] = useState(false);
@@ -196,7 +206,7 @@ export function WindowControls() {
   useEffect(() => {
     // Only Windows hit-tests the button natively; on Linux publishing its
     // rectangle would be a message a minute for nobody to read.
-    if (!available || gtk) return;
+    if (!available || gtk || !maximize) return;
     publishRect();
     const node = maximizeRef.current;
     if (node === null) return;
@@ -207,11 +217,11 @@ export function WindowControls() {
       observer.disconnect();
       window.removeEventListener("resize", publishRect);
     };
-  }, [available, gtk, publishRect]);
+  }, [available, gtk, maximize, publishRect]);
 
   // Hover state for a region the OS owns. Never arrives outside Windows.
   useEffect(() => {
-    if (!available || gtk) return;
+    if (!available || gtk || !maximize) return;
     let disposed = false;
     let unlisten: (() => void) | null = null;
     void (async () => {
@@ -226,7 +236,7 @@ export function WindowControls() {
       disposed = true;
       unlisten?.();
     };
-  }, [available, gtk]);
+  }, [available, gtk, maximize]);
 
   if (!available) return null;
 
@@ -246,14 +256,16 @@ export function WindowControls() {
       <Button title="Minimise" onClick={act((win) => win.minimize())}>
         <MinimiseGlyph />
       </Button>
-      <Button
-        title={maximized ? "Restore" : "Maximise"}
-        onClick={act((win) => win.toggleMaximize())}
-        forcedHover={snapHover}
-        buttonRef={maximizeRef}
-      >
-        <MaximiseGlyph maximized={maximized} />
-      </Button>
+      {maximize ? (
+        <Button
+          title={maximized ? "Restore" : "Maximise"}
+          onClick={act((win) => win.toggleMaximize())}
+          forcedHover={snapHover}
+          buttonRef={maximizeRef}
+        >
+          <MaximiseGlyph maximized={maximized} />
+        </Button>
+      ) : null}
       <Button title="Close" danger onClick={act((win) => win.close())}>
         <CloseGlyph />
       </Button>

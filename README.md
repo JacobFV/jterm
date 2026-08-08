@@ -22,9 +22,20 @@ runs on your behalf.
   recovered session shows what was on screen rather than a bare shell.
 - **Splits like tmux.** Split, zoom, move focus by direction, resize from the
   keyboard, and drag a pane by its grip to rearrange the layout.
+- **Folds a tab into a split.** Drag a tab out of the strip and drop it on a
+  pane: the tab's panes arrive as a split there, keeping the arrangement they
+  already had. Nothing restarts — the shells behind them never notice.
 - **Opens more than shells.** A notepad with syntax highlighting and save, a web
   pane, and viewers for images, video, audio and STL meshes. What opens is
-  chosen from the file you picked.
+  chosen from the file you picked; *where* it opens — a new tab, or a split on
+  the side you like — is up to you, in Settings → Files.
+- **Changes what a pane is.** Click a pane's kind icon, in its header or in the
+  tab strip, to replace it with a terminal, a notepad, a browser or a file — or
+  to move another open tab into that slot. Moving a tab in is an even trade: the
+  pane it displaces leaves as a tab of its own, so nothing is destroyed.
+- **Settles in a settings window.** Theme, type sizes, cursor, scrollback,
+  shell, and every shortcut — in a second window rather than a modal, so you can
+  watch the terminal change as you drag.
 
 ## Keys
 
@@ -41,9 +52,17 @@ runs on your behalf.
 | <kbd>Mod</kbd>+<kbd>T</kbd> / <kbd>Mod</kbd>+<kbd>1…9</kbd> | New tab / go to tab |
 | <kbd>Mod</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> | Close pane |
 | <kbd>Mod</kbd>+<kbd>S</kbd> | Save (in a text pane) |
+| <kbd>Mod</kbd>+<kbd>,</kbd> | Settings |
 | <kbd>F11</kbd> | Full screen |
 
-Hold the **+** in the tab bar for Notepad, Open file…, or Browser.
+Those are the defaults. All of them can be rebound in **Settings → Keyboard** by
+clicking a shortcut and pressing the keys you want; <kbd>Backspace</kbd> removes
+one entirely. Taking a chord that is already spoken for unbinds whichever action
+had it, rather than leaving two racing for the same key press.
+
+Hold the **+** in the tab bar for Notepad, Open file…, or Browser. Click a
+pane's kind icon — the small terminal or page glyph in its header, or on its tab
+— to change what that pane holds.
 
 ### About <kbd>Ctrl</kbd>+<kbd>D</kbd>
 
@@ -51,8 +70,18 @@ Splitting on <kbd>Mod</kbd>+<kbd>D</kbd> comes from iTerm2, where it is
 <kbd>⌘</kbd>+<kbd>D</kbd> and costs nothing. On Windows and Linux the same
 shortcut is <kbd>Ctrl</kbd>+<kbd>D</kbd> — the shell's end-of-file. Binding it
 takes that away, so <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> sends a literal
-EOF instead. If you would rather have your EOF back, `SPLIT_RIGHT` in
-[`src/lib/keymap.ts`](src/lib/keymap.ts) is the one line to change.
+EOF instead. If you would rather have your EOF back, unbind **Split right** in
+Settings → Keyboard and <kbd>Ctrl</kbd>+<kbd>D</kbd> goes back to the shell.
+
+## Settings
+
+A window, not a modal, because nearly everything in it is a thing you adjust
+while looking at the result: theme (including following the system), interface
+and terminal type sizes, font, line height, cursor shape and blink, scrollback,
+which shell to start, whether an opened file becomes a tab or a split and which
+side that split goes, the file tree's width and whether it shows dotfiles, and
+the shortcut table. Changes are written as you make them and reach the main
+window immediately — there is no OK button.
 
 ## How the crash-safety works
 
@@ -67,7 +96,12 @@ Two files, with deliberately different durability:
   Losing the last half-second of this costs nothing, and paying an `fsync` per
   chunk of `cargo build` output would make the terminal slow.
 
-Both live in the platform's data directory —
+`settings.json` sits beside them and is deliberately not part of either. The
+session snapshot is this machine at this moment and is rewritten several times a
+second; your preferences are the file you would copy to a new machine, and there
+is no reason for the two to be able to fail together.
+
+All three live in the platform's data directory —
 `~/.local/share/jterm`, `~/Library/Application Support/…`,
 `%APPDATA%\…`.
 
@@ -128,15 +162,24 @@ right-click → Open, and Windows SmartScreen wants More info → Run anyway.
 ```
 src/
   state/      tree.ts (split geometry), workspace.ts (tabs and panes),
-              snapshot.ts (persistence format), content.ts (buffers, outside React)
+              snapshot.ts (persistence format), content.ts (buffers, outside React),
+              settings.ts (preferences, shared between windows)
   panes/      one file per pane kind, plus registry.tsx
-  components/ shell/ — tab strip, window controls, pane grid
+  components/ shell/ — tab strip, window controls, file tree, workspace
+              settings/ — the second window
   lib/        draft.ts (the mirrored prompt line), osc.ts, keymap.ts, …
 src-tauri/src/
   pty.rs      pseudoterminals
-  store.rs    durable snapshots and scrollback
+  store.rs    durable snapshots, scrollback and settings
   files.rs    reading and saving edited files
 ```
+
+One file is worth reading before changing any of the layout code:
+[`components/shell/Workspace.tsx`](src/components/shell/Workspace.tsx). Every
+pane in the window is rendered from a single flat list rather than from the
+split tree or from its tab, and only its rectangle changes when the layout does.
+That is what lets a pane be moved — or handed to another tab — without React
+unmounting it and taking the live terminal with it.
 
 Built with [Tauri](https://tauri.app), [xterm.js](https://xtermjs.org),
 [CodeMirror](https://codemirror.net) and [three.js](https://threejs.org).

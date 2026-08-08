@@ -37,18 +37,18 @@ export function ImagePane({ pane, onFocus }: PaneProps<ImagePaneState>) {
   return (
     <div className="flex h-full w-full flex-col bg-surface-0" onMouseDown={onFocus}>
       <div className="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-surface-1 px-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-3">
+        <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-10)] text-ink-3">
           {pane.path}
         </span>
         {dimensions ? (
-          <span className="shrink-0 font-mono text-[10px] text-ink-4">
+          <span className="shrink-0 font-mono text-[length:var(--fs-10)] text-ink-4">
             {dimensions.width}×{dimensions.height}
           </span>
         ) : null}
         <button
           type="button"
           onClick={() => setActualSize((value) => !value)}
-          className="shrink-0 rounded-sm border border-hairline-strong px-1.5 text-[10px] text-ink-2 hover:bg-surface-2 hover:text-ink-1"
+          className="shrink-0 rounded-sm border border-hairline-strong px-1.5 text-[length:var(--fs-10)] text-ink-2 hover:bg-surface-2 hover:text-ink-1"
         >
           {actualSize ? "Fit" : "1:1"}
         </button>
@@ -61,7 +61,7 @@ export function ImagePane({ pane, onFocus }: PaneProps<ImagePaneState>) {
         )}
       >
         {failed ? (
-          <p className="p-4 font-mono text-[11px] text-danger">
+          <p className="p-4 font-mono text-[length:var(--fs-11)] text-danger">
             {fileName(pane.path)} could not be displayed.
           </p>
         ) : src ? (

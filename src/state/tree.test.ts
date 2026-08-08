@@ -1,15 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   type Node,
+  countPanes,
+  graftTree,
   layout,
   leaf,
   movePane,
   neighbor,
   paneIds,
   removePane,
+  repointPane,
   resizeTarget,
   setRatio,
   splitPane,
+  splitPlacement,
+  substituteTree,
 } from "./tree";
 
 const ids = (n: number) => ({ split: `s${n}`, leaf: `l${n}` });
@@ -61,6 +66,48 @@ describe("splitPane", () => {
       "b",
       "a",
     ]);
+  });
+});
+
+describe("splitPlacement", () => {
+  it("reads a direction as an axis and a side", () => {
+    expect(splitPlacement("right")).toEqual({ axis: "x", before: false });
+    expect(splitPlacement("left")).toEqual({ axis: "x", before: true });
+    expect(splitPlacement("down")).toEqual({ axis: "y", before: false });
+    expect(splitPlacement("up")).toEqual({ axis: "y", before: true });
+  });
+
+  it("agrees with what splitPane does with them", () => {
+    const { axis, before } = splitPlacement("up");
+    expect(paneIds(splitPane(leaf("l0", "a"), "a", axis, "b", ids(1), before))).toEqual([
+      "b",
+      "a",
+    ]);
+  });
+});
+
+describe("repointPane", () => {
+  it("swaps the pane behind a leaf without touching the shape", () => {
+    const before = layout(threePanes());
+    const after = layout(repointPane(threePanes(), "b", "z"));
+    expect(after.panes.map((pane) => pane.rect)).toEqual(before.panes.map((pane) => pane.rect));
+    expect(after.panes.map((pane) => pane.paneId)).toEqual(["a", "z", "c"]);
+  });
+
+  it("leaves a tree that never held the pane alone", () => {
+    const root = threePanes();
+    expect(repointPane(root, "nobody", "z")).toBe(root);
+  });
+});
+
+describe("substituteTree", () => {
+  it("puts a whole tree where one pane was", () => {
+    const incoming = splitPane(leaf("l8", "x"), "x", "y", "y", ids(8));
+    const root = substituteTree(threePanes(), "b", incoming);
+    expect(paneIds(root)).toEqual(["a", "x", "y", "c"]);
+    // The arrangement that arrived is still the arrangement it had.
+    expect(countPanes(root)).toBe(4);
+    expect(layout(root).dividers).toHaveLength(3);
   });
 });
 
@@ -169,5 +216,46 @@ describe("resizeTarget", () => {
     // 'c' sits under a y-split, but growing it left has to reach past that to
     // the x-split above.
     expect(resizeTarget(threePanes(), "c", "left")).toEqual({ nodeId: "s1", delta: -1 });
+  });
+});
+
+describe("graftTree", () => {
+  /** The right-hand half of `threePanes`: 'b' above 'c'. */
+  function stacked(): Node {
+    return splitPane(leaf("g0", "b"), "b", "y", "c", ids(9));
+  }
+
+  it("puts a whole tree beside a pane, keeping its shape", () => {
+    const root = graftTree(leaf("l0", "a"), "a", "x", stacked(), "graft");
+
+    expect(paneIds(root)).toEqual(["a", "b", "c"]);
+    // 'b' and 'c' arrive still stacked, not flattened into siblings of 'a'.
+    const boxes = layout(root).panes;
+    const rect = (paneId: string) => boxes.find((box) => box.paneId === paneId)!.rect;
+    expect(rect("a")).toEqual({ left: 0, top: 0, width: 50, height: 100 });
+    expect(rect("b")).toEqual({ left: 50, top: 0, width: 50, height: 50 });
+    expect(rect("c")).toEqual({ left: 50, top: 50, width: 50, height: 50 });
+  });
+
+  it("puts it in front when asked", () => {
+    const root = graftTree(leaf("l0", "a"), "a", "y", stacked(), "graft", true);
+    expect(paneIds(root)).toEqual(["b", "c", "a"]);
+    expect(layout(root).panes.find((box) => box.paneId === "a")!.rect).toEqual({
+      left: 0,
+      top: 50,
+      width: 100,
+      height: 50,
+    });
+  });
+
+  it("grafts onto a pane nested deep in the target", () => {
+    const root = graftTree(threePanes(), "c", "x", stacked(), "graft");
+    expect(paneIds(root)).toEqual(["a", "b", "c", "b", "c"]);
+    expect(countPanes(root)).toBe(5);
+  });
+
+  it("leaves the tree alone when the target pane is not in it", () => {
+    const before = threePanes();
+    expect(graftTree(before, "nobody", "x", stacked(), "graft")).toBe(before);
   });
 });

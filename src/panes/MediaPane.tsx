@@ -38,7 +38,7 @@ export function MediaPane({ pane, visible, onFocus }: PaneProps<MediaPaneState>)
   return (
     <div className="flex h-full w-full flex-col bg-surface-0" onMouseDown={onFocus}>
       <div className="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-surface-1 px-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-3">
+        <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-10)] text-ink-3">
           {pane.path}
         </span>
         <button
@@ -46,7 +46,7 @@ export function MediaPane({ pane, visible, onFocus }: PaneProps<MediaPaneState>)
           title="Open in your default player"
           aria-label="Open in your default player"
           onClick={() => void openPath(pane.path)}
-          className="inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-hairline-strong px-1.5 text-[10px] text-ink-2 hover:bg-surface-2 hover:text-ink-1"
+          className="inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-hairline-strong px-1.5 text-[length:var(--fs-10)] text-ink-2 hover:bg-surface-2 hover:text-ink-1"
         >
           <ExternalLink className="h-3 w-3" />
           Open
@@ -55,7 +55,7 @@ export function MediaPane({ pane, visible, onFocus }: PaneProps<MediaPaneState>)
 
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black p-2">
         {failed ? (
-          <p className="max-w-sm px-4 text-center font-mono text-[11px] text-ink-3">
+          <p className="max-w-sm px-4 text-center font-mono text-[length:var(--fs-11)] text-ink-3">
             {fileName(pane.path)} will not play here — this window has no codec for it.
             Use <span className="text-ink-1">Open</span> above to play it in your usual
             player.

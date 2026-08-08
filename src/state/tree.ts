@@ -155,6 +155,35 @@ function replaceLeaf(node: Node, paneId: string, make: (leafNode: LeafNode) => N
 }
 
 /**
+ * Put a whole tree beside the pane holding `targetPaneId`.
+ *
+ * The pane's slot becomes a split, with the pane on one side and `subtree` —
+ * which may be a single leaf or an entire layout — on the other. That
+ * generality is what lets a tab be dropped into another tab's workspace: the
+ * tab's panes arrive with the arrangement they already had, nested inside the
+ * half they were dropped into, rather than being flattened into siblings.
+ *
+ * The caller supplies `splitId`, because ids are minted where the rest of the
+ * app's ids are minted and this file stays pure.
+ */
+export function graftTree(
+  root: Node,
+  targetPaneId: string,
+  axis: Axis,
+  subtree: Node,
+  splitId: string,
+  before = false,
+): Node {
+  return replaceLeaf(root, targetPaneId, (existing) => ({
+    kind: "split",
+    id: splitId,
+    axis,
+    ratio: 0.5,
+    children: before ? [subtree, existing] : [existing, subtree],
+  }));
+}
+
+/**
  * Split the pane holding `targetPaneId`, putting `newPaneId` after it (to the
  * right for `x`, below for `y`) or before it when `before` is set.
  */
@@ -166,16 +195,14 @@ export function splitPane(
   newNodeIds: { split: string; leaf: string },
   before = false,
 ): Node {
-  return replaceLeaf(root, targetPaneId, (existing) => {
-    const fresh = leaf(newNodeIds.leaf, newPaneId);
-    return {
-      kind: "split",
-      id: newNodeIds.split,
-      axis,
-      ratio: 0.5,
-      children: before ? [fresh, existing] : [existing, fresh],
-    };
-  });
+  return graftTree(
+    root,
+    targetPaneId,
+    axis,
+    leaf(newNodeIds.leaf, newPaneId),
+    newNodeIds.split,
+    before,
+  );
 }
 
 /**
@@ -195,6 +222,26 @@ export function removePane(root: Node, paneId: string): Node | null {
   if (nextSecond === null) return nextFirst;
   if (nextFirst === first && nextSecond === second) return root;
   return { ...root, children: [nextFirst, nextSecond] };
+}
+
+/**
+ * Point the leaf holding `paneId` at a different pane, leaving the shape of the
+ * tree alone. Used when a pane is replaced by another kind of pane in place —
+ * the split it was half of is not the thing being changed.
+ */
+export function repointPane(root: Node, paneId: string, nextPaneId: string): Node {
+  return replaceLeaf(root, paneId, (existing) => ({ ...existing, paneId: nextPaneId }));
+}
+
+/**
+ * Put a whole tree where a single pane was.
+ *
+ * The mirror of `graftTree`: that one puts a subtree *beside* a pane, this one
+ * puts it *instead of* it. The displaced pane is not the tree's problem — the
+ * caller decides where it goes.
+ */
+export function substituteTree(root: Node, paneId: string, subtree: Node): Node {
+  return replaceLeaf(root, paneId, () => subtree);
 }
 
 export function setRatio(root: Node, nodeId: string, ratio: number): Node {
@@ -259,6 +306,21 @@ export function swapPanes(root: Node, a: string, b: string): Node {
 /* ── Directional focus ───────────────────────────────────────────────────── */
 
 export type Direction = "left" | "right" | "up" | "down";
+
+/**
+ * A direction read as a split: which axis it divides, and which side of the
+ * existing pane the new one lands on.
+ *
+ * Splits are described by an axis and a `before` flag because that is what the
+ * tree needs, but "down" is what a person means. One conversion, shared by
+ * everything that has a direction and wants a split.
+ */
+export function splitPlacement(direction: Direction): { axis: Axis; before: boolean } {
+  return {
+    axis: direction === "left" || direction === "right" ? "x" : "y",
+    before: direction === "left" || direction === "up",
+  };
+}
 
 /**
  * The pane a directional focus move should land on, by geometry rather than by

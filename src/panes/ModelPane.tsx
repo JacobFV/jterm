@@ -61,11 +61,11 @@ export function ModelPane({ pane, onFocus }: PaneProps<ModelPaneState>) {
   return (
     <div className="flex h-full w-full flex-col bg-surface-0" onMouseDown={onFocus}>
       <div className="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-surface-1 px-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-3">
+        <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-10)] text-ink-3">
           {pane.path}
         </span>
         {status === "ready" ? (
-          <span className="shrink-0 font-mono text-[10px] text-ink-4">
+          <span className="shrink-0 font-mono text-[length:var(--fs-10)] text-ink-4">
             {triangles.toLocaleString()} triangles · drag to rotate, scroll to zoom
           </span>
         ) : null}
@@ -74,7 +74,7 @@ export function ModelPane({ pane, onFocus }: PaneProps<ModelPaneState>) {
       <div className="relative min-h-0 flex-1">
         <div ref={hostRef} className="h-full w-full" />
         {status !== "ready" ? (
-          <p className="absolute inset-0 flex items-center justify-center p-4 text-center font-mono text-[11px] text-ink-3">
+          <p className="absolute inset-0 flex items-center justify-center p-4 text-center font-mono text-[length:var(--fs-11)] text-ink-3">
             {status === "loading"
               ? `Reading ${fileName(pane.path)}…`
               : `${fileName(pane.path)} could not be shown — ${detail}`}

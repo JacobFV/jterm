@@ -29,6 +29,7 @@ import { scanOsc } from "@/lib/osc";
 import { ready as ptyBusReady, subscribePty } from "@/lib/ptyBus";
 import { registerTerminal } from "@/lib/terminals";
 import { getContent, updateContent } from "@/state/content";
+import { getSettings, subscribeSettings } from "@/state/settings";
 import type { TerminalPaneState } from "@/state/workspace";
 import type { PaneProps } from "./types";
 
@@ -129,6 +130,10 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
       cols: term.cols,
       rows: term.rows,
       cwd,
+      // Read at spawn rather than held, so changing it in Settings applies to
+      // the next shell started — including the one Enter starts in a pane
+      // whose shell has exited — and leaves running shells alone.
+      shell: getSettings().shell || undefined,
     });
     if (info) {
       cwdRef.current = info.cwd;
@@ -226,18 +231,22 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
     const host = hostRef.current;
     if (host === null) return;
 
+    const settings = getSettings();
     const term = new Terminal({
       allowProposedApi: true,
-      cursorBlink: true,
-      cursorStyle: "bar",
+      cursorBlink: settings.cursorBlink,
+      cursorStyle: settings.cursorStyle,
+      // Read from the variable rather than from the setting: `lib/appearance`
+      // is where a chosen family gets the built-in stack put behind it, and the
+      // terminal should be looking at the same resolved value as the chrome.
       fontFamily: getComputedStyle(document.documentElement)
         .getPropertyValue("--font-mono")
         .trim(),
-      fontSize: 13,
-      lineHeight: 1.25,
+      fontSize: settings.fontSize,
+      lineHeight: settings.lineHeight,
       // xterm keeps its own scrollback for the live session; the file on disk
       // is what survives a restart, and is capped separately.
-      scrollback: 10_000,
+      scrollback: settings.scrollback,
       theme: readTheme(),
       macOptionIsMeta: true,
       // ConPTY re-wraps lines itself and reports the cursor differently from a
@@ -294,6 +303,32 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
       }
     };
     safeFit();
+
+    /**
+     * Push the settings onto a terminal that already exists.
+     *
+     * Type size is the interesting one: changing it changes the size of a cell,
+     * so the same pane is suddenly a different number of columns and rows, and
+     * a shell that is not told re-wraps its output against the old width. Hence
+     * the refit and the resize — a font change is a window resize as far as
+     * anything on the other end of the pty is concerned.
+     */
+    const applySettings = () => {
+      const current = getSettings();
+      term.options.fontFamily = getComputedStyle(document.documentElement)
+        .getPropertyValue("--font-mono")
+        .trim();
+      term.options.fontSize = current.fontSize;
+      term.options.lineHeight = current.lineHeight;
+      term.options.cursorStyle = current.cursorStyle;
+      term.options.cursorBlink = current.cursorBlink;
+      term.options.scrollback = current.scrollback;
+      term.options.theme = readTheme();
+      safeFit();
+      repaint();
+      if (!exitedRef.current) void pty.resize(paneId, term.cols, term.rows);
+    };
+    const stopSettings = subscribeSettings(applySettings);
 
     // Keystrokes on their way to the shell, mirrored on the way past.
     const dataSub = term.onData((data) => {
@@ -442,6 +477,7 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
     return () => {
       disposed = true;
       cancelReplay();
+      stopSettings();
       if (draftLogTimer.current !== null) clearTimeout(draftLogTimer.current);
       observer.disconnect();
       cancelAnimationFrame(frame);

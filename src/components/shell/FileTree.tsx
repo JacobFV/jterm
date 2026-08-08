@@ -27,8 +27,10 @@ import {
 
 import { fs, type DirEntry } from "@/lib/ipc";
 import { kindForPath } from "@/lib/filetypes";
+import { useSettings } from "@/lib/useSettings";
 import { cn } from "@/lib/utils";
 import { paneKind } from "@/panes/registry";
+import { updateSettings } from "@/state/settings";
 
 interface FileTreeProps {
   /** Where to root the tree — the focused terminal's cwd. */
@@ -38,7 +40,11 @@ interface FileTreeProps {
 }
 
 export function FileTree({ root, onOpen, onRootChange }: FileTreeProps) {
-  const [showHidden, setShowHidden] = useState(false);
+  // Kept in settings rather than in this component, so the eye in the tree and
+  // the switch in the settings window are two views of one preference — and so
+  // that turning dotfiles on survives a restart, which is the only way anyone
+  // who wants them on would want it to behave.
+  const showHidden = useSettings().showHiddenFiles;
   // Keyed by directory path. Absent means "never opened"; an empty array is a
   // directory that is genuinely empty, which must look different from pending.
   const [children, setChildren] = useState<Record<string, DirEntry[]>>({});
@@ -92,7 +98,7 @@ export function FileTree({ root, onOpen, onRootChange }: FileTreeProps) {
           <CornerLeftUp className="h-3 w-3" />
         </button>
         <span
-          className="min-w-0 flex-1 truncate font-mono text-[10px] text-ink-2"
+          className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-10)] text-ink-2"
           title={root}
         >
           {rootName}
@@ -101,7 +107,7 @@ export function FileTree({ root, onOpen, onRootChange }: FileTreeProps) {
           type="button"
           title={showHidden ? "Hide dotfiles" : "Show dotfiles"}
           aria-label={showHidden ? "Hide dotfiles" : "Show dotfiles"}
-          onClick={() => setShowHidden((value) => !value)}
+          onClick={() => updateSettings({ showHiddenFiles: !showHidden })}
           className="shrink-0 rounded-sm p-1 text-ink-4 hover:bg-surface-2 hover:text-ink-1"
         >
           {showHidden ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
@@ -160,7 +166,7 @@ function Level({ path, depth, showHidden, children_, open, failed, onToggle, onO
   if (failed[path]) {
     return (
       <p
-        className="px-2 py-1 font-mono text-[10px] text-danger"
+        className="px-2 py-1 font-mono text-[length:var(--fs-10)] text-danger"
         style={{ paddingLeft: 8 + depth * 12 }}
       >
         {failed[path].replace(/^Error:\s*/, "")}
@@ -171,7 +177,7 @@ function Level({ path, depth, showHidden, children_, open, failed, onToggle, onO
   if (entries === undefined) {
     return (
       <p
-        className="px-2 py-1 font-mono text-[10px] text-ink-4"
+        className="px-2 py-1 font-mono text-[length:var(--fs-10)] text-ink-4"
         style={{ paddingLeft: 8 + depth * 12 }}
       >
         reading…
@@ -184,7 +190,7 @@ function Level({ path, depth, showHidden, children_, open, failed, onToggle, onO
   if (visible.length === 0) {
     return (
       <p
-        className="px-2 py-1 font-mono text-[10px] text-ink-4"
+        className="px-2 py-1 font-mono text-[length:var(--fs-10)] text-ink-4"
         style={{ paddingLeft: 8 + depth * 12 }}
       >
         empty
@@ -224,7 +230,7 @@ function Level({ path, depth, showHidden, children_, open, failed, onToggle, onO
               <Icon
                 className={cn("h-3 w-3 shrink-0", entry.isDir ? "text-ink-3" : "text-ink-4")}
               />
-              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-2">
+              <span className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-11)] text-ink-2">
                 {entry.name}
               </span>
             </button>
