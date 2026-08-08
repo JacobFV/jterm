@@ -14,6 +14,8 @@
       property="og:description"
       content="A terminal that remembers the command you had not run yet."
     />
+    <meta property="og:image" content="https://jacobfv.github.io/jterm/panes.png" />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="theme-color" content="#000000" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -280,6 +282,43 @@
       }
       .row .fsize { font-family: var(--mono); font-size: 11px; color: var(--ink-3); min-width: 6ch; text-align: right; }
 
+      /* ── The screenshot ──────────────────────────────────────────────
+         Sits between the download button and the first section, because a
+         page selling a terminal that owes you nothing until you install it
+         should show the thing before it starts describing it.
+
+         Framed rather than floated: a hairline and a dark plate, the same
+         vocabulary as the download table, so it reads as part of the page
+         instead of a picture dropped onto it. The image itself is dark and
+         edge-to-edge, so it would otherwise dissolve into the background. */
+      figure.shot { margin: clamp(48px, 9vh, 96px) 0 0; }
+      .shot-frame {
+        position: relative;
+        border: 1px solid var(--line);
+        background: var(--bg-1);
+        padding: 8px;
+        border-radius: 4px;
+        /* Lifted off the fractal so the field does not read through the
+           frame's own edges. */
+        box-shadow: 0 40px 90px -50px rgba(0, 0, 0, 0.95);
+      }
+      .shot-frame img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border-radius: 2px;
+        border: 1px solid var(--line);
+      }
+      figure.shot figcaption {
+        margin-top: 14px;
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.6;
+        color: var(--ink-3);
+        max-width: 72ch;
+      }
+      figure.shot figcaption b { color: var(--ink-2); font-weight: 500; }
+
       /* ── Sections ────────────────────────────────────────────────── */
       section { padding: clamp(64px, 11vh, 128px) 0; border-top: 1px solid var(--line); }
 
@@ -425,6 +464,22 @@
             </div>
           </details>
         </header>
+
+        <figure class="shot">
+          <div class="shot-frame">
+            <img
+              src="panes.png"
+              width="1100"
+              height="737"
+              alt="One jterm tab split into four panes: a Rust file with syntax highlighting and a Save button, an STL cube that can be dragged to rotate, a PNG in the image viewer, and a live shell."
+            />
+          </div>
+          <figcaption>
+            One tab, four panes — <b>a Rust file</b>, <b>an STL mesh</b>,
+            <b>a PNG</b>, and <b>a shell</b>. Every pane can be dragged
+            somewhere else in the layout, and none of it restarts the shell.
+          </figcaption>
+        </figure>
       </div>
 
       <div class="wrap">
