@@ -20,8 +20,14 @@ DESKTOP_DIR="$PREFIX/share/applications"
 
 # The release binary lands under a target triple when one was named and
 # directly under `target/` when it was not, so ask rather than assume.
+#
+# `bundle/` is excluded because the bundler stages its own copies of the binary
+# there — and it stages them *after* linking, so they are both newer than the
+# real one and, if the bundler is still running, half written. Picking the
+# newest match without this would install a truncated binary.
 BINARY="$(find "$REPO/src-tauri/target" -type f -name "$APP" -path '*/release/*' \
-          -not -path '*/deps/*' -not -path '*/build/*' -print0 2>/dev/null \
+          -not -path '*/deps/*' -not -path '*/build/*' -not -path '*/bundle/*' \
+          -print0 2>/dev/null \
           | xargs -0 ls -t 2>/dev/null | head -1 || true)"
 
 if [[ -z "$BINARY" ]]; then

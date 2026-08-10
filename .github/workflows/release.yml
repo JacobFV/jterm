@@ -4,7 +4,11 @@ name: Release
 # there is exactly one action to remember and no build step anybody has to run
 # on their own machine:
 #
-#     npm run version 1.2.3 && git commit -am "v1.2.3" && git tag v1.2.3 && git push --follow-tags
+#     npm run version 1.2.3 && git commit -am "v1.2.3" && git tag -a v1.2.3 -m v1.2.3 && git push --follow-tags
+#
+# The tag is annotated because `--follow-tags` pushes annotated tags and only
+# those. With a lightweight `git tag v1.2.3` the commit goes up, the tag stays
+# home, and nothing builds — silently, since the push itself succeeds.
 on:
   push:
     tags: ["v*"]
