@@ -19,6 +19,13 @@ on:
         description: "Existing tag to build"
         required: true
 
+# Necessary but not sufficient: the token is also capped by the repository's
+# default workflow permission, and with that set to read-only, creating the
+# release object returns "Resource not accessible by integration" even though
+# the job reports `Contents: write` — after all five platforms have built.
+# Attaching assets to a release that already exists still works, which is what
+# makes the failure look like a fluke. Settings → Actions → General → Workflow
+# permissions must be "Read and write".
 permissions:
   contents: write
 

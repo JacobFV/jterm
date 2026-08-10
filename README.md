@@ -143,19 +143,37 @@ npm run tauri build    # installers in src-tauri/target/release/bundle
 cd src-tauri && cargo test
 ```
 
+On Linux, `scripts/install-local.sh` puts a build you just made on your `$PATH`
+and in the launcher — binary, icons and desktop entry, all under `~/.local`, so
+it needs no root and there is nothing to undo but three `rm`s. Re-running it
+over the version you are *currently running* is safe: it replaces the file by
+unlinking it first, so the running process keeps the inode it started with and
+carries on. You get the new build the next time you open a window.
+
 ## Releasing
 
 The version lives in three files; a script keeps them in step and CI refuses a
 tag that disagrees with them.
 
 ```sh
-npm run version 0.2.0
-git commit -am "v0.2.0" && git tag v0.2.0 && git push --follow-tags
+npm run version 0.3.0
+git commit -am "v0.3.0" && git tag -a v0.3.0 -m v0.3.0 && git push --follow-tags
 ```
 
 That builds macOS (Apple silicon and Intel), Windows, and Linux on both x86_64
 and arm64, and attaches the installers to the release. Builds are **not code-signed** — macOS wants
 right-click → Open, and Windows SmartScreen wants More info → Run anyway.
+
+Two things that fail quietly if they are wrong, both learned the hard way:
+
+- **The tag must be annotated.** `--follow-tags` pushes annotated tags and only
+  those, so a lightweight `git tag v0.3.0` sends the commit, keeps the tag at
+  home, and builds nothing — while the push itself reports success.
+- **Actions needs a write-capable token.** Creating the release object is the
+  one thing the workflow cannot do with a read-only default, and it fails
+  *after* all five platforms have built. Settings → Actions → General →
+  Workflow permissions must be "Read and write"; `permissions: contents: write`
+  in the workflow is not sufficient on its own.
 
 ## Layout
 
