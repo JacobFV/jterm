@@ -41,6 +41,16 @@ export interface SpawnInfo {
   pid: number | null;
   shell: string;
   cwd: string;
+  /** The tmux session the shell ended up in, or null for a bare one. Asking for
+   *  tmux does not guarantee getting it — see `pty_spawn` in the Rust side. */
+  tmux: string | null;
+}
+
+/** What a poll of a live terminal finds out about it. */
+export interface Probe {
+  cwd: string | null;
+  /** Whether tmux is between jterm and the shell at this moment. */
+  tmux: boolean;
 }
 
 export const pty = {
@@ -50,6 +60,8 @@ export const pty = {
     rows: number;
     cwd?: string;
     shell?: string;
+    /** Attach to (or create) this tmux session instead of running a shell. */
+    tmux?: string;
   }): Promise<SpawnInfo | null> => call("pty_spawn", args, null),
 
   write: (id: string, data: string) => call("pty_write", { id, data }, undefined),
@@ -59,8 +71,58 @@ export const pty = {
 
   kill: (id: string) => call("pty_kill", { id }, undefined),
 
-  cwd: (id: string): Promise<string | null> => call("pty_cwd", { id }, null),
+  probe: (id: string): Promise<Probe> =>
+    call("pty_probe", { id }, { cwd: null, tmux: false }),
 };
+
+export interface TmuxSession {
+  name: string;
+  windows: number;
+  /** True when some client — a jterm pane, or a terminal elsewhere — has it. */
+  attached: boolean;
+}
+
+/**
+ * tmux, when the machine has it.
+ *
+ * `available` is false on Windows and on any machine without tmux installed,
+ * and every caller treats that as "this feature is switched off here" rather
+ * than as an error. `paneCommand` sends jterm's own pane shortcuts to tmux; see
+ * `lib/tmux.ts` for which ones and why.
+ */
+export const tmux = {
+  available: (): Promise<boolean> => call("tmux_available", {}, false),
+  sessions: (): Promise<TmuxSession[]> => call("tmux_sessions", {}, []),
+  /** Resolves to whether tmux took the action; false means jterm should. */
+  paneCommand: (session: string, action: string): Promise<boolean> =>
+    call("tmux_pane_command", { session, action }, false),
+  killSession: (session: string) => call("tmux_kill_session", { session }, undefined),
+};
+
+/**
+ * Control mode: tmux describing itself so jterm can draw it.
+ *
+ * `attach` returns as soon as the client is up; the session's shape arrives on
+ * `TMUX_WINDOWS_EVENT`, which is also how every later change arrives, so there
+ * is one path rather than a first-time one and a steady-state one.
+ */
+export const tmuxControl = {
+  attach: (session: string, cols: number, rows: number) =>
+    call("tmux_control_attach", { session, cols, rows }, undefined),
+  detach: (session: string) => call("tmux_control_detach", { session }, undefined),
+  attached: (): Promise<string[]> => call("tmux_control_attached", {}, []),
+  /** Resolves to whether tmux took the action; false means jterm should. */
+  paneCommand: (pane: string, action: string): Promise<boolean> =>
+    call("tmux_control_pane_command", { pane, action }, false),
+  /** Ask tmux to re-send what a pane already has on screen. Called by the pane
+   *  once it is listening, since anything sent before that is dropped. */
+  capture: (pane: string) => call("tmux_control_capture", { pane }, undefined),
+};
+
+/** Raised whenever the shape of a control session changes. */
+export const TMUX_WINDOWS_EVENT = "tmux://windows";
+/** Raised when a control session ends, however it ended. */
+export const TMUX_CLOSED_EVENT = "tmux://closed";
 
 export const session = {
   save: (json: string) => call("session_save", { json }, undefined),

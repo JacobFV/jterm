@@ -15,9 +15,15 @@
 //!     the same bytes on the way past, rather than asked for later from the
 //!     frontend, because the frontend is exactly what is not running after a
 //!     crash.
+//!   - **Recording can be switched off under a running shell.** When tmux is
+//!     behind a pane it is already keeping that pane's history, and jterm's copy
+//!     would be a second one made out of a full-screen program's redraws — which
+//!     is worse than no copy at all, because it is what a restore would show.
+//!     See `crate::tmux`.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -25,7 +31,9 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+use crate::control::{self, ControlRegistry};
 use crate::store::Store;
+use crate::tmux;
 
 /// Emitted for every decoded chunk of shell output.
 pub const DATA_EVENT: &str = "pty://data";
@@ -57,6 +65,23 @@ pub struct SpawnInfo {
     /// The program actually launched, after the fallback chain below.
     pub shell: String,
     pub cwd: String,
+    /// The tmux session this pane ended up in, or `None` for a bare shell.
+    ///
+    /// Reported rather than assumed, because asking for tmux is not the same as
+    /// getting it: a settings file that says "tmux" on a machine without tmux
+    /// installed gets an ordinary shell, and the frontend has to know which one
+    /// it has before it decides whether to restore scrollback over the top.
+    pub tmux: Option<String>,
+}
+
+/// What a poll of a live pane finds out about it.
+#[derive(Serialize)]
+pub struct Probe {
+    /// Where the shell is, when the platform will say. See `pty_probe`.
+    pub cwd: Option<String>,
+    /// Whether tmux is between jterm and the shell right now — either because
+    /// jterm put it there, or because the user ran it themselves.
+    pub tmux: bool,
 }
 
 struct Session {
@@ -64,6 +89,14 @@ struct Session {
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
+    /// Set when jterm started this pane inside tmux, which settles the recording
+    /// question for the pane's whole life — unlike a tmux the user attaches and
+    /// later leaves.
+    tmux: Option<String>,
+    /// Read by the reader thread on every chunk, written by `pty_probe`. An
+    /// atomic rather than a message because the reader must not have to wait for
+    /// anything to answer "do I write this down?".
+    recording: Arc<AtomicBool>,
 }
 
 #[derive(Default)]
@@ -197,6 +230,7 @@ pub fn pty_spawn(
     rows: u16,
     cwd: Option<String>,
     shell: Option<String>,
+    tmux: Option<String>,
 ) -> Result<SpawnInfo, String> {
     // Re-spawning into a live id would orphan the old shell with no way to
     // reach it, so the previous one is closed first.
@@ -212,23 +246,49 @@ pub fn pty_spawn(
         .openpty(size)
         .map_err(|err| format!("could not open a pseudoterminal: {err}"))?;
 
-    let program = shell
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(default_shell);
-    let mut cmd = CommandBuilder::new(&program);
+    // Asked for is not the same as available. A settings file carried to a
+    // machine without tmux — or to Windows — falls back to a bare shell rather
+    // than failing the spawn, for the same reason a deleted `cwd` does.
+    let tmux_session = tmux
+        .filter(|name| !name.is_empty())
+        .filter(|_| tmux::available());
 
-    // macOS graphical apps inherit a bare environment, and the user's PATH
-    // lives in their login files. Linux desktop sessions already export it, and
-    // a login shell there reads a different file than an interactive one
-    // (`.bash_profile`, not `.bashrc`) — which would surprise people. So this
-    // is deliberately not symmetric.
-    #[cfg(target_os = "macos")]
-    cmd.arg("-l");
+    let chosen_shell = shell.filter(|s| !s.is_empty());
+    let program = chosen_shell.clone().unwrap_or_else(default_shell);
 
     let working_dir = cwd
         .map(std::path::PathBuf::from)
         .filter(|path| path.is_dir())
         .unwrap_or_else(home_dir);
+
+    let mut cmd = match (&tmux_session, tmux::program()) {
+        (Some(name), Some(binary)) => {
+            let mut cmd = CommandBuilder::new(binary);
+            for arg in tmux::attach_argv(name, &working_dir, chosen_shell.as_deref()) {
+                cmd.arg(arg);
+            }
+            cmd
+        }
+        _ => {
+            // `mut` only on macOS, which is the one platform that adds an
+            // argument below.
+            #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+            let mut cmd = CommandBuilder::new(&program);
+            // macOS graphical apps inherit a bare environment, and the user's
+            // PATH lives in their login files. Linux desktop sessions already
+            // export it, and a login shell there reads a different file than an
+            // interactive one (`.bash_profile`, not `.bashrc`) — which would
+            // surprise people. So this is deliberately not symmetric.
+            //
+            // Not reached on the tmux path above: `-l` there would be an
+            // argument to tmux, which has its own meaning for it, and the login
+            // shell question belongs to tmux's `default-command` anyway.
+            #[cfg(target_os = "macos")]
+            cmd.arg("-l");
+            cmd
+        }
+    };
+
     cmd.cwd(&working_dir);
 
     cmd.env("TERM", "xterm-256color");
@@ -239,7 +299,10 @@ pub fn pty_spawn(
     let child = pair
         .slave
         .spawn_command(cmd)
-        .map_err(|err| format!("could not start {program}: {err}"))?;
+        .map_err(|err| match &tmux_session {
+            Some(name) => format!("could not attach to the tmux session {name}: {err}"),
+            None => format!("could not start {program}: {err}"),
+        })?;
     let pid = child.process_id();
 
     let reader = pair
@@ -256,19 +319,38 @@ pub fn pty_spawn(
     // after the shell exits.
     drop(pair.slave);
 
+    // A pane that has just become tmux-backed may be carrying a log from when it
+    // was not. Nothing will ever be added to it again, and leaving it would make
+    // the next launch paint a stale screen above a tmux that is about to redraw
+    // the whole thing anyway.
+    if tmux_session.is_some() {
+        store.drop_scrollback(&id);
+    }
+    let recording = Arc::new(AtomicBool::new(tmux_session.is_none()));
+
     let session = Arc::new(Session {
         master: Mutex::new(pair.master),
         writer: Mutex::new(writer),
         child: Mutex::new(child),
+        tmux: tmux_session.clone(),
+        recording: recording.clone(),
     });
     registry.sessions.lock().insert(id.clone(), session.clone());
 
-    spawn_reader(app, registry.inner().clone(), (*store).clone(), id, reader);
+    spawn_reader(
+        app,
+        registry.inner().clone(),
+        (*store).clone(),
+        id,
+        reader,
+        recording,
+    );
 
     Ok(SpawnInfo {
         pid,
         shell: program,
         cwd: working_dir.to_string_lossy().into_owned(),
+        tmux: tmux_session,
     })
 }
 
@@ -279,6 +361,7 @@ fn spawn_reader(
     store: Arc<Store>,
     id: String,
     mut reader: Box<dyn Read + Send>,
+    recording: Arc<AtomicBool>,
 ) {
     std::thread::spawn(move || {
         let mut decoder = Decoder::default();
@@ -297,7 +380,13 @@ fn spawn_reader(
             // Recorded before it is displayed. If the machine dies between the
             // two, the log is ahead of the screen rather than behind it, which
             // is the harmless direction.
-            store.append_scrollback(&id, &buf[..read]);
+            //
+            // Unless tmux is behind this pane, in which case the history is
+            // already being kept by something that will still be running after
+            // the crash this log exists for.
+            if recording.load(Ordering::Relaxed) {
+                store.append_scrollback(&id, &buf[..read]);
+            }
 
             text.clear();
             decoder.push(&buf[..read], &mut text);
@@ -324,12 +413,21 @@ fn spawn_reader(
 }
 
 /// Send keystrokes (or pasted text) to the shell.
+///
+/// A control-mode pane has no pty of its own — its bytes go to tmux as a
+/// `send-keys` on the one pty the whole session shares. Answered here rather
+/// than by a second command the frontend would have to choose between, so a
+/// pane is a pane no matter what is behind it.
 #[tauri::command]
 pub fn pty_write(
     registry: tauri::State<'_, Arc<PtyRegistry>>,
+    control: tauri::State<'_, Arc<ControlRegistry>>,
     id: String,
     data: String,
 ) -> Result<(), String> {
+    if control::write(&control, &id, &data) {
+        return Ok(());
+    }
     let Some(session) = registry.get(&id) else {
         // The shell exited between the keystroke and its delivery. Not an
         // error worth surfacing — the tab already shows that it is dead.
@@ -347,10 +445,17 @@ pub fn pty_write(
 #[tauri::command]
 pub fn pty_resize(
     registry: tauri::State<'_, Arc<PtyRegistry>>,
+    control: tauri::State<'_, Arc<ControlRegistry>>,
     id: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
+    // For a control-mode pane this sizes the *client* rather than the pane —
+    // tmux lays its own panes out inside whatever jterm offers, and hands the
+    // result back as a layout change.
+    if control::resize(&control, &id, cols, rows) {
+        return Ok(());
+    }
     let Some(session) = registry.get(&id) else {
         return Ok(());
     };
@@ -368,7 +473,16 @@ pub fn pty_resize(
 
 /// End the shell behind a tab that is closing.
 #[tauri::command]
-pub fn pty_kill(registry: tauri::State<'_, Arc<PtyRegistry>>, id: String) -> Result<(), String> {
+pub fn pty_kill(
+    registry: tauri::State<'_, Arc<PtyRegistry>>,
+    control: tauri::State<'_, Arc<ControlRegistry>>,
+    id: String,
+) -> Result<(), String> {
+    // Closing a control-mode pane means killing tmux's pane; there is no pty
+    // here to end, and leaving tmux's would leave a pane nothing is showing.
+    if control::kill(&control, &id) {
+        return Ok(());
+    }
     pty_kill_inner(&registry, &id);
     Ok(())
 }
@@ -380,29 +494,88 @@ fn pty_kill_inner(registry: &PtyRegistry, id: &str) {
     }
 }
 
-/// Where the shell currently is, when the platform will say.
+/// Look at a live pane: where its shell is, and whether tmux is in front of it.
 ///
-/// Only Linux answers this directly. Elsewhere the frontend learns the working
-/// directory from the OSC 7 sequence the shell emits, which is why this
-/// returning `None` is an ordinary outcome rather than a failure.
+/// Two questions in one call because they are asked together, on the same poll,
+/// about the same process — and the pid has to be taken out from under the same
+/// lock either way.
+///
+/// **Where.** Only Linux answers directly. Elsewhere the frontend learns the
+/// working directory from the OSC 7 sequence the shell emits, which is why
+/// `cwd` coming back `None` is an ordinary outcome rather than a failure.
+///
+/// **Whether.** A pane jterm put in tmux answers yes for its whole life. A pane
+/// the user ran `tmux` inside answers yes only while that client is there, and
+/// recording resumes on its own when they leave — which is the "briefly naked
+/// in between sessions" case, and it needs no separate handling because leaving
+/// tmux is simply the moment this stops finding a client.
 #[tauri::command]
-pub fn pty_cwd(registry: tauri::State<'_, Arc<PtyRegistry>>, id: String) -> Option<String> {
-    let session = registry.get(&id)?;
-    let pid = session.child.lock().process_id()?;
+pub fn pty_probe(
+    registry: tauri::State<'_, Arc<PtyRegistry>>,
+    control: tauri::State<'_, Arc<ControlRegistry>>,
+    store: tauri::State<'_, Arc<Store>>,
+    id: String,
+) -> Probe {
+    // A control-mode pane is in tmux by construction, and has no process of its
+    // own on this side to read a directory from.
+    if control.has(&id) {
+        return Probe {
+            cwd: None,
+            tmux: true,
+        };
+    }
+    let Some(session) = registry.get(&id) else {
+        return Probe {
+            cwd: None,
+            tmux: false,
+        };
+    };
+    let pid = session.child.lock().process_id();
 
-    #[cfg(target_os = "linux")]
-    {
-        std::fs::read_link(format!("/proc/{pid}/cwd"))
-            .ok()
-            .map(|path| path.to_string_lossy().into_owned())
+    // A pane jterm started in tmux is settled without asking the process table:
+    // it is tmux, and it cannot stop being tmux without the shell exiting.
+    let in_tmux = session.tmux.is_some() || pid.is_some_and(tmux::has_client);
+
+    // Only the second kind of tmux can change the answer under a running shell,
+    // and only that kind leaves a log that a resume would append to.
+    if session.tmux.is_none() {
+        let was = session.recording.swap(!in_tmux, Ordering::Relaxed);
+        if was && in_tmux {
+            // A gap in the log with nothing to explain it reads as a bug on the
+            // next launch. One dim line costs a few bytes and says what happened
+            // to the output that is missing between here and the resume.
+            //
+            // It also marks off the untidy part. This runs on a poll, so tmux's
+            // first redraw — one screenful, arriving before anything had reason
+            // to look — is already in the log above it. Bounded by the poll
+            // interval and self-describing, which is the cheap answer; the
+            // expensive one is asking the process table on every chunk of
+            // output, which would be a `/proc` read per keystroke echo.
+            store.append_scrollback(&id, TMUX_GAP_MARKER.as_bytes());
+            store.flush_scrollback(&id);
+        }
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        // Consumed so the binding is not flagged as unused off Linux.
-        let _ = pid;
-        None
-    }
+
+    let cwd = pid.and_then(|pid| {
+        #[cfg(target_os = "linux")]
+        {
+            std::fs::read_link(format!("/proc/{pid}/cwd"))
+                .ok()
+                .map(|path| path.to_string_lossy().into_owned())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            // Consumed so the binding is not flagged as unused off Linux.
+            let _ = pid;
+            None
+        }
+    });
+
+    Probe { cwd, tmux: in_tmux }
 }
+
+/// Written into the log where recording stops because tmux took over.
+const TMUX_GAP_MARKER: &str = "\r\n\x1b[2m── tmux ──\x1b[0m\r\n";
 
 #[cfg(test)]
 mod tests {

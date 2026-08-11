@@ -34,10 +34,52 @@ const MAX_TABS = 64;
 export interface Snapshot {
   workspace: Workspace;
   content: Record<string, PaneContent>;
+  /** Control-mode sessions to reattach to. See `encode`. */
+  controlSessions: string[];
 }
 
+/**
+ * The workspace as bytes — minus the parts tmux is already remembering.
+ *
+ * Control-mode tabs are stripped and their session names kept instead. Writing
+ * those tabs down would be recording a shape whose owner is still running: on
+ * the next launch tmux is the thing that knows which windows the session has,
+ * and reattaching produces the tabs again, correct even if the session changed
+ * while jterm was closed. A saved copy could only be right by luck.
+ *
+ * It also avoids a worse failure. A restored control pane has no pty and no
+ * client behind it, so it would mount, spawn nothing, and sit there as a
+ * terminal that never says anything.
+ */
 export function encode(workspace: Workspace, content: Record<string, PaneContent>): string {
-  return JSON.stringify({ version: SNAPSHOT_VERSION, workspace, content });
+  const controlSessions = new Set<string>();
+  const tabs = workspace.tabs.filter((tab) => {
+    const session = controlSessionOf(tab);
+    if (session === null) return true;
+    controlSessions.add(session);
+    return false;
+  });
+
+  const activeTabId = tabs.some((tab) => tab.id === workspace.activeTabId)
+    ? workspace.activeTabId
+    : (tabs[0]?.id ?? null);
+
+  return JSON.stringify({
+    version: SNAPSHOT_VERSION,
+    workspace: { ...workspace, tabs, activeTabId },
+    content,
+    controlSessions: [...controlSessions],
+  });
+}
+
+/** The control session a tab belongs to, or `null` if it is an ordinary tab. */
+function controlSessionOf(tab: Tab): string | null {
+  for (const pane of Object.values(tab.panes)) {
+    if (pane.kind === "terminal" && pane.tmuxPane !== undefined && pane.tmux) {
+      return pane.tmux;
+    }
+  }
+  return null;
 }
 
 export function decode(json: string | null | undefined): Snapshot | null {
@@ -88,7 +130,24 @@ export function decode(json: string | null | undefined): Snapshot | null {
   return {
     workspace: { tabs, activeTabId, sidebarOpen: rawWorkspace.sidebarOpen === true },
     content,
+    controlSessions: decodeSessions(parsed.controlSessions),
   };
+}
+
+/**
+ * Session names to reattach to in control mode.
+ *
+ * Each one is handed to tmux as an argument, so it is length-capped like every
+ * other string out of this file — the snapshot lives in a user-writable
+ * directory and is read after a crash, which is not the moment to start
+ * trusting it.
+ */
+function decodeSessions(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((name): name is string => typeof name === "string" && name.length > 0)
+    .map((name) => name.slice(0, 128))
+    .slice(0, MAX_TABS);
 }
 
 function decodeTab(raw: unknown): Tab | null {
@@ -148,6 +207,10 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         kind: "terminal",
         title,
         cwd: typeof raw.cwd === "string" ? raw.cwd : undefined,
+        // Length-capped like every other string out of this file: a session
+        // name reaches tmux as an argument, and a hand-edited snapshot is not
+        // a thing to hand unbounded input to.
+        tmux: typeof raw.tmux === "string" && raw.tmux ? raw.tmux.slice(0, 128) : undefined,
       };
     case "notepad":
       return {

@@ -15,6 +15,14 @@
  *   - **Sizing.** A pane that is not visible still has a size, deliberately —
  *     see `PaneGrid` — so its shell is never told the window is 0×0 and never
  *     re-wraps its output while you are not looking.
+ *   - **Standing down for tmux** (`sessionRef`). When the pane is backed by a
+ *     tmux session, none of the first two happen. tmux redraws the screen on
+ *     attach, so replaying a log over the top would paint a stale picture that
+ *     the redraw then argues with; and the shell that has the half-typed line
+ *     is still running, so there is nothing to type back — the real line comes
+ *     back on its own, which is better than a reconstruction of it. The draft
+ *     mirror keeps running regardless, because it is also what the command log
+ *     is built from and tmux keeps no such log.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -24,10 +32,11 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 
 import { applyInput, draftFrom, emptyDraft, replayBytes, type Draft } from "@/lib/draft";
-import { history, pty, scrollback as scrollbackApi } from "@/lib/ipc";
+import { history, pty, scrollback as scrollbackApi, tmuxControl as tmuxControlApi } from "@/lib/ipc";
 import { scanOsc } from "@/lib/osc";
 import { ready as ptyBusReady, subscribePty } from "@/lib/ptyBus";
 import { registerTerminal } from "@/lib/terminals";
+import { sessionNameFor, tmuxAvailable } from "@/lib/tmux";
 import { getContent, updateContent } from "@/state/content";
 import { getSettings, subscribeSettings } from "@/state/settings";
 import type { TerminalPaneState } from "@/state/workspace";
@@ -110,11 +119,40 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
   /** Coalesces draft records; every keystroke would be a line per character. */
   const draftLogTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /**
+   * The tmux session behind this pane, or `undefined` for a bare shell.
+   *
+   * Held in a ref rather than read from `pane` because it has to survive the
+   * shell exiting and being restarted with Enter — that new shell belongs in
+   * the same session as the old one.
+   */
+  const sessionRef = useRef<string | undefined>(pane.tmux);
+  /** A tmux the *user* started in an ordinary pane, seen by the poll below. */
+  const inTmuxRef = useRef(false);
+
+  /**
+   * Whether anything tmux is between this pane and its shell, either way round.
+   *
+   * The one question the draft machinery asks. What it is really asking is
+   * "would writing this down be a second copy of something already kept?", and
+   * both kinds of tmux answer yes.
+   */
+  const underTmux = useCallback(
+    () => sessionRef.current !== undefined || inTmuxRef.current,
+    [],
+  );
+
   // Read once: the pane's id and its restored state are fixed for the lifetime
   // of this component, and the effect below must not re-run when a title or a
   // directory changes underneath it.
   const paneId = pane.id;
-  const initialRef = useRef({ cwd: pane.cwd, draft: getContent(paneId).draft ?? "" });
+  const initialRef = useRef({
+    cwd: pane.cwd,
+    draft: getContent(paneId).draft ?? "",
+    tmux: pane.tmux,
+    /** Set when tmux owns this pane outright — see `lib/tmuxControl.ts`. */
+    control: pane.tmuxPane !== undefined,
+  });
   const metaRef = useRef(onMeta);
   metaRef.current = onMeta;
 
@@ -122,6 +160,14 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
   const spawn = useCallback(async (cwd: string | undefined) => {
     const term = termRef.current;
     if (!term) return;
+
+    // A control-mode pane is already running. There is no pty to open: the pane
+    // exists inside tmux, its bytes arrive on the session's one control client,
+    // and spawning here would put a second shell behind a pane that has one.
+    if (initialRef.current.control) {
+      exitedRef.current = false;
+      return;
+    }
 
     exitedRef.current = false;
     await ptyBusReady();
@@ -134,16 +180,23 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
       // the next shell started — including the one Enter starts in a pane
       // whose shell has exited — and leaves running shells alone.
       shell: getSettings().shell || undefined,
+      tmux: sessionRef.current,
     });
     if (info) {
       cwdRef.current = info.cwd;
-      metaRef.current({ cwd: info.cwd, exited: false });
+      // Taken from the answer rather than from what was asked for: a session
+      // requested on a machine without tmux comes back as a bare shell, and a
+      // pane that went on believing otherwise would stop recording a history
+      // nothing else is keeping.
+      sessionRef.current = info.tmux ?? undefined;
+      metaRef.current({ cwd: info.cwd, exited: false, tmux: info.tmux ?? undefined });
       void history.append(paneId, {
         kind: "spawn",
         at: new Date().toISOString(),
         shell: info.shell,
         cwd: info.cwd,
         pid: info.pid,
+        tmux: info.tmux ?? undefined,
       });
     }
   }, [paneId]);
@@ -203,10 +256,19 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
     pending.settle = window.setTimeout(fireReplay, REPLAY_SETTLE_MS);
   }, [fireReplay]);
 
-  /** Read the shell's real working directory and report it if it moved. */
+  /**
+   * Read the shell's real working directory and report it if it moved — and,
+   * on the same trip, find out whether tmux is in front of it.
+   *
+   * The second question is asked here rather than on a timer of its own because
+   * it is about the same process, changes on the same sort of timescale, and
+   * the backend has to take the pid out from under the same lock either way.
+   */
   const checkCwd = useCallback(() => {
     if (exitedRef.current) return;
-    void pty.cwd(paneId).then((cwd) => {
+    void pty.probe(paneId).then((probe) => {
+      inTmuxRef.current = probe.tmux;
+      const cwd = probe.cwd;
       if (!cwd || cwd === cwdRef.current) return;
       cwdRef.current = cwd;
       metaRef.current({ cwd });
@@ -350,7 +412,11 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
       const submitted = draftRef.current.text;
 
       draftRef.current = applyInput(draftRef.current, data);
-      updateContent(paneId, { draft: draftRef.current.text });
+      // The mirror runs either way — the command log below is made out of it —
+      // but under tmux it is not written down. What the snapshot holds is what
+      // gets typed back on restore, and typing a line back at a shell that
+      // never lost it would leave the user with it twice.
+      if (!underTmux()) updateContent(paneId, { draft: draftRef.current.text });
 
       if (submitting && submitted.trim()) {
         void history.append(paneId, {
@@ -368,7 +434,10 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
       }
 
       // The unsubmitted line, on a timer. This is what makes the terminal's own
-      // file a complete record rather than only a list of what ran.
+      // file a complete record rather than only a list of what ran — and it is
+      // the one part of that record tmux makes redundant, since the line is
+      // still sitting in a readline that is still running.
+      if (underTmux()) return;
       if (draftLogTimer.current !== null) clearTimeout(draftLogTimer.current);
       draftLogTimer.current = setTimeout(() => {
         draftLogTimer.current = null;
@@ -457,17 +526,45 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
 
     let disposed = false;
     void (async () => {
-      // Scrollback first, so the shell's new prompt lands underneath the
-      // output it is continuing from rather than on top of it.
-      const previous = await scrollbackApi.read(paneId);
+      // Settled before anything is restored, because the answer changes what
+      // restoring means. A pane already carrying a session name keeps it — that
+      // is a restore, and the session is the thing being restored to. A new one
+      // takes the setting's word for it and gets a session of its own.
+      // Control mode settles it without asking: tmux owns the pane, so every
+      // question below about restoring one is already answered.
+      const wanted = initialRef.current.control
+        ? initialRef.current.tmux
+        : (initialRef.current.tmux ??
+          (getSettings().shellBackend === "tmux" ? sessionNameFor(paneId) : undefined));
+      sessionRef.current =
+        wanted !== undefined && (initialRef.current.control || (await tmuxAvailable()))
+          ? wanted
+          : undefined;
       if (disposed) return;
-      if (previous) {
-        term.write(previous);
-        term.write("\x1b[0m\r\n\x1b[2m── session restored ──\x1b[0m\r\n");
+
+      // Neither of these is right in front of a tmux attach. The log would
+      // paint a picture of the session that tmux is about to redraw properly,
+      // and the draft belongs to a shell that still has it.
+      if (sessionRef.current === undefined) {
+        // Scrollback first, so the shell's new prompt lands underneath the
+        // output it is continuing from rather than on top of it.
+        const previous = await scrollbackApi.read(paneId);
+        if (disposed) return;
+        if (previous) {
+          term.write(previous);
+          term.write("\x1b[0m\r\n\x1b[2m── session restored ──\x1b[0m\r\n");
+        }
       }
+
       await spawn(initialRef.current.cwd);
       if (disposed) return;
-      armReplay(initialRef.current.draft);
+
+      // A control-mode pane has a screenful of history already, and no way to
+      // have heard about it before now: the layout that created this component
+      // is the same message that would have carried it. Asked for here, with
+      // the subscription above already in place.
+      if (initialRef.current.control) tmuxControlApi.capture(paneId);
+      if (sessionRef.current === undefined) armReplay(initialRef.current.draft);
       // The prompt lands shortly after this; a repaint once the pane has
       // settled is what makes a restored session look restored rather than
       // empty.
@@ -493,7 +590,7 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
       // cleanup also runs on an ordinary unmount, and killing a shell because
       // React re-rendered would be a very expensive bug.
     };
-  }, [paneId, armReplay, bumpReplay, cancelReplay, checkCwd, spawn]);
+  }, [paneId, armReplay, bumpReplay, cancelReplay, checkCwd, spawn, underTmux]);
 
   // Focus follows the app's idea of the focused pane, not the DOM's, so
   // clicking a tab returns the caret to wherever it was in that tab.

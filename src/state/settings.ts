@@ -27,6 +27,23 @@ export type CursorStyle = "bar" | "block" | "underline";
 /** Where a file goes when you open one: a tab of its own, or a split. */
 export type FileOpenTarget = "tab" | "pane";
 
+/**
+ * What is behind a new terminal, and therefore what keeps its history.
+ *
+ * `direct` is a shell on a pty, and jterm's own snapshot is what survives a
+ * crash — the mechanism the rest of this app is built around. `tmux` puts each
+ * new terminal in a session of its own, so the *process* survives rather than a
+ * replayed transcript of it, and jterm stands down: no scrollback log, no draft
+ * replay, because the shell that has the real command line is still running.
+ *
+ * There is deliberately no third choice for "jsonl unless already inside tmux".
+ * Nobody can answer that at settings time, and it is not a preference: a pane
+ * that already has tmux in front of it is being recorded twice no matter which
+ * backend it started on, so jterm detects that and stops on its own. See
+ * `pty_probe` in the Rust side.
+ */
+export type ShellBackend = "direct" | "tmux";
+
 export interface Settings {
   theme: ThemeChoice;
   /** The chrome's text size. The terminal has its own, below. */
@@ -41,6 +58,13 @@ export interface Settings {
   scrollback: number;
   /** Empty means whatever the platform considers the login shell. */
   shell: string;
+  /** What a new terminal runs on. Ignored where tmux is not installed, and on
+   *  Windows, where a request for it quietly gets an ordinary shell. */
+  shellBackend: ShellBackend;
+  /** Whether a tmux-backed pane's split, focus and resize shortcuts act on
+   *  tmux's panes instead of jterm's. Off puts them back to splitting jterm,
+   *  around the tmux pane rather than inside it. */
+  tmuxKeys: boolean;
   sidebarWidth: number;
   showHiddenFiles: boolean;
   /** What opening a file does — a new tab, or a split beside what you are
@@ -78,6 +102,8 @@ export const DEFAULTS: Settings = {
   cursorBlink: true,
   scrollback: 10_000,
   shell: "",
+  shellBackend: "direct",
+  tmuxKeys: true,
   sidebarWidth: 220,
   showHiddenFiles: false,
   openFilesIn: "tab",
@@ -88,6 +114,7 @@ export const DEFAULTS: Settings = {
 const THEMES: ThemeChoice[] = ["system", "dark", "light"];
 const CURSORS: CursorStyle[] = ["bar", "block", "underline"];
 const FILE_OPEN_TARGETS: FileOpenTarget[] = ["tab", "pane"];
+const SHELL_BACKENDS: ShellBackend[] = ["direct", "tmux"];
 const SPLIT_DIRECTIONS: Direction[] = ["right", "left", "down", "up"];
 
 /* ── Reading the file ────────────────────────────────────────────────────── */
@@ -118,6 +145,8 @@ export function decodeSettings(json: string | null | undefined): Settings | null
     cursorBlink: parsed.cursorBlink === undefined ? DEFAULTS.cursorBlink : parsed.cursorBlink === true,
     scrollback: Math.round(clamp(parsed.scrollback, LIMITS.scrollback, DEFAULTS.scrollback)),
     shell: text(parsed.shell, DEFAULTS.shell),
+    shellBackend: pick(parsed.shellBackend, SHELL_BACKENDS, DEFAULTS.shellBackend),
+    tmuxKeys: parsed.tmuxKeys === undefined ? DEFAULTS.tmuxKeys : parsed.tmuxKeys === true,
     sidebarWidth: Math.round(clamp(parsed.sidebarWidth, LIMITS.sidebarWidth, DEFAULTS.sidebarWidth)),
     showHiddenFiles: parsed.showHiddenFiles === true,
     openFilesIn: pick(parsed.openFilesIn, FILE_OPEN_TARGETS, DEFAULTS.openFilesIn),

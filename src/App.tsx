@@ -20,6 +20,7 @@ import { FileTree } from "@/components/shell/FileTree";
 import type { PaneMenuActions } from "@/components/shell/PaneMenu";
 import { ResizeHandles } from "@/components/shell/ResizeHandles";
 import { TabStrip } from "@/components/shell/TabStrip";
+import { TmuxSessions } from "@/components/shell/TmuxSessions";
 import {
   Workspace as PaneWorkspace,
   type TabDrag,
@@ -28,12 +29,15 @@ import {
 import { readClipboard, writeClipboard } from "@/lib/clipboard";
 import {
   SESSION_IMPORTED_EVENT,
+  TMUX_CLOSED_EVENT,
+  TMUX_WINDOWS_EVENT,
   dialog,
   fs,
   history as historyApi,
   listen,
   scrollback as scrollbackApi,
   session,
+  tmuxControl,
 } from "@/lib/ipc";
 import { kindForPath } from "@/lib/filetypes";
 import { resolve, type ActionId } from "@/lib/keymap";
@@ -46,6 +50,8 @@ import {
 import { openSettingsWindow } from "@/lib/settingsWindow";
 import { isTauri } from "@/lib/tauri";
 import { terminalHandle } from "@/lib/terminals";
+import { isTmuxAction, runControlAction, runTmuxAction, tmuxAvailable } from "@/lib/tmux";
+import type { TmuxSessionShape } from "@/lib/tmuxControl";
 import { useSettings } from "@/lib/useSettings";
 import { disposePane } from "@/panes/registry";
 import { loadContent, onContentChange, snapshotContent } from "@/state/content";
@@ -73,6 +79,15 @@ export function App() {
   const [sidebarRoot, setSidebarRoot] = useState<string | null>(null);
   const settings = useSettings();
 
+  // Whether this machine has tmux at all, which is what decides if the feature
+  // is offered rather than merely failing when reached. Asked once; the answer
+  // cannot usefully change while the window is open.
+  const [hasTmux, setHasTmux] = useState(false);
+  const [pickingSession, setPickingSession] = useState(false);
+  useEffect(() => {
+    void tmuxAvailable().then(setHasTmux);
+  }, []);
+
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
 
@@ -90,9 +105,15 @@ export function App() {
       const live = livePaneIds(snapshot?.workspace ?? initialRef.current);
       // Anything on disk or in the window belonging to a pane that no longer
       // exists is from a session that ended badly. Nothing else will clean it.
+      //
+      // Control-mode panes are exempt: their tabs are rebuilt from tmux a
+      // moment from now, and pruning on the strength of a snapshot that
+      // deliberately does not mention them would delete the logs of panes that
+      // are about to come back.
       void scrollbackApi.prune(live);
       void historyApi.prune(live);
       setLoaded(true);
+      if (snapshot) reattachRef.current(snapshot.controlSessions);
     })();
   }, []);
 
@@ -121,6 +142,63 @@ export function App() {
       stop?.();
     };
   }, []);
+
+  /* ── Control-mode sessions ────────────────────────────────────────── */
+
+  /**
+   * tmux describing itself, turned into tabs.
+   *
+   * The whole of control mode's structure arrives here. tmux is the authority
+   * on which windows exist and how their panes are arranged, so this listens
+   * rather than asks, and the reducer replaces those tabs' trees outright. Tab
+   * and pane ids are derived from tmux's own, which is what keeps a layout
+   * change from remounting the terminals inside it — see `lib/tmuxControl.ts`.
+   */
+  useEffect(() => {
+    const stops: (() => void)[] = [];
+    let disposed = false;
+    const keep = (unlisten: () => void) => {
+      if (disposed) unlisten();
+      else stops.push(unlisten);
+    };
+
+    void listen<TmuxSessionShape>(TMUX_WINDOWS_EVENT, (shape) => {
+      dispatch({ type: "tmux/sync", session: shape.session, windows: shape.windows });
+    }).then(keep);
+
+    // Detached, killed, or the client died — all the same from here, and none
+    // of them are a reason to end anything inside the session.
+    void listen<string>(TMUX_CLOSED_EVENT, (name) => {
+      dispatch({ type: "tmux/closed", session: name });
+    }).then(keep);
+
+    return () => {
+      disposed = true;
+      for (const stop of stops) stop();
+    };
+  }, []);
+
+  /**
+   * Reattach to whatever was attached when the app last closed.
+   *
+   * Control-mode tabs are not in the snapshot — see `state/snapshot.ts` — so
+   * this is what brings them back, and it brings them back from tmux rather
+   * than from a recording of tmux. A session that has since gone away simply
+   * yields no windows and no tabs.
+   *
+   * The size is a guess until the first pane has measured itself, at which
+   * point the real one follows within a frame. Attaching cannot wait for a pane
+   * that does not exist until attaching has happened.
+   */
+  const reattach = useCallback((sessions: string[]) => {
+    for (const name of sessions) {
+      void tmuxControl.attach(name, 80, 24);
+    }
+  }, []);
+  // Read through a ref by the restore effect, which runs once on mount and must
+  // not be rebuilt — or re-run — when this callback is.
+  const reattachRef = useRef(reattach);
+  reattachRef.current = reattach;
 
   /* ── Persistence ──────────────────────────────────────────────────── */
 
@@ -400,7 +478,8 @@ export function App() {
   const closePaneRef = useRef(closePane);
   closePaneRef.current = closePane;
 
-  const runAction = useCallback(
+  /** Do the jterm thing: split jterm's panes, move between jterm's panes. */
+  const runLocal = useCallback(
     (id: ActionId, index?: number) => {
       const current = workspaceRef.current;
       const tab = activeTab(current);
@@ -502,6 +581,44 @@ export function App() {
     [],
   );
 
+  /**
+   * The same shortcuts, offered to tmux first when the focused pane is in it.
+   *
+   * This is what "seamless" comes down to. Inside a tmux-backed pane `Mod+D`
+   * makes a tmux split, not a jterm one — so the split lands in the session
+   * that survives the app, and the muscle memory does not have to know which
+   * kind of pane it is aimed at. Tabs are never forwarded: a jterm tab is a
+   * window of the app and has no tmux counterpart.
+   *
+   * tmux declining is not a dead end. `runTmuxAction` resolves false when a
+   * focus move has run out of tmux panes to reach, and the jterm move then
+   * happens instead — which is how the focus crosses from the last tmux pane to
+   * the jterm pane beside it without the user noticing there was a boundary.
+   */
+  const runAction = useCallback(
+    (id: ActionId, index?: number) => {
+      const tab = activeTab(workspaceRef.current);
+      const pane = tab ? tab.panes[tab.focusedPaneId] : undefined;
+      const session = pane?.kind === "terminal" ? pane.tmux : undefined;
+      const controlPane = pane?.kind === "terminal" ? pane.tmuxPane : undefined;
+
+      if (session && isTmuxAction(id) && getSettings().tmuxKeys) {
+        // In control mode the pane is addressable directly, which is exact;
+        // otherwise the best that can be aimed at is the session's own idea of
+        // where it is.
+        const offer = controlPane
+          ? runControlAction(pane!.id, id)
+          : runTmuxAction(session, id);
+        void offer.then((taken) => {
+          if (!taken) runLocal(id, index);
+        });
+        return;
+      }
+      runLocal(id, index);
+    },
+    [runLocal],
+  );
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const hit = resolve(event);
@@ -544,6 +661,26 @@ export function App() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-surface-0">
+      {pickingSession ? (
+        <TmuxSessions
+          onClose={() => setPickingSession(false)}
+          onAttach={(session) => {
+            setPickingSession(false);
+            dispatch({ type: "tab/open", kind: "terminal", seed: { tmux: session } });
+          }}
+          onAttachControl={(session) => {
+            setPickingSession(false);
+            // No tab is made here. tmux is about to say which windows it has,
+            // and the tabs come from that — making one now would leave a stray
+            // pane beside the ones tmux is about to describe.
+            void tmuxControl.attach(session, 80, 24);
+          }}
+          onDetach={(session) => {
+            void tmuxControl.detach(session);
+          }}
+        />
+      ) : null}
+
       <TabStrip
         tabs={tabs}
         activeTabId={workspace.activeTabId}
@@ -553,6 +690,7 @@ export function App() {
         // The label says "Open file…" under a new-tab button, so it makes a tab
         // whatever the preference says.
         onOpenFile={() => void openFile("tab")}
+        onTmuxSessions={hasTmux ? () => setPickingSession(true) : null}
         paneMenu={paneMenu}
         sidebarOpen={workspace.sidebarOpen}
         onToggleSidebar={() => dispatch({ type: "ui/sidebar" })}

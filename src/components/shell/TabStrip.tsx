@@ -19,7 +19,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { PanelLeft, Plus, Settings as SettingsIcon, X } from "lucide-react";
+import { Layers, PanelLeft, Plus, Settings as SettingsIcon, X } from "lucide-react";
 
 import { MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -53,6 +53,9 @@ interface TabStripProps {
   onNew: (kind: PaneKind) => void;
   /** Show the file chooser and open whatever comes back. */
   onOpenFile: () => void;
+  /** Offer the tmux sessions on this machine, or `null` where there is no tmux
+   *  — which is Windows, and any machine without it installed. */
+  onTmuxSessions: (() => void) | null;
   onReorder: (tabId: string, toIndex: number) => void;
   /** What a tab's kind icon offers — the same menu a split pane's header has,
    *  aimed at whichever pane that tab is focused on. It lives here too because
@@ -76,6 +79,7 @@ export function TabStrip({
   onClose,
   onNew,
   onOpenFile,
+  onTmuxSessions,
   onReorder,
   paneMenu,
   sidebarOpen,
@@ -274,7 +278,7 @@ export function TabStrip({
 
         {/* Left gravity: the new-tab control sits against the rightmost tab and
             travels with it, rather than parking at the far edge of the strip. */}
-        <NewTabButton onNew={onNew} onOpenFile={onOpenFile} />
+        <NewTabButton onNew={onNew} onOpenFile={onOpenFile} onTmuxSessions={onTmuxSessions} />
 
         {/* The window's drag handle, and where a double-click toggles maximise —
             which Tauri wires to the drag region for us. Zero-basis, so it only
@@ -343,9 +347,11 @@ function ChromeButton({
 function NewTabButton({
   onNew,
   onOpenFile,
+  onTmuxSessions,
 }: {
   onNew: (kind: PaneKind) => void;
   onOpenFile: () => void;
+  onTmuxSessions: (() => void) | null;
 }) {
   const menu = useMenu();
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -412,6 +418,19 @@ function NewTabButton({
               }}
             />
           ))}
+          {/* Kept out of `NEW_PANE_MENU` because it is not a pane kind. It
+              makes a terminal like the first entry does — the difference is
+              what that terminal is attached to. */}
+          {onTmuxSessions ? (
+            <MenuItem
+              icon={Layers}
+              label="tmux session…"
+              onSelect={() => {
+                menu.close();
+                onTmuxSessions();
+              }}
+            />
+          ) : null}
         </Menu>
       ) : null}
     </div>

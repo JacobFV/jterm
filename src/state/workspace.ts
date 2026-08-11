@@ -14,6 +14,12 @@
 
 import { newId } from "@/lib/utils";
 import {
+  panesFor,
+  toNode,
+  windowTabId,
+  type TmuxWindow,
+} from "@/lib/tmuxControl";
+import {
   type Axis,
   type DropEdge,
   type Direction,
@@ -49,6 +55,26 @@ export interface TerminalPaneState extends PaneCommon {
   cwd?: string;
   /** True once the shell has exited and the pane is only showing its remains. */
   exited?: boolean;
+  /**
+   * The tmux session this pane is attached to, when it is in one.
+   *
+   * Persisted, and it is the field that makes a tmux-backed pane worth having:
+   * a restored pane reattaches to a session that never stopped running, so what
+   * comes back is the shell itself rather than a picture of what it printed.
+   * Absent for an ordinary pane, which is the default.
+   */
+  tmux?: string;
+  /**
+   * tmux's own id for this pane, as `%3`, when jterm is drawing tmux's panes
+   * as its own — control mode. See `lib/tmuxControl.ts`.
+   *
+   * `tmux` alone means tmux is running *inside* this pane and drawing itself.
+   * `tmux` and this together mean the pane has no pty at all: its bytes arrive
+   * from the one control client the session shares, and it must not be spawned.
+   * The distinction is the whole of what `TerminalPane` needs to tell them
+   * apart.
+   */
+  tmuxPane?: string;
 }
 
 export interface NotepadPaneState extends PaneCommon {
@@ -259,7 +285,11 @@ export type Action =
   | { type: "pane/ratio"; tabId: string; nodeId: string; ratio: number }
   | { type: "pane/nudge"; tabId: string; direction: Direction }
   | { type: "pane/zoom"; tabId: string; paneId?: string }
-  | { type: "pane/meta"; tabId: string; paneId: string; patch: Partial<PaneState> };
+  | { type: "pane/meta"; tabId: string; paneId: string; patch: Partial<PaneState> }
+  /** tmux has described a control session; make the tabs agree with it. */
+  | { type: "tmux/sync"; session: string; windows: TmuxWindow[] }
+  /** A control session ended or was detached from; its tabs go with it. */
+  | { type: "tmux/closed"; session: string };
 
 /** How far one keyboard resize step moves a divider. */
 const NUDGE = 0.03;
@@ -583,7 +613,102 @@ export function reduce(state: Workspace, action: Action): Workspace {
         if (shallowEqual(pane, next)) return tab;
         return { ...tab, panes: { ...tab.panes, [action.paneId]: next } };
       });
+
+    /**
+     * Make the tabs of one control session say what tmux says.
+     *
+     * Wholesale for the windows named, rather than a diff: tmux has just
+     * described its own state and there is nothing here worth preserving
+     * against it. What *is* preserved is identity — tab ids and pane ids are
+     * derived from tmux's, so a window that was already open keeps its position
+     * in the strip and its terminals keep running. Only the tree is replaced.
+     *
+     * Windows this session no longer has lose their tabs. Windows of *other*
+     * sessions, and every ordinary tab, are left alone: one session's news says
+     * nothing about anyone else.
+     */
+    case "tmux/sync": {
+      const wanted = new Map(
+        action.windows.map((window) => [windowTabId(action.session, window.id), window]),
+      );
+
+      const kept = state.tabs.filter(
+        (tab) => !belongsTo(tab, action.session) || wanted.has(tab.id),
+      );
+
+      const tabs = kept.map((tab) => {
+        const window = wanted.get(tab.id);
+        if (!window) return tab;
+        wanted.delete(tab.id);
+        return syncTab(tab, action.session, window);
+      });
+
+      // Whatever is left is new, and joins the strip in tmux's order.
+      for (const [tabId, window] of wanted) {
+        tabs.push(syncTab(blankTab(tabId), action.session, window));
+      }
+
+      const activeTabId =
+        state.activeTabId !== null && tabs.some((tab) => tab.id === state.activeTabId)
+          ? state.activeTabId
+          : (tabs[tabs.length - 1]?.id ?? null);
+
+      return { ...state, tabs, activeTabId };
+    }
+
+    /**
+     * The session is gone — detached, killed, or the client died.
+     *
+     * The tabs go without disposing their panes. A control pane's `dispose`
+     * kills tmux's pane, and detaching from a session must not be a way to
+     * destroy the work in it.
+     */
+    case "tmux/closed": {
+      const tabs = state.tabs.filter((tab) => !belongsTo(tab, action.session));
+      if (tabs.length === state.tabs.length) return state;
+      const activeTabId =
+        state.activeTabId !== null && tabs.some((tab) => tab.id === state.activeTabId)
+          ? state.activeTabId
+          : (tabs[0]?.id ?? null);
+      return { ...state, tabs, activeTabId };
+    }
   }
+}
+
+/** Whether a tab is one of `session`'s control-mode windows. */
+function belongsTo(tab: Tab, session: string): boolean {
+  return Object.values(tab.panes).some(
+    (pane) => pane.kind === "terminal" && pane.tmuxPane !== undefined && pane.tmux === session,
+  );
+}
+
+function blankTab(id: string): Tab {
+  return { id, root: leaf(`${id}-root`, ""), panes: {}, focusedPaneId: "", zoomedPaneId: null };
+}
+
+/**
+ * One tab, made to match one tmux window.
+ *
+ * The focused pane is kept if tmux still has it — moving between panes inside
+ * tmux and having jterm forget where you were would make the focus jump on
+ * every split — and otherwise falls to whichever pane tmux lists first.
+ */
+function syncTab(tab: Tab, session: string, window: TmuxWindow): Tab {
+  const panes = panesFor(session, window.layout);
+  const root = toNode(window.layout, windowTabId(session, window.id));
+  const ids = Object.keys(panes);
+  const focusedPaneId = panes[tab.focusedPaneId] ? tab.focusedPaneId : (ids[0] ?? "");
+
+  return {
+    ...tab,
+    // tmux's window name, unless the user has renamed the tab here.
+    title: tab.title ?? (window.name || undefined),
+    root,
+    panes,
+    focusedPaneId,
+    // A pane zoomed in jterm that tmux no longer has is not zoomed any more.
+    zoomedPaneId: tab.zoomedPaneId && panes[tab.zoomedPaneId] ? tab.zoomedPaneId : null,
+  };
 }
 
 /**
@@ -592,6 +717,11 @@ export function reduce(state: Workspace, action: Action): Workspace {
  * Only the working directory, and only between terminals: splitting a terminal
  * is nearly always "another shell, here", and having to `cd` back to where you
  * already were is the small friction that makes people stop using splits.
+ *
+ * Notably *not* the tmux session. Two panes attached to one session are two
+ * views of the same shell, each fighting the other over how wide it is — so a
+ * split gets a session of its own, which the new pane works out for itself from
+ * the setting.
  */
 function inheritFrom(source: PaneState | undefined, kind: PaneKind): Partial<PaneState> {
   if (kind === "terminal" && source?.kind === "terminal" && source.cwd) {

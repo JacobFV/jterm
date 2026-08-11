@@ -33,6 +33,12 @@ runs on your behalf.
   tab strip, to replace it with a terminal, a notepad, a browser or a file — or
   to move another open tab into that slot. Moving a tab in is an even trade: the
   pane it displaces leaves as a tab of its own, so nothing is destroyed.
+- **Works through tmux, if you already do.** A terminal can run on a tmux
+  session instead of a bare shell, so what survives a crash is the *shell*
+  rather than a recording of it — and `Mod+D` splits tmux rather than splitting
+  around it. Or attach in **control mode**, where a tmux window becomes a jterm
+  tab and a tmux pane becomes a real jterm pane: no nested status bar, no tmux
+  drawn inside a box. Either way, from the **+** menu.
 - **Settles in a settings window.** Theme, type sizes, cursor, scrollback,
   shell, and every shortcut — in a second window rather than a modal, so you can
   watch the terminal change as you drag.
@@ -115,6 +121,89 @@ Text panes are different on purpose: the **buffer** is saved continuously, the
 **file** only when you save. A crash therefore leaves your file untouched and
 your unsaved work recoverable.
 
+## tmux
+
+All of the above reconstructs a shell from what jterm wrote down. tmux does not
+have to: the shell is in a server process that outlives the app, so what comes
+back is the thing itself. Where that is available it is simply better, and jterm
+stands down rather than keeping a second copy.
+
+**Settings → tmux → New terminals run on** chooses. On `A tmux session`, each
+new terminal is `tmux new-session -A -s jterm-<pane>`; jterm then keeps no
+scrollback log for it and replays no draft, because the shell that has the real
+command line never stopped running. The command log in `terminals/*.jsonl` is
+still written — tmux keeps no such record, so it is the one thing not made
+redundant. Terminals already open keep whatever they started on.
+
+Closing a pane ends the session jterm made for it, because closing a pane means
+the shell is finished with. Quitting or crashing does not. That asymmetry is the
+whole feature: what survives is exactly what you never deliberately closed. A
+session you attached to yourself is never ended by jterm — the pane detaches and
+leaves it as it was.
+
+**Pane shortcuts drive tmux.** In a tmux-backed pane, splitting, moving the
+focus and resizing act on tmux's panes rather than jterm's, so the split lands
+in the session that survives and the muscle memory does not have to know which
+kind of pane it is aimed at. Moving the focus off the edge of a tmux layout
+arrives at the jterm pane next door, so the boundary between the two split trees
+is not a trap. Tab shortcuts are never forwarded: a jterm tab is a window of the
+app and has no tmux counterpart. Turn the setting off to split jterm *around* a
+tmux pane instead. `Mod+Shift+W` always closes the jterm pane, never the tmux
+one — routed to `kill-pane` it would destroy a one-pane session and leave a dead
+shell behind, which is a keystroke that does not close what it is aimed at.
+
+**+ → tmux session…** lists what is running and offers each of it two ways,
+including sessions jterm knows nothing about. That is the case jterm's own
+snapshot structurally cannot cover: ssh somewhere, lose the connection, and the
+draft it saved belongs to a shell that no longer exists.
+
+### Control mode
+
+The second of those two ways. Everything above puts tmux *inside* a pane — one
+pty per pane, tmux drawing its own status line and its own dividers in a box
+jterm knows nothing about. Control mode inverts it: one pty runs `tmux -CC`,
+tmux stops drawing and starts *describing* itself, and jterm renders the
+description with its own panes and its own splits.
+
+**A tmux window becomes a jterm tab; a tmux pane becomes a real terminal in a
+real jterm split.** No nested status bar, because nothing is nested. Splitting
+with `Mod+D` splits tmux, and the tab strip fills with the session's windows.
+Every pane's history is fetched from tmux on arrival, so attaching to a session
+left running last week looks like arriving rather than starting.
+
+tmux is the authority throughout. jterm listens for `%layout-change` and
+rebuilds those tabs from what tmux says, so a split made in another terminal
+attached to the same session appears here too. Tab and pane ids are *derived*
+from tmux's own, which is what keeps a layout change from remounting the
+terminals inside it — the shells never notice.
+
+Control-mode tabs are **not** in the snapshot. Only the session names are: tmux
+is still running and still knows which windows it has, so a saved copy of that
+shape could only be right by luck. On the next launch jterm reattaches and the
+tabs come back from tmux, correct even if the session changed while jterm was
+closed.
+
+Detaching, from the same panel, takes the tabs away and leaves the session
+exactly as it was. Closing a control-mode pane kills tmux's pane, since that is
+what closing a pane means everywhere else here.
+
+Two things it does not do. jterm's tab shortcuts are never forwarded — a jterm
+tab is a window of the app, and `Mod+T` opening a tmux window would make the tab
+strip disagree with itself. And a control-mode tab cannot be folded into another
+tab as a split, because its layout is not jterm's to rearrange.
+
+Running `tmux` yourself inside an ordinary pane is noticed too — jterm pauses
+its scrollback recording while a tmux client is under the pane's shell, and
+resumes when you leave, since otherwise the log fills with a full-screen
+program's redraws and a restore paints them back. The pause is written into the
+log as a `── tmux ──` line so the gap is not mistaken for a bug. It runs on the
+same poll as the working-directory check, so up to one screenful of tmux's first
+redraw lands above the marker.
+
+None of this exists on Windows, where tmux does not, or on any machine without
+it installed: the settings section and the menu entry are absent, and a settings
+file carried from a machine that had it quietly gets an ordinary shell.
+
 ## Known limits
 
 - **Browser panes are iframes.** A real embedded webview was built first and
@@ -185,9 +274,14 @@ src/
   panes/      one file per pane kind, plus registry.tsx
   components/ shell/ — tab strip, window controls, file tree, workspace
               settings/ — the second window
-  lib/        draft.ts (the mirrored prompt line), osc.ts, keymap.ts, …
+  lib/        draft.ts (the mirrored prompt line), osc.ts, keymap.ts,
+              tmux.ts (which panes are in tmux, and what the shortcuts
+              mean when they are), tmuxControl.ts (tmux's layout as
+              jterm's split tree), …
 src-tauri/src/
   pty.rs      pseudoterminals
+  tmux.rs     sessions jterm starts, and noticing ones the user starts
+  control.rs  the `tmux -CC` protocol, and tmux's layout as a tree
   store.rs    durable snapshots, scrollback and settings
   files.rs    reading and saving edited files
 ```

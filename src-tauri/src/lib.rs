@@ -11,10 +11,12 @@
 //! `src/panes/BrowserPane.tsx`. Opening a URL in the user's real browser is the
 //! opener plugin's job.
 
+pub mod control;
 pub mod files;
 pub mod history;
 pub mod pty;
 pub mod store;
+pub mod tmux;
 #[cfg(windows)]
 mod win32_snap;
 pub mod window_chrome;
@@ -39,6 +41,7 @@ fn data_dir() -> PathBuf {
 pub fn run() {
     let store = Store::open(data_dir());
     let registry = Arc::new(PtyRegistry::new());
+    let control = Arc::new(control::ControlRegistry::new());
     let maximize_bounds = Arc::new(MaximizeButtonBounds::new());
 
     tauri::Builder::default()
@@ -47,13 +50,23 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(store)
         .manage(registry)
+        .manage(control)
         .manage(maximize_bounds)
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
             pty::pty_kill,
-            pty::pty_cwd,
+            pty::pty_probe,
+            tmux::tmux_available,
+            tmux::tmux_sessions,
+            tmux::tmux_pane_command,
+            tmux::tmux_kill_session,
+            control::tmux_control_attach,
+            control::tmux_control_detach,
+            control::tmux_control_attached,
+            control::tmux_control_pane_command,
+            control::tmux_control_capture,
             store::session_save,
             store::session_load,
             store::session_dir,

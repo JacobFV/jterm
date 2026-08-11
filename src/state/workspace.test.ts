@@ -279,3 +279,178 @@ describe("pane/split", () => {
     expect(tab.focusedPaneId).toBe(first);
   });
 });
+
+/* ── Control mode ────────────────────────────────────────────────────────── */
+
+import type { TmuxWindow } from "@/lib/tmuxControl";
+import { windowTabId } from "@/lib/tmuxControl";
+
+function tmuxPane(n: number, width = 80, height = 24) {
+  return { kind: "pane" as const, id: `tmux-work-${n}`, tmux: `%${n}`, width, height };
+}
+
+function window(id: string, layout: TmuxWindow["layout"], name = "bash"): TmuxWindow {
+  return { id, name, active: true, layout };
+}
+
+/** The state after tmux has described a session with the given windows. */
+function synced(windows: TmuxWindow[], from: Workspace = emptyWorkspace()): Workspace {
+  return reduce(from, { type: "tmux/sync", session: "work", windows });
+}
+
+describe("tmux/sync", () => {
+  it("adds a tab per tmux window, alongside the ordinary ones", () => {
+    const start = emptyWorkspace();
+    const state = synced([window("@0", tmuxPane(0)), window("@1", tmuxPane(1))], start);
+
+    expect(state.tabs).toHaveLength(3);
+    // The tab that was already open is untouched: one session's news says
+    // nothing about anything else in the window.
+    expect(state.tabs[0].id).toBe(start.tabs[0].id);
+    expect(state.tabs.map((tab) => tab.id).slice(1)).toEqual([
+      windowTabId("work", "@0"),
+      windowTabId("work", "@1"),
+    ]);
+  });
+
+  it("names the panes so they can be written to, and marks them control-mode", () => {
+    const state = synced([window("@0", tmuxPane(3))]);
+    const tab = state.tabs.find((entry) => entry.id === windowTabId("work", "@0"))!;
+    expect(tab.panes["tmux-work-3"]).toMatchObject({
+      kind: "terminal",
+      tmux: "work",
+      tmuxPane: "%3",
+    });
+    expect(tab.focusedPaneId).toBe("tmux-work-3");
+  });
+
+  it("keeps a tab's identity when tmux only changes its shape", () => {
+    // The property that keeps live terminals alive: a split arriving from tmux
+    // must not make a new tab or new panes for the panes that already existed,
+    // because `Workspace` renders from ids and would unmount everything else.
+    const one = synced([window("@0", tmuxPane(0))]);
+    const before = one.tabs.find((tab) => tab.id === windowTabId("work", "@0"))!;
+
+    const two = synced(
+      [
+        window("@0", {
+          kind: "split",
+          axis: "x",
+          width: 80,
+          height: 24,
+          children: [tmuxPane(0, 40), tmuxPane(1, 39)],
+        }),
+      ],
+      one,
+    );
+    const after = two.tabs.find((tab) => tab.id === windowTabId("work", "@0"))!;
+
+    expect(after.id).toBe(before.id);
+    expect(after.panes["tmux-work-0"]).toBeDefined();
+    expect(countPanes(after.root)).toBe(2);
+    expect(paneIds(after.root).sort()).toEqual(["tmux-work-0", "tmux-work-1"]);
+  });
+
+  it("keeps the focused pane if tmux still has it", () => {
+    const one = synced([
+      window("@0", {
+        kind: "split",
+        axis: "x",
+        width: 80,
+        height: 24,
+        children: [tmuxPane(0, 40), tmuxPane(1, 39)],
+      }),
+    ]);
+    const tabId = windowTabId("work", "@0");
+    const focused = reduce(one, { type: "pane/focus", tabId, paneId: "tmux-work-1" });
+    expect(focused.tabs.find((tab) => tab.id === tabId)!.focusedPaneId).toBe("tmux-work-1");
+
+    // A resize elsewhere should not move the caret out of the pane it is in.
+    const again = synced(
+      [
+        window("@0", {
+          kind: "split",
+          axis: "x",
+          width: 80,
+          height: 24,
+          children: [tmuxPane(0, 20), tmuxPane(1, 59)],
+        }),
+      ],
+      focused,
+    );
+    expect(again.tabs.find((tab) => tab.id === tabId)!.focusedPaneId).toBe("tmux-work-1");
+  });
+
+  it("falls back to a pane that exists when the focused one is killed", () => {
+    const two = synced([
+      window("@0", {
+        kind: "split",
+        axis: "x",
+        width: 80,
+        height: 24,
+        children: [tmuxPane(0, 40), tmuxPane(1, 39)],
+      }),
+    ]);
+    const tabId = windowTabId("work", "@0");
+    const focused = reduce(two, { type: "pane/focus", tabId, paneId: "tmux-work-1" });
+
+    const one = synced([window("@0", tmuxPane(0))], focused);
+    expect(one.tabs.find((tab) => tab.id === tabId)!.focusedPaneId).toBe("tmux-work-0");
+  });
+
+  it("drops the tab of a window tmux no longer has", () => {
+    const two = synced([window("@0", tmuxPane(0)), window("@1", tmuxPane(1))]);
+    const one = synced([window("@0", tmuxPane(0))], two);
+
+    expect(one.tabs.some((tab) => tab.id === windowTabId("work", "@1"))).toBe(false);
+    expect(one.tabs.some((tab) => tab.id === windowTabId("work", "@0"))).toBe(true);
+  });
+
+  it("leaves another session's tabs alone", () => {
+    const mine = synced([window("@0", tmuxPane(0))]);
+    const theirs = reduce(mine, {
+      type: "tmux/sync",
+      session: "other",
+      windows: [
+        {
+          id: "@0",
+          name: "bash",
+          active: true,
+          layout: { kind: "pane", id: "tmux-other-0", tmux: "%0", width: 80, height: 24 },
+        },
+      ],
+    });
+    expect(theirs.tabs.some((tab) => tab.id === windowTabId("work", "@0"))).toBe(true);
+    expect(theirs.tabs.some((tab) => tab.id === windowTabId("other", "@0"))).toBe(true);
+  });
+
+  it("takes the window's name for the tab", () => {
+    const state = synced([window("@0", tmuxPane(0), "vim")]);
+    expect(state.tabs.find((tab) => tab.id === windowTabId("work", "@0"))!.title).toBe("vim");
+  });
+
+  it("never leaves the active tab pointing at something that is gone", () => {
+    const two = synced([window("@0", tmuxPane(0)), window("@1", tmuxPane(1))]);
+    const active = reduce(two, { type: "tab/select", tabId: windowTabId("work", "@1") });
+    const one = synced([window("@0", tmuxPane(0))], active);
+
+    expect(one.tabs.some((tab) => tab.id === one.activeTabId)).toBe(true);
+  });
+});
+
+describe("tmux/closed", () => {
+  it("takes the session's tabs and leaves everything else", () => {
+    const start = emptyWorkspace();
+    const state = synced([window("@0", tmuxPane(0)), window("@1", tmuxPane(1))], start);
+    const closed = reduce(state, { type: "tmux/closed", session: "work" });
+
+    expect(closed.tabs).toHaveLength(1);
+    expect(closed.tabs[0].id).toBe(start.tabs[0].id);
+    expect(closed.activeTabId).toBe(start.tabs[0].id);
+  });
+
+  it("does nothing for a session that has no tabs here", () => {
+    const state = synced([window("@0", tmuxPane(0))]);
+    expect(reduce(state, { type: "tmux/closed", session: "elsewhere" })).toBe(state);
+  });
+});

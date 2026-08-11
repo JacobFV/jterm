@@ -26,8 +26,9 @@ import {
 } from "lucide-react";
 
 import { history, pty, scrollback } from "@/lib/ipc";
+import { disposeSession } from "@/lib/tmux";
 import { dropContent } from "@/state/content";
-import type { PaneKind, PaneState } from "@/state/workspace";
+import type { PaneKind, PaneState, TerminalPaneState } from "@/state/workspace";
 import { BrowserPane } from "./BrowserPane";
 import { ImagePane } from "./ImagePane";
 import { MediaPane } from "./MediaPane";
@@ -48,8 +49,12 @@ export interface PaneKindDef {
    * Release whatever the pane owns outside React. Called when a pane is closed
    * for good — not on an ordinary unmount, which also happens when a tab is
    * torn down at exit and must not kill anything.
+   *
+   * Handed the whole pane rather than its id, because what a terminal owns now
+   * depends on what it is: a tmux-backed pane has a session to end as well as a
+   * pty to close, and only the pane knows which session.
    */
-  dispose?: (paneId: string) => void;
+  dispose?: (pane: PaneState) => void;
 }
 
 export const PANE_KINDS: PaneKindDef[] = [
@@ -58,10 +63,15 @@ export const PANE_KINDS: PaneKindDef[] = [
     label: "Terminal",
     icon: TerminalSquare,
     Component: TerminalPane,
-    dispose: (paneId) => {
-      void pty.kill(paneId);
-      void scrollback.drop(paneId);
-      void history.drop(paneId);
+    dispose: (pane) => {
+      void pty.kill(pane.id);
+      void scrollback.drop(pane.id);
+      void history.drop(pane.id);
+      // Closing a pane means the shell is finished with, so the session jterm
+      // made for it goes too. Quitting the app does not come through here, and
+      // that asymmetry is the feature: what survives a crash is exactly what
+      // was never deliberately closed.
+      disposeSession(pane.id, (pane as TerminalPaneState).tmux);
     },
   },
   { kind: "notepad", label: "Notepad", icon: FileText, Component: NotepadPane },
@@ -83,7 +93,7 @@ export function paneKind(kind: PaneKind): PaneKindDef {
 
 /** Everything a closing pane owns, given up in one place. */
 export function disposePane(pane: PaneState): void {
-  BY_KIND.get(pane.kind)?.dispose?.(pane.id);
+  BY_KIND.get(pane.kind)?.dispose?.(pane);
   dropContent(pane.id);
 }
 

@@ -13,13 +13,14 @@
  * on macOS, jterm's on Windows and Linux.
  */
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { ResizeHandles } from "@/components/shell/ResizeHandles";
 import { WindowControls } from "@/components/shell/WindowControls";
 import { dialog } from "@/lib/ipc";
 import type { ActionId } from "@/lib/keymap";
 import { MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
+import { tmuxAvailable } from "@/lib/tmux";
 import { DEFAULTS, LIMITS, resetSettings, updateSettings } from "@/state/settings";
 import { useSettings } from "@/lib/useSettings";
 import { KeyBindings } from "./KeyBindings";
@@ -28,6 +29,13 @@ import { Button, NumberInput, Row, Section, Segmented, Slider, TextInput, Toggle
 
 export function SettingsWindow() {
   const settings = useSettings();
+
+  // This window is its own webview, so it asks for itself rather than being
+  // told — there is nothing shared between the two but the settings file.
+  const [hasTmux, setHasTmux] = useState(false);
+  useEffect(() => {
+    void tmuxAvailable().then(setHasTmux);
+  }, []);
 
   const setKeys = useCallback((keys: Partial<Record<ActionId, string>>) => {
     updateSettings({ keys });
@@ -151,6 +159,39 @@ export function SettingsWindow() {
             />
           </Row>
         </Section>
+
+        {/* Only where there is a tmux to talk to. A choice that cannot be
+            honoured is worse than one that is not offered — it looks like a
+            setting that does not work. */}
+        {hasTmux ? (
+          <Section title="tmux">
+            <Row
+              label="New terminals run on"
+              hint="A shell is jterm's own: it dies with the app, and what survives a crash is the snapshot jterm keeps of it. A tmux session outlives the app, so a restored tab reattaches to the shell itself rather than to a picture of it — and jterm stops keeping its own copy, since tmux already has one."
+            >
+              <Segmented
+                label="New terminals run on"
+                value={settings.shellBackend}
+                onChange={(shellBackend) => updateSettings({ shellBackend })}
+                options={[
+                  { value: "direct", label: "A shell" },
+                  { value: "tmux", label: "A tmux session" },
+                ]}
+              />
+            </Row>
+
+            <Row
+              label="Pane shortcuts drive tmux"
+              hint="In a pane that is in tmux, splitting and moving between panes acts on tmux's panes rather than jterm's — so the split lands in the session that survives. Moving off the edge of a tmux layout still arrives at the jterm pane next door. Turn this off to split jterm around the tmux pane instead."
+            >
+              <Toggle
+                label="Pane shortcuts drive tmux"
+                value={settings.tmuxKeys}
+                onChange={(tmuxKeys) => updateSettings({ tmuxKeys })}
+              />
+            </Row>
+          </Section>
+        ) : null}
 
         <Section title="Files">
           <Row
