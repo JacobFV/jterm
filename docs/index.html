@@ -234,6 +234,22 @@
       .btn:active { transform: translateY(0); }
       .btn .sz { font-weight: 400; opacity: 0.62; }
 
+      /* The platform mark. Sized in `em` so it tracks the label rather than
+         needing its own breakpoint, and drawn in `currentColor` so it is the
+         same ink as the text through every state the button has. The holes in
+         it — Tux's eyes and front — are holes rather than painted shapes, so
+         they show whatever the button is filled with and stay right when the
+         hover lightens it. */
+      .os-mark {
+        display: inline-flex;
+        width: 1.25em;
+        height: 1.25em;
+        margin-right: -2px;
+      }
+      .os-mark svg { width: 100%; height: 100%; fill: currentColor; }
+      /* Nothing to reserve space for until the platform is known. */
+      .os-mark:empty { display: none; }
+
       .alt-note { font-family: var(--mono); font-size: 12px; color: var(--ink-3); }
       .alt-note a { color: var(--ink-2); text-underline-offset: 3px; }
       .alt-note a:hover { color: var(--gold); }
@@ -451,6 +467,13 @@
 
           <div class="cta">
             <a class="btn" id="primary-dl" href="https://github.com/JacobFV/jterm/releases/latest">
+              <!-- Filled in by `guess()` once the platform is known, and empty
+                   until then: a placeholder mark would have to be some other
+                   platform's, which is worse than none for the half-second it
+                   shows. `aria-hidden` because the label beside it already
+                   names the platform, and a screen reader saying "Apple
+                   Download for macOS" is one Apple too many. -->
+              <span class="os-mark" id="primary-icon" aria-hidden="true"></span>
               <span id="primary-label">Download</span>
               <span class="sz" id="primary-size"></span>
             </a>
@@ -764,6 +787,31 @@
         }
 
         /**
+         * The three platform marks, as inline SVG.
+         *
+         * Inline rather than files: they are a few hundred bytes each, and the
+         * page's whole point is to be one request that works before anything
+         * else has loaded. `currentColor` throughout, so the button's own ink
+         * decides — including on hover, where the background moves.
+         *
+         * Tux is drawn as one path with `evenodd`, which makes the eyes, beak
+         * and front *holes* rather than shapes filled with a guess at the
+         * button's colour. That is what keeps them correct when the hover
+         * lightens the gold underneath.
+         */
+        const MARKS = {
+          apple:
+            '<svg viewBox="0 0 24 24" role="img"><path d="M17.05 12.53c-.02-2.4 1.96-3.55 2.05-3.61-1.12-1.63-2.86-1.86-3.48-1.88-1.48-.15-2.89.87-3.64.87-.75 0-1.91-.85-3.14-.83-1.61.02-3.1.94-3.93 2.38-1.68 2.91-.43 7.22 1.2 9.58.8 1.16 1.75 2.46 3 2.41 1.2-.05 1.66-.78 3.11-.78 1.45 0 1.86.78 3.13.75 1.29-.02 2.11-1.18 2.9-2.34.91-1.34 1.29-2.64 1.31-2.71-.03-.01-2.51-.96-2.53-3.84zM14.7 5.4c.66-.8 1.11-1.92.99-3.03-.95.04-2.11.63-2.79 1.43-.61.71-1.15 1.85-1.01 2.94 1.06.08 2.15-.54 2.81-1.34z"/></svg>',
+          windows:
+            '<svg viewBox="0 0 24 24" role="img"><path d="M3 5.1l7.4-1.02v7.15H3zm8.6-1.18L21 2.6v8.43h-9.4zM3 12.43h7.4v7.15L3 18.56zm8.6 0H21v8.43l-9.4-1.32z"/></svg>',
+          linux:
+            '<svg viewBox="0 0 24 24" role="img">' +
+            '<path fill-rule="evenodd" d="M12 1.9c-2.32 0-4.2 1.88-4.2 4.2 0 .98.34 1.88.9 2.6C6.73 9.94 5.4 12.2 5.4 14.9c0 3.62 2.94 5.95 6.6 5.95s6.6-2.33 6.6-5.95c0-2.7-1.33-4.96-3.3-6.2.56-.72.9-1.62.9-2.6 0-2.32-1.88-4.2-4.2-4.2zm-1.55 3.05a.9.9 0 1 0 0 1.8.9.9 0 0 0 0-1.8zm3.1 0a.9.9 0 1 0 0 1.8.9.9 0 0 0 0-1.8zM12 11.9c1.6 0 2.85 1.72 2.85 3.9S13.6 19.5 12 19.5s-2.85-1.52-2.85-3.7S10.4 11.9 12 11.9z"/>' +
+            '<path d="M9.15 20.4c1.05 0 1.9.55 1.9 1.2s-.85 1.05-1.9 1.05-1.9-.4-1.9-1.05.85-1.2 1.9-1.2zm5.7 0c1.05 0 1.9.55 1.9 1.2s-.85 1.05-1.9 1.05-1.9-.4-1.9-1.05.85-1.2 1.9-1.2z"/>' +
+            '</svg>',
+        };
+
+        /**
          * Which build this visitor most likely wants.
          *
          * Architecture is the awkward part. `userAgentData` reports it, but
@@ -789,6 +837,7 @@
             return {
               want: intel ? "macOS · Intel" : "macOS · Apple silicon",
               label: intel ? "Download for macOS (Intel)" : "Download for macOS",
+              icon: MARKS.apple,
               alt: intel
                 ? { text: "On Apple silicon?", want: "macOS · Apple silicon" }
                 : { text: "On an Intel Mac?", want: "macOS · Intel" },
@@ -800,6 +849,7 @@
             return {
               want: "Windows · installer",
               label: "Download for Windows",
+              icon: MARKS.windows,
               alt: { text: "Prefer the MSI?", want: "Windows · MSI" },
               mod: "Ctrl",
             };
@@ -810,6 +860,7 @@
             return {
               want: arm ? "Linux arm64 · AppImage" : "Linux x86_64 · AppImage",
               label: arm ? "Download for Linux (arm64)" : "Download for Linux",
+              icon: MARKS.linux,
               alt: arm
                 ? { text: "Prefer a .deb?", want: "Linux arm64 · .deb" }
                 : { text: "Prefer a .deb?", want: "Linux x86_64 · .deb" },
@@ -817,7 +868,10 @@
             };
           }
 
-          return { want: null, label: "See all downloads", alt: null, mod: "Ctrl" };
+          // No mark for a platform that could not be identified: any of the
+          // three would be a claim about the visitor's machine that this does
+          // not have the evidence for.
+          return { want: null, label: "See all downloads", alt: null, icon: "", mod: "Ctrl" };
         }
 
         async function run() {
@@ -829,6 +883,7 @@
           // not depend on the release, and an API that is slow or unreachable
           // should still leave a button that says what it will get you.
           document.getElementById("primary-label").textContent = me.label;
+          document.getElementById("primary-icon").innerHTML = me.icon;
 
           let release;
           try {
