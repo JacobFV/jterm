@@ -43,14 +43,25 @@ runs on your behalf.
   icon — for **Theme ▸**, and pointing at an entry *applies* it: the terminal you
   are already looking at repaints under the pointer, and leaving the menu puts
   back what you had. Twenty of them, from Gruvbox and Solarized through a
-  green phosphor CRT and Windows 3.1's Hotdog Stand, plus eight that are alive —
+  green phosphor CRT and Windows 3.1's Hotdog Stand, plus ten that are alive —
   a Mandelbrot breathing in and out of itself, a Julia set turning inside out,
-  drifting nebulae, aurora, digital rain, a starfield, a lava lamp, and a
-  sunflower head whose spirals wind and unwind forever — drawn behind the panes
-  with the terminal translucent over them, in the theme's own colours. They hold
-  still under `prefers-reduced-motion`. Each living theme's swatch is that
-  drawing, running: a still frame of a fractal tells you nothing about the one
-  thing you are choosing it for.
+  drifting nebulae, aurora, digital rain, a starfield, a lava lamp, a sunflower
+  head whose spirals wind and unwind forever, Turing's own reaction–diffusion
+  growing the patterns that are on actual animals, and a Lorenz attractor
+  tracing the original picture of chaos — drawn behind the panes with the
+  terminal translucent over them, in the theme's own colours. They hold still
+  under `prefers-reduced-motion`. Each living theme's swatch is that drawing,
+  running: a still frame of a fractal tells you nothing about the one thing you
+  are choosing it for.
+- **And lets you turn all of that down.** Three sliders in **Settings →
+  Appearance**, shown only when the theme actually draws something. **Motion**
+  at zero settles the drawing and then holds it — a still wallpaper in the
+  theme's colours, rather than a choice between weather and giving the theme
+  up. **Presence** is how much shows through the terminal, and at zero there is
+  no drawing at all. **Reacts to the shell** speeds the weather up while your
+  own output is flooding and lets it settle when the prompt comes back, so a
+  long build is visible out of the corner of your eye without occupying a pixel
+  of chrome; at zero it runs on a plain clock.
 - **Settles in a settings window.** Theme, type sizes, cursor, scrollback,
   shell, and every shortcut — in a second window rather than a modal, so you can
   watch the terminal change as you drag.

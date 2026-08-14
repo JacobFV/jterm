@@ -28,7 +28,9 @@ export type AmbientId =
   | "rain"
   | "warp"
   | "lava"
-  | "bloom";
+  | "bloom"
+  | "reaction"
+  | "lorenz";
 
 /** The sixteen ANSI slots, plus the three colours a terminal needs besides. */
 export interface Palette {
@@ -1070,6 +1072,68 @@ export const THEMES: Theme[] = [
       brightMagenta: "#ffb8e2",
       brightCyan: "#aeeade",
       brightWhite: "#fff2f8",
+    },
+  },
+  {
+    id: "reaction",
+    name: "Turing",
+    group: "Living",
+    base: "dark",
+    ambient: "reaction",
+    // Like Bloom, a pattern of edges rather than a wash — it takes a thin veil
+    // without ever putting a bright field behind a line of text.
+    veil: 0.7,
+    accent: "#7fe3c4",
+    palette: {
+      bg: "#04100e",
+      fg: "#d8f2ea",
+      cursor: "#7fe3c4",
+      black: "#123029",
+      red: "#ff8a7a",
+      green: "#7fe3a4",
+      yellow: "#e8dd8f",
+      blue: "#6fc9d8",
+      magenta: "#a9a8ee",
+      cyan: "#7fe3c4",
+      white: "#bcd6ce",
+      brightBlack: "#2c5a4d",
+      brightRed: "#ffa89a",
+      brightGreen: "#a5f0c2",
+      brightYellow: "#f4ebb0",
+      brightBlue: "#9adde8",
+      brightMagenta: "#c6c5f6",
+      brightCyan: "#a6f0da",
+      brightWhite: "#f0fffa",
+    },
+  },
+  {
+    id: "lorenz",
+    name: "Strange Attractor",
+    group: "Living",
+    base: "dark",
+    ambient: "lorenz",
+    veil: 0.72,
+    accent: "#8fb8ff",
+    palette: {
+      bg: "#05060f",
+      fg: "#dfe4f5",
+      cursor: "#8fb8ff",
+      black: "#171b30",
+      red: "#ff8095",
+      green: "#8ee0b0",
+      yellow: "#f0cf92",
+      blue: "#8fb8ff",
+      magenta: "#c3a2f5",
+      cyan: "#8ad9ea",
+      white: "#c2c8dd",
+      brightBlack: "#36406b",
+      brightRed: "#ffa2b3",
+      brightGreen: "#b0efcb",
+      brightYellow: "#f7e2b6",
+      brightBlue: "#b2cdff",
+      brightMagenta: "#d9c3ff",
+      brightCyan: "#b0e9f5",
+      brightWhite: "#f4f7ff",
     },
   },
 ];

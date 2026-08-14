@@ -594,6 +594,238 @@ function makeWarp(): Painter {
 
 /* ── The loop ────────────────────────────────────────────────────────────── */
 
+/**
+ * Turing patterns: two chemicals, and nothing else.
+ *
+ * The Gray–Scott model is the whole of it. `A` is fed in everywhere at rate
+ * `f`; `B` converts `A` into more of itself wherever it already is, and is
+ * drained at rate `k + f`. Both diffuse, `A` twice as fast as `B`. That is
+ * four numbers and a Laplacian, and out of it come the spots, stripes and
+ * fingerprints on actual animals — which is the reason to have it behind a
+ * terminal: it is not a picture of something, it is the thing itself running.
+ *
+ * `f` and `k` decide which pattern you get, and the interesting ones live in a
+ * narrow band. These are set for the labyrinth — the one that never settles,
+ * because a backdrop that reaches a steady state is a still image with a fan
+ * running to keep it there. It drifts slowly along that band so the character
+ * of the pattern changes over the hour.
+ *
+ * Deliberately at half the usual buffer. This is the only painter that is
+ * iterative rather than closed-form — every frame depends on the last, so it
+ * cannot be computed at a coarse rate and interpolated — and the cost is per
+ * cell per step.
+ */
+function makeReaction(): Painter {
+  let field: Field | null = null;
+  let a: Float32Array | null = null;
+  let b: Float32Array | null = null;
+  let scratchA: Float32Array | null = null;
+  let scratchB: Float32Array | null = null;
+  let last = 0;
+
+  const reset = () => {
+    field = null;
+    a = null;
+    b = null;
+    scratchA = null;
+    scratchB = null;
+    last = 0;
+  };
+
+  const seed = (w: number, h: number) => {
+    const n = w * h;
+    a = new Float32Array(n).fill(1);
+    b = new Float32Array(n);
+    scratchA = new Float32Array(n);
+    scratchB = new Float32Array(n);
+    // A handful of blots of `B`. The pattern grows outward from these, so too
+    // many and the screen is uniform before it has drawn anything.
+    for (let i = 0; i < 14; i++) {
+      const cx = Math.floor(Math.random() * w);
+      const cy = Math.floor(Math.random() * h);
+      const r = 3 + Math.floor(Math.random() * 4);
+      for (let y = -r; y <= r; y++) {
+        for (let x = -r; x <= r; x++) {
+          if (x * x + y * y > r * r) continue;
+          const px = (cx + x + w) % w;
+          const py = (cy + y + h) % h;
+          b[py * w + px] = 1;
+        }
+      }
+    }
+  };
+
+  const paint = (frame: Frame) => {
+    // Half size: iterative, so its cost cannot be amortised the way the
+    // escape-time painters' can.
+    if (field === null) field = makeField(frame.w * 0.5, frame.h * 0.5);
+    if (field === null) return;
+    const { w, h, image } = field;
+    if (a === null || b === null || a.length !== w * h) seed(w, h);
+    if (a === null || b === null || scratchA === null || scratchB === null) return;
+
+    // Steps are taken against the painters' clock, so the motion slider scales
+    // the chemistry rather than the frame rate — at zero it genuinely stops.
+    const dt = Math.min(0.25, Math.max(0, frame.t - last));
+    last = frame.t;
+    // Enough that the pattern grows in over a couple of seconds rather than a
+    // couple of minutes; it takes roughly six hundred steps to become one.
+    const steps = Math.min(16, Math.round(dt * 240));
+
+    const DA = 1.0;
+    const DB = 0.5;
+    // A slow wander along the band where the labyrinth lives.
+    const f = 0.0545 + 0.0032 * Math.sin(frame.t * 0.011);
+    const k = 0.0620 + 0.0018 * Math.cos(frame.t * 0.008);
+
+    for (let step = 0; step < steps; step++) {
+      for (let y = 0; y < h; y++) {
+        // Wrapped rather than clamped: an edge the pattern behaves differently
+        // against is the first thing the eye finds in an otherwise even field.
+        const up = ((y - 1 + h) % h) * w;
+        const down = ((y + 1) % h) * w;
+        const row = y * w;
+        for (let x = 0; x < w; x++) {
+          const left = (x - 1 + w) % w;
+          const right = (x + 1) % w;
+          const i = row + x;
+
+          // The weighted nine-point Laplacian — orthogonal neighbours at .2,
+          // diagonals at .05, centre at -1 — and it is not an aesthetic
+          // choice. Explicit diffusion is only stable while `D·dt/dx² ≤ 0.25`,
+          // and the plain five-point kernel has a centre of -4, which is four
+          // times over that budget at `DA = 1` and `dt = 1`. It does not
+          // degrade gracefully: the field goes to NaN within a hundred steps
+          // and the backdrop is simply the background colour forever.
+          const la =
+            (a[row + left] + a[row + right] + a[up + x] + a[down + x]) * 0.2 +
+            (a[up + left] + a[up + right] + a[down + left] + a[down + right]) * 0.05 -
+            a[i];
+          const lb =
+            (b[row + left] + b[row + right] + b[up + x] + b[down + x]) * 0.2 +
+            (b[up + left] + b[up + right] + b[down + left] + b[down + right]) * 0.05 -
+            b[i];
+
+          const av = a[i];
+          const bv = b[i];
+          const reaction = av * bv * bv;
+          scratchA[i] = av + (DA * la - reaction + f * (1 - av));
+          scratchB[i] = bv + (DB * lb + reaction - (k + f) * bv);
+        }
+      }
+      a.set(scratchA);
+      b.set(scratchB);
+    }
+
+    const data = image.data;
+    let p = 0;
+    for (let i = 0; i < w * h; i++) {
+      // `B`'s concentration is the picture. It sits well below 1 even where the
+      // pattern is strongest, so it is stretched before it is used.
+      const v = Math.min(1, b[i] * 2.6);
+      const c = ramp(frame.colors, v * 0.5 + frame.t * 0.006);
+      const k2 = v * v;
+      data[p++] = frame.bg[0] + (c[0] - frame.bg[0]) * k2;
+      data[p++] = frame.bg[1] + (c[1] - frame.bg[1]) * k2;
+      data[p++] = frame.bg[2] + (c[2] - frame.bg[2]) * k2;
+      data[p++] = 255;
+    }
+    field.ctx.putImageData(image, 0, 0);
+
+    frame.ctx.imageSmoothingEnabled = true;
+    frame.ctx.imageSmoothingQuality = "high";
+    frame.ctx.drawImage(field.canvas, 0, 0, frame.w, frame.h);
+  };
+
+  return { paint, reset };
+}
+
+/**
+ * The Lorenz attractor, drawn as the path rather than the shape.
+ *
+ * Three equations Lorenz wrote down for convection in air, which turned out
+ * never to repeat and never to leave a bounded region — the original picture of
+ * deterministic chaos, and the reason "butterfly effect" is a phrase. What is
+ * drawn is one trajectory being integrated in real time, smeared into a buffer
+ * that fades: the two lobes appear because the path keeps returning to them,
+ * not because anything here knows they are there.
+ */
+function makeLorenz(): Painter {
+  let field: Field | null = null;
+  let x = 0.1;
+  let y = 0;
+  let z = 0;
+  let last = 0;
+
+  const reset = () => {
+    field = null;
+    x = 0.1;
+    y = 0;
+    z = 0;
+    last = 0;
+  };
+
+  const paint = (frame: Frame) => {
+    if (field === null) {
+      field = makeField(frame.w, frame.h);
+      if (field === null) return;
+      field.ctx.fillStyle = css(frame.bg);
+      field.ctx.fillRect(0, 0, field.w, field.h);
+    }
+    const { ctx: fctx, w, h } = field;
+
+    // The trail's life. Without a bleed the buffer saturates into a solid
+    // silhouette and the sense of something moving along a path is lost.
+    fctx.globalCompositeOperation = "source-over";
+    fctx.fillStyle = css(frame.bg, 0.022);
+    fctx.fillRect(0, 0, w, h);
+
+    const dt = Math.min(0.25, Math.max(0, frame.t - last));
+    last = frame.t;
+
+    const SIGMA = 10;
+    const RHO = 28;
+    const BETA = 8 / 3;
+    // Small enough that Euler stays on the attractor rather than spiralling off
+    // it, and many of them per frame so the trail is a line and not a dotted
+    // one.
+    const h0 = 0.0035;
+    const steps = Math.min(900, Math.round(dt * 2600));
+
+    fctx.globalCompositeOperation = "lighter";
+    // The attractor lives roughly within ±25 in x and y, and 0..50 in z.
+    const scale = Math.min(w, h) / 62;
+    const cx = w / 2;
+    const cy = h / 2;
+
+    for (let i = 0; i < steps; i++) {
+      const dx = SIGMA * (y - x);
+      const dy = x * (RHO - z) - y;
+      const dz = x * y - BETA * z;
+      x += dx * h0;
+      y += dy * h0;
+      z += dz * h0;
+
+      const px = cx + x * scale;
+      const py = cy + (z - 25) * scale;
+      if (px < 0 || px >= w || py < 0 || py >= h) continue;
+
+      // Coloured by which lobe it is in and how fast it is going, so the
+      // crossings between them are the bright part.
+      const speed = Math.min(1, Math.sqrt(dx * dx + dy * dy + dz * dz) / 260);
+      fctx.fillStyle = css(ramp(frame.colors, speed * 0.6 + frame.t * 0.008), 0.5);
+      fctx.fillRect(px, py, 1, 1);
+    }
+    fctx.globalCompositeOperation = "source-over";
+
+    frame.ctx.imageSmoothingEnabled = true;
+    frame.ctx.imageSmoothingQuality = "high";
+    frame.ctx.drawImage(field.canvas, 0, 0, frame.w, frame.h);
+  };
+
+  return { paint, reset };
+}
+
 /* ── The table of painters ───────────────────────────────────────────────── */
 
 /** The three shapes a painter comes in. See the three sections above. */
@@ -615,6 +847,8 @@ const PAINTERS: Record<AmbientId, Slot> = {
   nebula: { kind: "stateful", make: makeNebula },
   rain: { kind: "stateful", make: makeRain },
   warp: { kind: "stateful", make: makeWarp },
+  reaction: { kind: "stateful", make: makeReaction },
+  lorenz: { kind: "stateful", make: makeLorenz },
   aurora: { kind: "direct", draw: aurora },
   bloom: { kind: "direct", draw: bloom },
   mandelbrot: { kind: "buffered", draw: mandelbrot },
