@@ -82,6 +82,24 @@ export interface Settings {
   openFilesIn: FileOpenTarget;
   /** Which side of the focused pane a file lands on, when it opens as a pane. */
   openPaneDirection: Direction;
+  /**
+   * How fast a living theme's backdrop moves, as a multiplier. Zero is the
+   * point of the low end: it stops the drawing dead and leaves it as a still
+   * wallpaper, which is the honest way to keep a *quiet* backdrop without
+   * having to give up the theme that draws one.
+   */
+  ambientMotion: number;
+  /**
+   * How much of the backdrop shows through the terminal, as a multiplier on
+   * the theme's own veil. Below one the terminal sits more opaquely over its
+   * drawing; at zero the drawing is hidden completely.
+   */
+  ambientPresence: number;
+  /**
+   * How much the shell's own output speeds the backdrop up. Zero is a backdrop
+   * on a plain clock, which is what every living theme was before this.
+   */
+  ambientActivity: number;
   /** Only what the user changed. Absent means "the default", so a default that
    *  moves in a later version moves for everyone who never touched it. */
   keys: Partial<Record<ActionId, string>>;
@@ -99,6 +117,13 @@ export const LIMITS = {
   lineHeight: { min: 1, max: 2, step: 0.05 },
   scrollback: { min: 0, max: 200_000, step: 1000 },
   sidebarWidth: { min: 140, max: 600, step: 10 },
+  // All three are plain multiples, so 1 is "as the theme's author meant it"
+  // and the ends are honest: 0 motion really is stopped, 0 presence really is
+  // hidden. Above 1 is allowed because a backdrop is a matter of taste and
+  // somebody is going to want more of it.
+  ambientMotion: { min: 0, max: 2, step: 0.05 },
+  ambientPresence: { min: 0, max: 1.6, step: 0.05 },
+  ambientActivity: { min: 0, max: 2, step: 0.05 },
 } as const;
 
 export const DEFAULTS: Settings = {
@@ -117,6 +142,9 @@ export const DEFAULTS: Settings = {
   showHiddenFiles: false,
   openFilesIn: "tab",
   openPaneDirection: "right",
+  ambientMotion: 1,
+  ambientPresence: 1,
+  ambientActivity: 1,
   keys: {},
 };
 
@@ -158,6 +186,9 @@ export function decodeSettings(json: string | null | undefined): Settings | null
     shellBackend: pick(parsed.shellBackend, SHELL_BACKENDS, DEFAULTS.shellBackend),
     tmuxKeys: parsed.tmuxKeys === undefined ? DEFAULTS.tmuxKeys : parsed.tmuxKeys === true,
     sidebarWidth: Math.round(clamp(parsed.sidebarWidth, LIMITS.sidebarWidth, DEFAULTS.sidebarWidth)),
+    ambientMotion: clamp(parsed.ambientMotion, LIMITS.ambientMotion, DEFAULTS.ambientMotion),
+    ambientPresence: clamp(parsed.ambientPresence, LIMITS.ambientPresence, DEFAULTS.ambientPresence),
+    ambientActivity: clamp(parsed.ambientActivity, LIMITS.ambientActivity, DEFAULTS.ambientActivity),
     showHiddenFiles: parsed.showHiddenFiles === true,
     openFilesIn: pick(parsed.openFilesIn, FILE_OPEN_TARGETS, DEFAULTS.openFilesIn),
     openPaneDirection: pick(

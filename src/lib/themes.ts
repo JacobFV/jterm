@@ -164,7 +164,11 @@ const SURFACE = [0, 0.025, 0.05, 0.085];
 const HAIRLINE = [0.13, 0.2];
 const INK = [0, 0.28, 0.54, 0.72];
 
-export function themeVars(theme: Theme): Record<string, string> {
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
+
+export function themeVars(theme: Theme, presence = 1): Record<string, string> {
   const p = theme.palette;
   // The chrome's two ends, which are the palette's own unless a theme has said
   // otherwise. Note that `--bg-0` is still exactly `ground`, so a terminal sits
@@ -204,7 +208,13 @@ export function themeVars(theme: Theme): Record<string, string> {
     // that an ambient drawing shows through the text. `--term-bg-solid` is the
     // same colour with none, for the places that need something to sit on —
     // the cursor's own text, and the first paint before any canvas exists.
-    "--term-bg": theme.ambient ? withAlpha(p.bg, theme.veil ?? 0.75) : p.bg,
+    // `presence` is the viewer's half of the veil: 1 leaves the theme author's
+    // choice alone, 0 makes the terminal fully opaque and hides the drawing
+    // completely. It scales the *transparency* rather than the alpha, so the
+    // slider reads as "how much backdrop" in the direction you would expect.
+    "--term-bg": theme.ambient
+      ? withAlpha(p.bg, clamp01(1 - (1 - (theme.veil ?? 0.75)) * presence))
+      : p.bg,
     "--term-bg-solid": p.bg,
     "--term-fg": p.fg,
     "--term-cursor": p.cursor,

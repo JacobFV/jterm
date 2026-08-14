@@ -13,6 +13,7 @@
  * includes the prompt — arrives with nobody listening.
  */
 
+import { recordOutput } from "./activity";
 import { PTY_DATA_EVENT, PTY_EXIT_EVENT, listen, type PtyData, type PtyExit } from "./ipc";
 
 type DataHandler = (chunk: string) => void;
@@ -49,6 +50,10 @@ export function ready(): Promise<void> {
   if (attaching === null) {
     attaching = Promise.all([
       listen<PtyData>(PTY_DATA_EVENT, (payload) => {
+        // Counted before it is delivered, and counted for every pane whether or
+        // not one is listening: this is "are the shells busy", which is a
+        // question about the machine rather than about any pane on screen.
+        recordOutput(payload.chunk.length);
         const handler = dataHandlers.get(payload.id);
         if (handler !== undefined) isolate("data", payload.id, () => handler(payload.chunk));
       }),

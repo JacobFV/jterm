@@ -21,6 +21,7 @@
  *     backdrop that draws the eye is a backdrop that has to be turned off.
  */
 
+import { activityLevel } from "./activity";
 import type { AmbientId, Palette } from "./themes";
 
 /** Longest side of the buffer the per-pixel painters compute into. */
@@ -630,10 +631,29 @@ const PAINTERS: Record<AmbientId, Slot> = {
  * cheap enough to rebuild, and nothing about the old one should survive into
  * the new one's colours.
  */
+/** What the viewer has asked of the backdrop, over what the theme asked for. */
+export interface AmbientTuning {
+  /** Speed multiplier. `0` stops the drawing and leaves it as a wallpaper. */
+  motion: number;
+  /** How much the shells' own output speeds it up. `0` is a plain clock. */
+  activity: number;
+}
+
+const STEADY: AmbientTuning = { motion: 1, activity: 1 };
+
+/**
+ * `tuning` is a *getter*, read once per frame, rather than a value.
+ *
+ * Dragging a slider changes it sixty times a second, and a value would mean
+ * sixty restarts — each one throwing away the pixel buffer, the particles and
+ * the picture built up in them. Read per frame, the same drag is free and the
+ * backdrop simply changes speed under the pointer.
+ */
 export function startAmbient(
   canvas: HTMLCanvasElement,
   id: AmbientId,
   palette: Palette,
+  tuning: () => AmbientTuning = () => STEADY,
 ): () => void {
   const ctx = canvas.getContext("2d", { alpha: false });
   if (ctx === null) return () => {};
@@ -667,7 +687,19 @@ export function startAmbient(
   let stopped = false;
   let painted = 0;
   let fieldAt = -Infinity;
-  const started = performance.now();
+  /**
+   * The painters' clock, which is *not* the wall clock.
+   *
+   * Time is accumulated at a rate the viewer controls rather than read from
+   * `now`, because the two behave completely differently when the rate changes:
+   * scaling elapsed wall time would make every painter jump — a fractal that
+   * has been zooming for ten minutes would snap somewhere else the moment the
+   * slider moved — while accumulating simply carries on from where it is at the
+   * new speed. It is also what lets `motion: 0` mean "hold this picture" rather
+   * than "go back to the beginning".
+   */
+  let clock = 0;
+  let tick = 0;
 
   const reduced =
     typeof window.matchMedia === "function" &&
@@ -708,11 +740,34 @@ export function startAmbient(
     // in some webviews when the window is behind another one.
     if (document.hidden || width === 0) return;
 
+    // Advance the painters' clock. `dt` is clamped because a window that has
+    // been behind another one for a minute comes back with a minute's gap, and
+    // handing that to a painter would jump the picture exactly as hard as
+    // scaling wall time would.
+    const dt = tick === 0 ? 0 : Math.min(0.1, (now - tick) / 1000);
+    tick = now;
+    // The shells' own busyness, but only as far as the viewer asked for it.
+    // At `activity: 0` this is the plain clock every living theme had before.
+    const { motion, activity } = tuning();
+    const busy = activity === 0 ? 0 : activityLevel(now) * activity;
+    clock += dt * motion * (1 + busy);
+
+    // A backdrop that is not moving is a wallpaper. The accumulating painters
+    // still need a few passes to build their picture, so it settles first and
+    // is then simply held — which costs one comparison a frame instead of
+    // repainting an identical image, and leaves the loop live so that raising
+    // Motion picks straight up rather than needing a restart.
+    //
+    // `motion: 0` has to be caught here rather than by leaving `clock` alone,
+    // because the particle painters advance their swarms per *frame* and would
+    // carry on drifting under a stopped clock.
+    if ((reduced || motion === 0) && painted >= REDUCED_FRAMES) return;
+
     const frame: Frame = {
       ctx: ctx!,
       w: width,
       h: height,
-      t: (now - started) / 1000,
+      t: clock,
       colors,
       bg,
       hi,
@@ -739,12 +794,6 @@ export function startAmbient(
     }
 
     painted++;
-    // Enough passes for the accumulating painters to build a full picture,
-    // then the loop parks and the image simply stays.
-    if (reduced && painted >= REDUCED_FRAMES) {
-      cancelAnimationFrame(raf);
-      raf = 0;
-    }
   }
 
   const observer =

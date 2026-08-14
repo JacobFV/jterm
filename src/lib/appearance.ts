@@ -82,7 +82,7 @@ export function applyAppearance(settings: Settings): void {
   // blocks in `index.css` — which stay behind only as the palette of the very
   // first paint, before the settings file has been read — so a theme is data
   // here rather than a stylesheet that would have to be edited to add one.
-  for (const [name, value] of Object.entries(themeVars(theme))) {
+  for (const [name, value] of Object.entries(themeVars(theme, settings.ambientPresence))) {
     root.style.setProperty(name, value);
   }
   root.dataset.theme = theme.base;
@@ -91,7 +91,11 @@ export function applyAppearance(settings: Settings): void {
   // The two things a theme can ask the layout for, rather than the palette:
   // that a backdrop is drawn behind the panes, and — as a consequence — that
   // the surfaces which would cover it stand down. See `.pane-ground`.
-  if (theme.ambient) root.dataset.ambient = theme.ambient;
+  // Presence at zero is not "a drawing you cannot see" — it is no drawing. The
+  // flag has to go too, or the surfaces that stand down for a backdrop stay
+  // transparent and the sliver of pane padding around each terminal keeps
+  // showing the weather the terminal itself is now hiding.
+  if (theme.ambient && settings.ambientPresence > 0) root.dataset.ambient = theme.ambient;
   else delete root.dataset.ambient;
 
   root.style.setProperty("--ui-font-size", `${settings.uiFontSize}px`);
