@@ -51,5 +51,12 @@ windows = { version = "0.61", features = [
 codegen-units = 1
 lto = true
 opt-level = "s"
-panic = "abort"
+# Deliberately *not* `panic = "abort"`. Every pty reader and every tmux control
+# client is its own thread, and aborting means a bug in any one of them takes
+# the window and every other tab's shell down with it — the same failure the
+# per-shell cgroups in `src/isolation.rs` exist to prevent, arriving by a
+# different road. Unwinding lets that one thread die, its pane report an exit,
+# and the rest of the app carry on. It costs some binary size, which is a very
+# cheap trade for it. See the panic hook in `src/lib.rs` for the record it
+# leaves behind.
 strip = true

@@ -176,6 +176,19 @@ started directly and nothing else changes. One consequence is worth knowing: a
 background job you have deliberately disowned now outlives the app rather than
 being swept up with it, the same way a tmux session already does.
 
+The same principle applies twice more inside the app. A bug that throws while
+one pane is *drawing* stops at that pane, which shows the error while its
+siblings carry on and every shell keeps running — rather than unmounting the
+whole window and leaving you a blank rectangle with a working terminal
+underneath it you cannot reach. And the release build unwinds rather than
+aborting on a panic, so a fault in one pty reader or tmux client is that
+thread's death rather than the process's.
+
+When something does go wrong, it leaves a note: `panic.log`, beside the session
+files, gets a line naming the thread, the source location and the message. An
+app launched from a desktop menu has no stderr anyone will ever read, which is
+how "it crashes randomly" turns into a report with nothing attached to it.
+
 ## tmux
 
 All of the above reconstructs a shell from what jterm wrote down. tmux does not

@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 import { paneKind } from "@/panes/registry";
 import { type Action, type Tab, paneLabel } from "@/state/workspace";
 import { type DropEdge, type Layout, type Rect, countPanes, layout } from "@/state/tree";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { PaneMenu, type PaneMenuActions } from "./PaneMenu";
 
 /** Height of the strip above each pane. Only drawn when a tab has splits. */
@@ -375,19 +376,25 @@ export function Workspace({
               ) : null}
 
               <div className="min-h-0 flex-1">
-                <definition.Component
-                  pane={pane}
-                  focused={onScreen && focused}
-                  // "On screen for the user": its tab is up and it is not
-                  // hidden behind a zoomed sibling. A media pane mutes itself
-                  // on this; nothing should be playing out of a tab you cannot
-                  // see.
-                  visible={onScreen && (tab.zoomedPaneId === null || isZoomed)}
-                  onFocus={() => dispatch({ type: "pane/focus", tabId: tab.id, paneId })}
-                  onMeta={(patch) =>
-                    dispatch({ type: "pane/meta", tabId: tab.id, paneId, patch })
-                  }
-                />
+                {/* Per pane, and keyed on the pane rather than shared: a
+                    boundary that has caught stays caught, so one placed around
+                    the whole grid would take every sibling down with the one
+                    that threw — which is the failure it exists to prevent. */}
+                <ErrorBoundary label={paneLabel(pane)}>
+                  <definition.Component
+                    pane={pane}
+                    focused={onScreen && focused}
+                    // "On screen for the user": its tab is up and it is not
+                    // hidden behind a zoomed sibling. A media pane mutes itself
+                    // on this; nothing should be playing out of a tab you cannot
+                    // see.
+                    visible={onScreen && (tab.zoomedPaneId === null || isZoomed)}
+                    onFocus={() => dispatch({ type: "pane/focus", tabId: tab.id, paneId })}
+                    onMeta={(patch) =>
+                      dispatch({ type: "pane/meta", tabId: tab.id, paneId, patch })
+                    }
+                  />
+                </ErrorBoundary>
               </div>
             </div>
           </div>

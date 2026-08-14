@@ -23,14 +23,38 @@ const exitHandlers = new Map<string, ExitHandler>();
 
 let attaching: Promise<void> | null = null;
 
+/**
+ * Run one pane's handler without letting it reach the others.
+ *
+ * The saving in having a single listener is also the risk in it: every pane's
+ * output arrives through one callback, so an exception from one pane's handler
+ * is thrown inside the delivery path that all of them share. A React error
+ * boundary is no help — this is an event callback, not a render — and the
+ * failure would be a terminal that silently stopped printing, which is a
+ * miserable thing to diagnose because the shell behind it is still running and
+ * still producing the output nobody is drawing.
+ *
+ * Logged rather than swallowed: one bad chunk should cost that chunk, not the
+ * pane, and certainly not the pane next to it.
+ */
+function isolate(what: string, id: string, run: () => void): void {
+  try {
+    run();
+  } catch (error) {
+    console.error(`[jterm] pty ${what} handler for ${id} threw`, error);
+  }
+}
+
 export function ready(): Promise<void> {
   if (attaching === null) {
     attaching = Promise.all([
       listen<PtyData>(PTY_DATA_EVENT, (payload) => {
-        dataHandlers.get(payload.id)?.(payload.chunk);
+        const handler = dataHandlers.get(payload.id);
+        if (handler !== undefined) isolate("data", payload.id, () => handler(payload.chunk));
       }),
       listen<PtyExit>(PTY_EXIT_EVENT, (payload) => {
-        exitHandlers.get(payload.id)?.(payload.code);
+        const handler = exitHandlers.get(payload.id);
+        if (handler !== undefined) isolate("exit", payload.id, () => handler(payload.code));
       }),
     ]).then(() => {});
   }
