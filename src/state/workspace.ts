@@ -49,8 +49,13 @@ interface PaneCommon {
   /** Set by the pane itself — a shell's title, a page's title, a file name. */
   title?: string;
   /**
-   * A theme for this pane alone. Absent — which is the default and stays the
-   * default — means it wears whatever its tab is wearing.
+   * A theme for this pane alone, or absent for the default.
+   *
+   * Absent is the state every pane starts in and stays in until somebody
+   * changes it, and it does not mean "no theme" — it is a live reference to the
+   * tab, so the pane wears whatever the tab is wearing *and follows it when
+   * that changes*. Only a pane someone has deliberately dressed holds a value
+   * here. See `themeOf`, which is the whole rule.
    *
    * The innermost of the three levels: app, tab, pane. It is stored here rather
    * than in the settings file because it belongs to *this* pane in *this*
@@ -133,7 +138,12 @@ export interface Tab {
   /** A name the user typed. Absent means the focused pane names the tab. */
   title?: string;
   /**
-   * A theme for this tab and everything in it. Absent means it follows the app.
+   * A theme for this tab and everything in it, or absent for the default.
+   *
+   * The same rule as a pane's, one level out: absent is where every tab starts
+   * and stays until somebody changes it, and it is a live reference to the app
+   * — the tab wears the app's theme and follows it when that changes. Only a
+   * tab someone has deliberately dressed holds a value here.
    *
    * The middle of the three levels, and the one that makes switching tabs a
    * change of scenery: the window's chrome wears the active tab's theme, so a
@@ -487,10 +497,11 @@ export function reduce(state: Workspace, action: Action): Workspace {
       };
       const evicted: Tab = {
         id: newId(),
-        // The pane leaves looking as it did. It was wearing the target tab's
-        // theme a moment ago, and a move that destroys nothing should not
-        // repaint the thing it moved either.
-        theme: target.theme,
+        // No theme, because nobody has chosen one for this tab: it is brand
+        // new. It was tempting to copy the target tab's, so the pane would
+        // leave looking exactly as it did — but that would put a *concrete*
+        // theme on a tab the user never themed, and the next change to the app
+        // theme would then leave it behind. Default until changed, everywhere.
         root: leaf(newId(), displaced.id),
         panes: { [displaced.id]: displaced },
         focusedPaneId: displaced.id,
@@ -783,10 +794,17 @@ function syncTab(tab: Tab, session: string, window: TmuxWindow): Tab {
  * split gets a session of its own, which the new pane works out for itself from
  * the setting.
  *
- * Nor the theme. A pane-level theme is nearly always there to tell one pane
- * apart from the one beside it — this shell is on production, that one is not —
- * and a split that copied it would undo the distinction at the exact moment it
- * is being drawn. A new pane follows its tab, like every other new pane.
+ * Nor the theme, and here "nor" means *nothing is copied*, not "it comes out
+ * looking different". A new pane is default-themed, and default is not a
+ * colour — it is a live reference to the level above, so the pane wears its
+ * tab's theme and keeps wearing it when the tab's changes. In the ordinary case
+ * — a tab nobody has themed individually — that is exactly the pane it was
+ * split off, which is what you would expect from a split.
+ *
+ * What is deliberately *not* carried over is an override the source pane had of
+ * its own. Those exist to tell one pane apart from the one beside it — this
+ * shell is on production, that one is not — and a split that duplicated the
+ * override would undo the distinction at the exact moment it is being drawn.
  */
 function inheritFrom(source: PaneState | undefined, kind: PaneKind): Partial<PaneState> {
   if (kind === "terminal" && source?.kind === "terminal" && source.cwd) {

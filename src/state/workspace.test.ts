@@ -328,7 +328,39 @@ describe("themes at three levels", () => {
     expect(reduce(dressed, { type: "tab/theme", tabId, theme: "nord" })).toBe(dressed);
   });
 
-  it("keeps a split from inheriting the pane it was split off", () => {
+  it("leaves a split default, which is to say wearing its tab's theme", () => {
+    const setup = twoTabs();
+    const dressed = reduce(setup.state, {
+      type: "tab/theme",
+      tabId: setup.targetTabId,
+      theme: "nord",
+    });
+    const next = reduce(dressed, {
+      type: "pane/split",
+      tabId: setup.targetTabId,
+      paneId: setup.targetPaneId,
+      axis: "x",
+      kind: "terminal",
+    });
+    const tab = next.tabs[0];
+    const fresh = tab.panes[tab.focusedPaneId];
+    // Nothing was copied onto the pane...
+    expect(fresh.theme).toBeUndefined();
+    // ...and it is wearing the tab's theme all the same, which is the point:
+    // default is a reference, not the absence of a colour.
+    expect(themeOf("dark", tab, fresh)).toBe("nord");
+    // So it follows the tab rather than being frozen at what the tab was.
+    const recoloured = reduce(next, {
+      type: "tab/theme",
+      tabId: setup.targetTabId,
+      theme: "gruvbox",
+    });
+    expect(themeOf("dark", recoloured.tabs[0], fresh)).toBe("gruvbox");
+  });
+
+  it("does not carry an override onto the pane split off a dressed one", () => {
+    // The override exists to tell this pane from the one beside it; duplicating
+    // it would undo the distinction as the split is drawn.
     const setup = twoTabs();
     const dressed = reduce(setup.state, {
       type: "pane/theme",
@@ -343,11 +375,13 @@ describe("themes at three levels", () => {
       axis: "x",
       kind: "terminal",
     });
-    const fresh = next.tabs[0].panes[next.tabs[0].focusedPaneId];
-    expect(fresh.theme).toBeUndefined();
+    expect(next.tabs[0].panes[next.tabs[0].focusedPaneId].theme).toBeUndefined();
   });
 
-  it("sends a pane out of an absorbed tab still wearing what it wore", () => {
+  it("gives a brand-new tab no theme of its own, however it was made", () => {
+    // Including the one `tab/absorb` mints for the pane it displaces. Copying
+    // the theme there would look right for a moment and then stop following the
+    // app, which is the one thing a default must never do.
     const setup = twoTabs();
     const dressed = reduce(setup.state, {
       type: "tab/theme",
@@ -361,7 +395,11 @@ describe("themes at three levels", () => {
       targetPaneId: setup.targetPaneId,
     });
     const evicted = next.tabs.find((tab) => tab.panes[setup.targetPaneId]);
-    expect(evicted?.theme).toBe("nord");
+    expect(evicted?.theme).toBeUndefined();
+    expect(themeOf("dark", evicted)).toBe("dark");
+
+    expect(reduce(setup.state, { type: "tab/new", kind: "terminal" }).tabs.at(-1)?.theme)
+      .toBeUndefined();
   });
 });
 
