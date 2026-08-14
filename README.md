@@ -73,8 +73,9 @@ runs on your behalf.
 
   It is every submitted line, not only shell commands: jterm mirrors what you
   type and cannot tell a shell's prompt from a REPL's or an agent's, so those
-  are in there too. Telling them apart needs the shell to say where its prompts
-  begin.
+  are in there too. Where your shell reports them, rows also carry the **exit
+  status** of anything that failed and **how long** anything slow took — see
+  *Shell integration* below.
 - **Settles in a settings window.** Theme, type sizes, cursor, scrollback,
   shell, and every shortcut — in a second window rather than a modal, so you can
   watch the terminal change as you drag.
@@ -130,6 +131,27 @@ all the same key; you should not have to know which one the table was written
 down with. Going the other way is plain <kbd>Mod</kbd>+<kbd>-</kbd> only —
 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>-</kbd> is <kbd>Ctrl</kbd>+<kbd>_</kbd>,
 which is readline's undo, and that still belongs to the shell.
+
+### Shell integration
+
+A terminal cannot tell where one command ends and the next begins — from out
+here, a shell's prompt and a REPL's are the same bytes. **OSC 133** is the
+shell saying so out loud, and where jterm hears it, the history search gains
+the exit status of failed commands and the duration of slow ones.
+
+jterm only listens. Plenty of setups already emit these markers — starship,
+bash-preexec, several distributions' stock profiles — and there it works with
+nothing installed. jterm will not write to your rc files to arrange it. If you
+want it and your shell is quiet, this is the whole of it for bash:
+
+```bash
+PS0=$'\e]133;C\a'
+PROMPT_COMMAND='__jt=$?; printf "\033]133;D;%s\007" "$__jt"'
+PS1=$'\e]133;A\a'"$PS1"$'\e]133;B\a'
+```
+
+A shell that says nothing is not treated as a shell whose commands all
+succeeded: an unreported status stays blank rather than being shown as zero.
 
 ### About <kbd>Ctrl</kbd>+<kbd>D</kbd>
 

@@ -238,6 +238,10 @@ export interface HistoryHit {
   text: string;
   cwd: string | null;
   at: string | null;
+  /** The exit status, where the shell reported one. See `lib/osc.ts`. */
+  code: number | null;
+  /** How long it ran, in milliseconds, where that is known. */
+  ms: number | null;
 }
 
 /**

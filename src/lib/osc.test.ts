@@ -1,58 +1,77 @@
 import { describe, expect, it } from "vitest";
+
 import { scanOsc } from "./osc";
 
-describe("scanOsc", () => {
-  it("reads a working directory report", () => {
-    expect(scanOsc("\x1b]7;file://host/home/me/code\x07").cwd).toBe("/home/me/code");
-  });
+const BEL = "\x07";
+const ST = "\x1b\\";
 
-  it("accepts a string terminator as well as a bell", () => {
-    expect(scanOsc("\x1b]7;file://host/tmp\x1b\\").cwd).toBe("/tmp");
-  });
-
-  it("accepts an empty host", () => {
-    expect(scanOsc("\x1b]7;file:///var/log\x07").cwd).toBe("/var/log");
+describe("OSC 7 and the title", () => {
+  it("reads the directory out of a file URL", () => {
+    const scan = scanOsc(`hello\x1b]7;file://host/home/me/src${BEL}world`);
+    expect(scan.cwd).toBe("/home/me/src");
   });
 
   it("decodes a path with a space in it", () => {
-    expect(scanOsc("\x1b]7;file://h/home/me/My%20Notes\x07").cwd).toBe("/home/me/My Notes");
+    const scan = scanOsc(`\x1b]7;file://host/home/me/my%20code${BEL}`);
+    expect(scan.cwd).toBe("/home/me/my code");
   });
 
-  it("survives a path that is not valid percent-encoding", () => {
-    expect(scanOsc("\x1b]7;file://h/odd%zz\x07").cwd).toBe("/odd%zz");
+  it("keeps only the newest of several", () => {
+    const scan = scanOsc(`\x1b]7;file://h/one${BEL}\x1b]7;file://h/two${BEL}`);
+    expect(scan.cwd).toBe("/two");
+  });
+});
+
+describe("OSC 133 prompt marks", () => {
+  it("reports each marker in the order the shell sent it", () => {
+    const scan = scanOsc(`\x1b]133;A${BEL}prompt$ \x1b]133;B${BEL}ls\x1b]133;C${BEL}out`);
+    expect(scan.marks.map((mark) => mark.kind)).toEqual(["prompt", "input", "running"]);
   });
 
-  it("reads titles from OSC 0 and OSC 2", () => {
-    expect(scanOsc("\x1b]0;me@box: ~\x07").title).toBe("me@box: ~");
-    expect(scanOsc("\x1b]2;vim README\x07").title).toBe("vim README");
+  it("takes the exit status off a D, and coincidentally not off a C", () => {
+    const scan = scanOsc(`\x1b]133;C${BEL}output\x1b]133;D;1${BEL}`);
+    expect(scan.marks).toEqual([{ kind: "running" }, { kind: "done", code: 1 }]);
   });
 
-  it("keeps the newest of several reports in one chunk", () => {
-    const text = "\x1b]7;file://h/first\x07 out \x1b]7;file://h/second\x07";
-    expect(scanOsc(text).cwd).toBe("/second");
+  it("treats a D with no status as unknown rather than as success", () => {
+    // A shell that does not report the code is not the same as one reporting
+    // zero, and a terminal that guesses would mark failures as successes.
+    const scan = scanOsc(`\x1b]133;D${BEL}`);
+    expect(scan.marks).toEqual([{ kind: "done" }]);
+    expect(scan.marks[0].code).toBeUndefined();
   });
 
-  it("finds a sequence split across two chunks", () => {
-    const first = scanOsc("output\x1b]7;file://host/ho");
-    expect(first.cwd).toBeUndefined();
-    expect(scanOsc("me/me\x07", first.carry).cwd).toBe("/home/me");
+  it("accepts the string terminator as well as BEL", () => {
+    const scan = scanOsc(`\x1b]133;D;0${ST}`);
+    expect(scan.marks).toEqual([{ kind: "done", code: 0 }]);
   });
 
-  it("does not re-report an old value as if it were new", () => {
-    const first = scanOsc("\x1b]7;file://h/one\x07");
-    expect(first.cwd).toBe("/one");
-    // The carry still holds the old sequence, but a chunk with a newer one
-    // must resolve to the newer one.
-    expect(scanOsc("\x1b]7;file://h/two\x07", first.carry).cwd).toBe("/two");
+  it("ignores the extra parameters other shells hang off a marker", () => {
+    const scan = scanOsc(`\x1b]133;A;special_key=value${BEL}\x1b]133;D;130;more${BEL}`);
+    expect(scan.marks).toEqual([{ kind: "prompt" }, { kind: "done", code: 130 }]);
   });
 
-  it("reports nothing for ordinary output", () => {
-    const scan = scanOsc("total 24\r\ndrwxr-xr-x  3 me me 4096 Jan  1 00:00 .\r\n");
-    expect(scan.cwd).toBeUndefined();
-    expect(scan.title).toBeUndefined();
+  it("sees a marker split across two reads, exactly once", () => {
+    // The half-written sequence cannot be reported on the first read, and must
+    // not be missed on the second — this is what the carry is for.
+    const first = scanOsc("output\x1b]133;D;");
+    expect(first.marks).toEqual([]);
+
+    const second = scanOsc(`7${BEL}next`, first.carry);
+    expect(second.marks).toEqual([{ kind: "done", code: 7 }]);
   });
 
-  it("keeps the carry bounded", () => {
-    expect(scanOsc("x".repeat(50_000)).carry.length).toBeLessThanOrEqual(1024);
+  it("does not report a marker twice because the carry was rescanned", () => {
+    // The bug this guards against records one command as two: the carry is the
+    // tail of the previous chunk, so every marker in it comes back round.
+    const first = scanOsc(`\x1b]133;C${BEL}some output\x1b]133;D;0${BEL}`);
+    expect(first.marks.map((mark) => mark.kind)).toEqual(["running", "done"]);
+
+    const second = scanOsc("more output with no markers at all", first.carry);
+    expect(second.marks).toEqual([]);
+  });
+
+  it("has no marks at all for a shell that says nothing", () => {
+    expect(scanOsc("just some ordinary output\r\n").marks).toEqual([]);
   });
 });

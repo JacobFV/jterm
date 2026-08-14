@@ -144,6 +144,12 @@ pub struct Hit {
     /// ISO-8601, as the frontend wrote it. Absent on a record old enough to
     /// predate the field, which is why it is an `Option` rather than a default.
     pub at: Option<String>,
+    /// The exit status, when the shell reported one through OSC 133. `None`
+    /// covers both "the shell says nothing" and "it finished but did not say",
+    /// which are the same thing to a reader and neither of them is zero.
+    pub code: Option<i64>,
+    /// How long it ran, in milliseconds, when that is known.
+    pub ms: Option<i64>,
 }
 
 /// Every command matching `query`, newest first, one entry per distinct text.
@@ -185,6 +191,12 @@ pub fn search(store: &Store, query: &str, limit: usize) -> Vec<Hit> {
             continue;
         };
 
+        // Built per file and filtered afterwards, because a `result` record
+        // describes the `command` above it: matching as we go would leave a
+        // result with nothing to attach to whenever its command did not match.
+        let mut file_hits: Vec<Hit> = Vec::new();
+        let mut awaiting: Option<usize> = None;
+
         for line in text.lines() {
             // A damaged line is skipped rather than failing the search, for the
             // same reason `import` skips one: a log is append-only and the last
@@ -192,32 +204,52 @@ pub fn search(store: &Store, query: &str, limit: usize) -> Vec<Hit> {
             let Ok(Value::Object(record)) = serde_json::from_str::<Value>(line) else {
                 continue;
             };
-            if record.get("kind").and_then(Value::as_str) != Some("command") {
-                continue;
+            match record.get("kind").and_then(Value::as_str) {
+                Some("command") => {
+                    let Some(command) = record.get("text").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    if command.trim().is_empty() {
+                        continue;
+                    }
+                    awaiting = Some(file_hits.len());
+                    file_hits.push(Hit {
+                        pane: pane.to_string(),
+                        text: command.to_string(),
+                        cwd: record
+                            .get("cwd")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        at: record.get("at").and_then(Value::as_str).map(str::to_string),
+                        code: None,
+                        ms: None,
+                    });
+                }
+                Some("result") => {
+                    // Only ever the command immediately above, and only once: a
+                    // stray result with no command before it belongs to nothing,
+                    // and attaching it to an older one would put a status on a
+                    // line that did not produce it.
+                    if let Some(index) = awaiting.take() {
+                        if let Some(hit) = file_hits.get_mut(index) {
+                            hit.code = record.get("code").and_then(Value::as_i64);
+                            hit.ms = record.get("ms").and_then(Value::as_i64);
+                        }
+                    }
+                }
+                _ => {}
             }
-            let Some(command) = record.get("text").and_then(Value::as_str) else {
-                continue;
-            };
-            if command.trim().is_empty() {
-                continue;
-            }
-            let cwd = record.get("cwd").and_then(Value::as_str);
+        }
 
+        for hit in file_hits {
             let haystack = format!(
                 "{} {}",
-                command.to_lowercase(),
-                cwd.unwrap_or("").to_lowercase()
+                hit.text.to_lowercase(),
+                hit.cwd.as_deref().unwrap_or("").to_lowercase()
             );
-            if !terms.iter().all(|term| haystack.contains(term.as_str())) {
-                continue;
+            if terms.iter().all(|term| haystack.contains(term.as_str())) {
+                hits.push(hit);
             }
-
-            hits.push(Hit {
-                pane: pane.to_string(),
-                text: command.to_string(),
-                cwd: cwd.map(str::to_string),
-                at: record.get("at").and_then(Value::as_str).map(str::to_string),
-            });
         }
     }
 
@@ -237,6 +269,8 @@ pub fn search(store: &Store, query: &str, limit: usize) -> Vec<Hit> {
                 text: hit.text.clone(),
                 cwd: hit.cwd.clone(),
                 at: hit.at.clone(),
+                code: hit.code,
+                ms: hit.ms,
             });
         }
     }
@@ -597,6 +631,86 @@ mod tests {
             Some("2026-01-05T00:00:00Z"),
             "the most recent one is kept"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_result_lands_on_the_command_it_followed() {
+        let (store, root) = temp_store();
+        append(
+            &store,
+            "abc",
+            r#"{"kind":"command","at":"2026-01-01T00:00:00Z","text":"make","cwd":"/w"}"#,
+        )
+        .unwrap();
+        append(
+            &store,
+            "abc",
+            r#"{"kind":"result","at":"2026-01-01T00:00:04Z","code":2,"ms":4210}"#,
+        )
+        .unwrap();
+
+        let hits = search(&store, "make", 10);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].code, Some(2));
+        assert_eq!(hits[0].ms, Some(4210));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_result_never_reaches_back_past_the_command_above_it() {
+        let (store, root) = temp_store();
+        // Two commands, and a status that belongs only to the second. The first
+        // must not inherit it, and a second stray result must not either.
+        append(
+            &store,
+            "abc",
+            r#"{"kind":"command","at":"2026-01-01T00:00:00Z","text":"first","cwd":"/w"}"#,
+        )
+        .unwrap();
+        append(
+            &store,
+            "abc",
+            r#"{"kind":"command","at":"2026-01-01T00:01:00Z","text":"second","cwd":"/w"}"#,
+        )
+        .unwrap();
+        append(
+            &store,
+            "abc",
+            r#"{"kind":"result","at":"2026-01-01T00:01:01Z","code":1}"#,
+        )
+        .unwrap();
+        append(
+            &store,
+            "abc",
+            r#"{"kind":"result","at":"2026-01-01T00:01:02Z","code":99}"#,
+        )
+        .unwrap();
+
+        let hits = search(&store, "", 10);
+        let first = hits.iter().find(|hit| hit.text == "first").unwrap();
+        let second = hits.iter().find(|hit| hit.text == "second").unwrap();
+        assert_eq!(first.code, None, "an earlier command keeps no status");
+        assert_eq!(
+            second.code,
+            Some(1),
+            "and the stray second result is dropped"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_shell_that_reports_no_status_is_not_reported_as_success() {
+        let (store, root) = temp_store();
+        append(
+            &store,
+            "abc",
+            r#"{"kind":"command","at":"2026-01-01T00:00:00Z","text":"quiet","cwd":"/w"}"#,
+        )
+        .unwrap();
+        let hits = search(&store, "quiet", 10);
+        assert_eq!(hits[0].code, None);
+        assert_eq!(hits[0].ms, None);
         let _ = fs::remove_dir_all(root);
     }
 

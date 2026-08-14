@@ -71,6 +71,15 @@ function when(at: string | null): string {
   return `${Math.round(days / 30)}mo ago`;
 }
 
+/** "4.2s", "1m 20s" — only ever shown for something slow enough to notice. */
+function duration(ms: number | null): string | null {
+  if (ms === null || ms < 2000) return null;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${Math.round(seconds - minutes * 60)}s`;
+}
+
 export function HistorySearch({
   home,
   onPick,
@@ -184,6 +193,16 @@ export function HistorySearch({
                 </span>
                 <span className="flex w-full items-center gap-2 text-[length:var(--fs-10)] text-ink-4">
                   <span className="min-w-0 flex-1 truncate">{shortenPath(hit.cwd, home)}</span>
+                  {/* Only ever shown when the shell actually said so. A status
+                      jterm did not hear is left blank rather than assumed to be
+                      zero — see `lib/osc.ts`. Colour means state, so only a
+                      failure gets any. */}
+                  {hit.code !== null && hit.code !== 0 ? (
+                    <span className="shrink-0 font-mono text-danger">exit {hit.code}</span>
+                  ) : null}
+                  {duration(hit.ms) !== null ? (
+                    <span className="shrink-0 font-mono">{duration(hit.ms)}</span>
+                  ) : null}
                   <span className="shrink-0">{when(hit.at)}</span>
                 </span>
               </button>

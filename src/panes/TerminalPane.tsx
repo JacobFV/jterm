@@ -115,6 +115,16 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
   const draftRef = useRef<Draft>(emptyDraft());
   const altScreenRef = useRef(false);
   const oscCarryRef = useRef("");
+  /**
+   * When the running command started, if the shell said so.
+   *
+   * `null` means nothing is known to be running — either the shell does not
+   * emit OSC 133 at all, or it is sitting at a prompt. It is deliberately not
+   * "the last time Enter was pressed": jterm sees Enter at every prompt,
+   * including a REPL's, and only the shell can say which of those started a
+   * command.
+   */
+  const runningSinceRef = useRef<number | null>(null);
   const exitedRef = useRef(false);
   const replayRef = useRef<{ text: string; settle: number; deadline: number } | null>(null);
   /** Where the shell was when the last command was submitted, for the log. */
@@ -480,6 +490,27 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
 
         const scan = scanOsc(chunk, oscCarryRef.current);
         oscCarryRef.current = scan.carry;
+
+        // What the shell says about its own prompts, where it says anything.
+        // See `lib/osc.ts`: this is the only source of a real exit status, and
+        // panes whose shell is quiet simply never take this branch.
+        for (const mark of scan.marks) {
+          if (mark.kind === "running") {
+            runningSinceRef.current = Date.now();
+          } else if (mark.kind === "done") {
+            const started = runningSinceRef.current;
+            runningSinceRef.current = null;
+            void history.append(paneId, {
+              kind: "result",
+              at: new Date().toISOString(),
+              // Both are absent rather than guessed when unknown. A missing
+              // status is not zero, and a duration invented from when jterm
+              // happened to notice would be a number that reads as measured.
+              ...(mark.code === undefined ? {} : { code: mark.code }),
+              ...(started === null ? {} : { ms: Date.now() - started }),
+            });
+          }
+        }
         if (scan.cwd && scan.cwd !== cwdRef.current) {
           cwdRef.current = scan.cwd;
           void history.append(paneId, {
