@@ -18,11 +18,12 @@ import { useCallback, useEffect, useState } from "react";
 import { ResizeHandles } from "@/components/shell/ResizeHandles";
 import { WindowControls } from "@/components/shell/WindowControls";
 import { WindowFrame } from "@/components/shell/WindowFrame";
+import { ThemeSwatch } from "@/components/shell/ThemeSwatch";
 import { dialog } from "@/lib/ipc";
 import { displayKeys, keysFor, type ActionId } from "@/lib/keymap";
 import { MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
 import { useIsFullscreen } from "@/lib/useFullscreen";
-import { swatch, THEME_GROUPS, THEMES } from "@/lib/themes";
+import { THEME_GROUPS, THEMES } from "@/lib/themes";
 import { tmuxAvailable } from "@/lib/tmux";
 import { cn } from "@/lib/utils";
 import { DEFAULTS, LIMITS, resetSettings, updateSettings } from "@/state/settings";
@@ -56,7 +57,6 @@ function ThemePicker({ value, onChange }: { value: string; onChange: (id: string
               {items.map((theme) => {
                 const id = theme?.id ?? "system";
                 const active = value === id;
-                const hues = theme ? swatch(theme) : null;
                 return (
                   <button
                     key={id}
@@ -67,27 +67,19 @@ function ThemePicker({ value, onChange }: { value: string; onChange: (id: string
                     title={theme ? theme.name : "Follow the desktop"}
                     className={cn(
                       "flex flex-col gap-1 border p-1.5 text-left",
-                      active
-                        ? "border-brand"
-                        : "border-hairline-strong hover:border-ink-4",
+                      active ? "border-brand" : "border-hairline-strong hover:border-ink-4",
                     )}
                   >
-                    <span
-                      className="flex h-6 items-end gap-px overflow-hidden px-1 pb-1"
-                      style={{
-                        background: hues ? hues[0] : "linear-gradient(90deg, #000 50%, #fff 50%)",
-                      }}
-                    >
-                      {(hues ?? []).slice(1).map((hue, index) => (
-                        <span
-                          key={index}
-                          className="flex-1"
-                          // Stepped heights, so the row reads as a little bar
-                          // chart of the palette rather than as a flat ribbon.
-                          style={{ background: hue, height: `${5 + (index % 3) * 4}px` }}
-                        />
-                      ))}
-                    </span>
+                    {/* Near-square rather than the old short strip. A living
+                        theme's cell is its drawing actually running, and a
+                        letterboxed fractal is a texture, not a preview — a
+                        Mandelbrot cropped to 3:1 is a stripe of edge detail
+                        with the set itself off the top and bottom. */}
+                    <ThemeSwatch
+                      theme={theme}
+                      className="aspect-[4/3] w-full border-0"
+                      bars={8}
+                    />
                     <span
                       className={cn(
                         "truncate text-[length:var(--fs-10)]",
@@ -121,8 +113,60 @@ function zoomHint(): string {
   return ` ${displayKeys(zoomIn)} and ${displayKeys(zoomOut)} move it from the keyboard.`;
 }
 
+/**
+ * The tabs, and what belongs under each.
+ *
+ * The page had grown to eight sections and about three screens, which meant the
+ * shortcut table — the longest thing in it and the one people come back to —
+ * was reached by scrolling past everything else every time. Tabs make each
+ * group a place you arrive at rather than a place you pass through.
+ *
+ * Grouped by *when you are asking*, not by which part of the app owns the
+ * setting: what the terminal looks like is one visit, how files open is
+ * another. tmux rides with Terminal because "what does a new terminal run on"
+ * is the same question as "what does a terminal do", and it disappears with the
+ * rest of the tmux settings on a machine without it.
+ */
+const TABS = ["Appearance", "Terminal", "Files", "Keyboard", "Data"] as const;
+type Tab = (typeof TABS)[number];
+
+function TabBar({ active, onPick }: { active: Tab; onPick: (tab: Tab) => void }) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Settings"
+      className="flex shrink-0 items-stretch border-b border-border bg-surface-1 px-2"
+    >
+      {TABS.map((tab) => {
+        const selected = tab === active;
+        return (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            onClick={() => onPick(tab)}
+            className={cn(
+              // A hairline under the live one rather than a filled pill: the
+              // same way the tab strip in the main window marks its tab, and
+              // the same reason — separation here is a line, never a fill.
+              "-mb-px border-b-2 px-3 py-2 text-[length:var(--fs-11)] transition-colors",
+              selected
+                ? "border-brand text-ink-1"
+                : "border-transparent text-ink-3 hover:text-ink-1",
+            )}
+          >
+            {tab}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function SettingsWindow() {
   const settings = useSettings();
+  const [tab, setTab] = useState<Tab>("Appearance");
 
   // This window is its own webview, so it asks for itself rather than being
   // told — there is nothing shared between the two but the settings file.
@@ -146,8 +190,13 @@ export function SettingsWindow() {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-surface-0">
       <TitleBar />
+      <TabBar active={tab} onPick={setTab} />
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* Keyed on the tab so a switch starts at the top rather than inheriting
+          the previous panel's scroll position, which on the short panels reads
+          as the window having jumped. */}
+      <div key={tab} role="tabpanel" aria-label={tab} className="min-h-0 flex-1 overflow-y-auto">
+        {tab === "Appearance" ? (
         <Section title="Appearance">
           <Row
             label="Theme"
@@ -174,7 +223,10 @@ export function SettingsWindow() {
             />
           </Row>
         </Section>
+        ) : null}
 
+        {tab === "Terminal" ? (
+          <>
         <Section title="Terminal">
           <Row
             label="Font"
@@ -291,7 +343,11 @@ export function SettingsWindow() {
             </Row>
           </Section>
         ) : null}
+          </>
+        ) : null}
 
+        {tab === "Files" ? (
+          <>
         <Section title="Files">
           <Row
             label="Open files in"
@@ -345,11 +401,17 @@ export function SettingsWindow() {
             />
           </Row>
         </Section>
+          </>
+        ) : null}
 
+        {tab === "Keyboard" ? (
         <Section title="Keyboard">
           <KeyBindings keys={settings.keys} onChange={setKeys} />
         </Section>
+        ) : null}
 
+        {tab === "Data" ? (
+          <>
         <Section title="Your data">
           <SessionData />
         </Section>
@@ -364,6 +426,8 @@ export function SettingsWindow() {
             </Button>
           </Row>
         </Section>
+          </>
+        ) : null}
       </div>
 
       <ResizeHandles />

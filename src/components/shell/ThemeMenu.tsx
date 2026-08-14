@@ -17,36 +17,22 @@
 import { useEffect, useRef } from "react";
 
 import { useSettings } from "@/lib/useSettings";
-import { swatch, THEME_GROUPS, THEMES, themeById } from "@/lib/themes";
+import { THEME_GROUPS, THEMES, themeById } from "@/lib/themes";
 import { updateSettings } from "@/state/settings";
 import { MenuHeading, MenuItem } from "./Menu";
+import { ThemeSwatch } from "./ThemeSwatch";
 
-/** What the row shows: the theme's own background, with its hues laid on it. */
+/**
+ * Square, and big enough to be a picture.
+ *
+ * A living theme's swatch is its drawing actually running, and the old ribbon
+ * — half as tall as it was wide — cropped every one of them to a stripe. Square
+ * is the shape a spiral or a fractal survives being shrunk into.
+ */
+const SWATCH = "h-[18px] w-[18px]";
+
 function Swatch({ themeId }: { themeId: string }) {
-  const theme = themeById(themeId);
-  if (theme === null) {
-    // `system`, which is not a theme and so has no palette of its own. Drawn
-    // as the two foundations meeting, since that is exactly what it means.
-    return (
-      <span className="flex h-3.5 w-4 shrink-0 overflow-hidden border border-hairline-strong">
-        <span className="flex-1 bg-black" />
-        <span className="flex-1 bg-white" />
-      </span>
-    );
-  }
-  const [bg, ...hues] = swatch(theme);
-  return (
-    <span
-      className="flex h-3.5 w-4 shrink-0 items-center gap-px overflow-hidden border border-hairline-strong px-px"
-      style={{ background: bg }}
-    >
-      {/* Four of the eight, evenly spaced round the wheel: enough to tell two
-          palettes apart at this size, where all eight would be a grey smear. */}
-      {[hues[0], hues[1], hues[3], hues[4]].map((hue, index) => (
-        <span key={index} className="h-2.5 flex-1" style={{ background: hue }} />
-      ))}
-    </span>
-  );
+  return <ThemeSwatch theme={themeById(themeId)} className={SWATCH} />;
 }
 
 export function ThemeMenu({ onPick }: { onPick: () => void }) {

@@ -20,7 +20,15 @@
  */
 
 /** A drawing that runs behind the panes. Implemented in `lib/ambient.ts`. */
-export type AmbientId = "mandelbrot" | "julia" | "nebula" | "aurora" | "rain" | "warp" | "lava";
+export type AmbientId =
+  | "mandelbrot"
+  | "julia"
+  | "nebula"
+  | "aurora"
+  | "rain"
+  | "warp"
+  | "lava"
+  | "bloom";
 
 /** The sixteen ANSI slots, plus the three colours a terminal needs besides. */
 export interface Palette {
@@ -1016,6 +1024,42 @@ export const THEMES: Theme[] = [
       brightMagenta: "#ff96b8",
       brightCyan: "#ffe0a0",
       brightWhite: "#fff3e8",
+    },
+  },
+  {
+    id: "bloom",
+    name: "Bloom",
+    group: "Living",
+    base: "dark",
+    ambient: "bloom",
+    // The thinnest veil of the eight, since `veil` is how *opaque* the
+    // terminal sits over its drawing. A phyllotaxis is a pattern of small
+    // discrete marks rather than a wash of light: it has no bright areas to
+    // fight the text, and it disappears entirely under the covering the others
+    // need.
+    veil: 0.68,
+    accent: "#ffb3d1",
+    palette: {
+      // Warm-dark, not black: the head should look lit rather than cut out.
+      bg: "#140a12",
+      fg: "#f6e4ee",
+      cursor: "#ffb3d1",
+      black: "#3a2030",
+      red: "#ff7a9c",
+      green: "#a8d98b",
+      yellow: "#ffd08a",
+      blue: "#b39cf0",
+      magenta: "#ff9ad4",
+      cyan: "#8fd8c8",
+      white: "#e0cad6",
+      brightBlack: "#5e3a4e",
+      brightRed: "#ff9fb8",
+      brightGreen: "#c3ecab",
+      brightYellow: "#ffe0ac",
+      brightBlue: "#cbb8ff",
+      brightMagenta: "#ffb8e2",
+      brightCyan: "#aeeade",
+      brightWhite: "#fff2f8",
     },
   },
 ];

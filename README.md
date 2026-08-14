@@ -43,11 +43,14 @@ runs on your behalf.
   icon — for **Theme ▸**, and pointing at an entry *applies* it: the terminal you
   are already looking at repaints under the pointer, and leaving the menu puts
   back what you had. Twenty of them, from Gruvbox and Solarized through a
-  green phosphor CRT and Windows 3.1's Hotdog Stand, plus seven that are alive —
+  green phosphor CRT and Windows 3.1's Hotdog Stand, plus eight that are alive —
   a Mandelbrot breathing in and out of itself, a Julia set turning inside out,
-  drifting nebulae, aurora, digital rain, a starfield, a lava lamp — drawn
-  behind the panes with the terminal translucent over them, in the theme's own
-  colours. They hold still under `prefers-reduced-motion`.
+  drifting nebulae, aurora, digital rain, a starfield, a lava lamp, and a
+  sunflower head whose spirals wind and unwind forever — drawn behind the panes
+  with the terminal translucent over them, in the theme's own colours. They hold
+  still under `prefers-reduced-motion`. Each living theme's swatch is that
+  drawing, running: a still frame of a fractal tells you nothing about the one
+  thing you are choosing it for.
 - **Settles in a settings window.** Theme, type sizes, cursor, scrollback,
   shell, and every shortcut — in a second window rather than a modal, so you can
   watch the terminal change as you drag.
@@ -115,7 +118,9 @@ Settings → Keyboard and <kbd>Ctrl</kbd>+<kbd>D</kbd> goes back to the shell.
 ## Settings
 
 A window, not a modal, because nearly everything in it is a thing you adjust
-while looking at the result: theme (including following the system), the
+while looking at the result — and five tabs rather than one long page, so the
+shortcut table is somewhere you arrive at rather than somewhere you scroll past.
+Between them: theme (including following the system), the
 interface's type size and the one the terminals and text panes share, font,
 line height, cursor shape and blink, scrollback, which shell to start, whether
 an opened file becomes a tab or a split and which side that split goes, the

@@ -311,6 +311,82 @@ function aurora(frame: Frame): void {
   ctx.globalCompositeOperation = "source-over";
 }
 
+/**
+ * A flower that never finishes rearranging itself.
+ *
+ * Seeds are placed the way a sunflower places them: the *n*th at angle
+ * `n × divergence` and radius `√n`, which packs them evenly with no gaps and
+ * no seams — the arrangement a real head arrives at, and the reason one looks
+ * the way it does. At the golden angle the seeds never line up, so the eye
+ * invents spiral arms out of near-alignments instead, and counts them in
+ * Fibonacci numbers because those are the fractions closest to the golden
+ * ratio.
+ *
+ * The motion is one number. The divergence drifts by about a tenth of a degree
+ * either side of golden, and that is enough to swap which near-alignments the
+ * eye finds: the arms unwind, reverse, and rewind the other way, forever,
+ * without anything ever moving quickly. It is a very large visual change bought
+ * with a very small one, which is exactly the trade a backdrop wants.
+ *
+ * Drawn straight to the canvas rather than through the pixel buffer. This is a
+ * few hundred discs, not a few hundred thousand samples, and discs at real
+ * resolution keep the crisp centre a scaled-up buffer would lose.
+ */
+function bloom(frame: Frame): void {
+  const { ctx, w, h, t, colors } = frame;
+  ctx.fillStyle = css(frame.bg);
+  ctx.fillRect(0, 0, w, h);
+
+  // 137.507…°, the golden angle, in radians.
+  const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+  const divergence = GOLDEN + 0.0021 * Math.sin(t * 0.031);
+
+  const seeds = 620;
+  const cx = w / 2;
+  const cy = h / 2;
+  // Reaches past the shorter edge, so the head is cropped by the window rather
+  // than floating in the middle of it with a margin all round — a backdrop
+  // should look like a window onto something bigger.
+  const spread = (Math.max(w, h) * 0.62) / Math.sqrt(seeds);
+  const spin = t * 0.02;
+  // Six lobes of brightness laid over the spiral, which is what reads as
+  // "flower" rather than "seed head".
+  const petals = 6;
+
+  ctx.globalCompositeOperation = "lighter";
+  for (let i = 1; i <= seeds; i++) {
+    const a = i * divergence + spin;
+    const r = spread * Math.sqrt(i);
+    const x = cx + Math.cos(a) * r;
+    const y = cy + Math.sin(a) * r;
+    // Cheap reject: the corners are the only part outside, and skipping them
+    // is most of the head once the window is wide.
+    if (x < -8 || x > w + 8 || y < -8 || y > h + 8) continue;
+
+    const u = i / seeds;
+    // Bigger further out, the way the florets of a real head are.
+    const size = (0.6 + u * 2.6) * Math.max(1, Math.min(w, h) / 190);
+    const petal = 0.55 + 0.45 * Math.cos(a * petals - t * 0.08);
+    // Faded at the rim so the head has no hard edge to it.
+    const alpha = 0.52 * petal * (1 - u * 0.45);
+
+    ctx.fillStyle = css(ramp(colors, u * 0.55 + t * 0.01), alpha);
+    ctx.beginPath();
+    ctx.arc(x, y, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // The heart of it: one soft light where the newest florets are, in the
+  // theme's brightest colour, so the middle is where the eye settles.
+  const heart = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(w, h) * 0.22);
+  heart.addColorStop(0, css(frame.hi, 0.16));
+  heart.addColorStop(1, css(frame.hi, 0));
+  ctx.fillStyle = heart;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.globalCompositeOperation = "source-over";
+}
+
 /* ── Painters that keep state between frames ─────────────────────────────── */
 
 /**
@@ -517,6 +593,34 @@ function makeWarp(): Painter {
 
 /* ── The loop ────────────────────────────────────────────────────────────── */
 
+/* ── The table of painters ───────────────────────────────────────────────── */
+
+/** The three shapes a painter comes in. See the three sections above. */
+type Slot =
+  | { kind: "stateful"; make: () => Painter }
+  | { kind: "direct"; draw: (frame: Frame) => void }
+  | { kind: "buffered"; draw: (field: Field, frame: Frame) => void };
+
+/**
+ * Every painter, by the id that asks for it.
+ *
+ * `Record<AmbientId, Slot>` is the whole point of the table: adding an id to
+ * the union and forgetting to draw it is a compile error here. This replaced a
+ * chain of `else if` that ended in `else lava(…)`, where the same mistake was
+ * silent — a new living theme simply drew a lava lamp in its own colours, which
+ * looks enough like a working feature to ship.
+ */
+const PAINTERS: Record<AmbientId, Slot> = {
+  nebula: { kind: "stateful", make: makeNebula },
+  rain: { kind: "stateful", make: makeRain },
+  warp: { kind: "stateful", make: makeWarp },
+  aurora: { kind: "direct", draw: aurora },
+  bloom: { kind: "direct", draw: bloom },
+  mandelbrot: { kind: "buffered", draw: mandelbrot },
+  julia: { kind: "buffered", draw: julia },
+  lava: { kind: "buffered", draw: lava },
+};
+
 /**
  * Start drawing `id` on `canvas` in `palette`'s colours. Returns the stop.
  *
@@ -553,8 +657,8 @@ export function startAmbient(
     getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim() ||
     "monospace";
 
-  const painter: Painter | null =
-    id === "nebula" ? makeNebula() : id === "rain" ? makeRain() : id === "warp" ? makeWarp() : null;
+  const slot = PAINTERS[id];
+  const painter: Painter | null = slot.kind === "stateful" ? slot.make() : null;
 
   let field: Field | null = null;
   let width = 0;
@@ -615,21 +719,19 @@ export function startAmbient(
       mono,
     };
 
-    if (painter) {
+    if (painter !== null) {
       painter.paint(frame);
-    } else if (id === "aurora") {
-      aurora(frame);
-    } else {
-      // The per-pixel three. Recomputed on a slower clock than the screen's
-      // and blitted every frame, which is invisible at this scale and is the
-      // difference between a backdrop and a fan coming on.
+    } else if (slot.kind === "direct") {
+      slot.draw(frame);
+    } else if (slot.kind === "buffered") {
+      // Recomputed on a slower clock than the screen's and blitted every
+      // frame, which is invisible at this scale and is the difference between
+      // a backdrop and a fan coming on.
       if (field === null) field = makeField(width, height);
       if (field === null) return;
       if (now - fieldAt >= 1000 / FIELD_FPS) {
         fieldAt = now;
-        if (id === "mandelbrot") mandelbrot(field, frame);
-        else if (id === "julia") julia(field, frame);
-        else lava(field, frame);
+        slot.draw(field, frame);
       }
       ctx!.imageSmoothingEnabled = true;
       ctx!.imageSmoothingQuality = "high";
