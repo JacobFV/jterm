@@ -3,6 +3,7 @@
 //! One file per concern:
 //!   - `files`         — reading and saving what editor panes have open
 //!   - `history`       — the JSONL every terminal leaves behind, and export/import
+//!   - `isolation`     — keeping one tab's collapse away from the rest of the app
 //!   - `pty`           — a pseudoterminal per terminal pane
 //!   - `store`         — session snapshots and scrollback on disk
 //!   - `window_chrome` — the native half of the custom titlebar
@@ -14,6 +15,7 @@
 pub mod control;
 pub mod files;
 pub mod history;
+pub mod isolation;
 pub mod pty;
 pub mod store;
 pub mod tmux;

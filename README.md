@@ -121,6 +121,27 @@ Text panes are different on purpose: the **buffer** is saved continuously, the
 **file** only when you save. A crash therefore leaves your file untouched and
 your unsaved work recoverable.
 
+### One tab cannot take the window with it
+
+On Linux, each shell is started in a systemd scope of its own rather than in
+jterm's. This is not tidiness — it is the difference between losing a tab and
+losing the session.
+
+A tab running something that grows without bound has that process killed by the
+kernel's OOM killer, which is survivable. What is not is what systemd does next:
+every shell being a member of the *app's* scope means `OOMPolicy=stop`, the
+default, answers one member being killed by stopping the whole unit — jterm and
+every other tab's shell along with it. The window vanishes while you are typing
+somewhere else, and the only record is a line in `journalctl --user` about a
+process you never had open.
+
+So a pane's shell gets its own transient scope with `OOMPolicy=continue`, and
+the blast radius becomes the one tab that earned it. Where that cannot be
+arranged — no systemd, no user session bus, or any other platform — the shell is
+started directly and nothing else changes. One consequence is worth knowing: a
+background job you have deliberately disowned now outlives the app rather than
+being swept up with it, the same way a tmux session already does.
+
 ## tmux
 
 All of the above reconstructs a shell from what jterm wrote down. tmux does not

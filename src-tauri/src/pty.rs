@@ -32,6 +32,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::control::{self, ControlRegistry};
+use crate::isolation;
 use crate::store::Store;
 use crate::tmux;
 
@@ -261,33 +262,67 @@ pub fn pty_spawn(
         .filter(|path| path.is_dir())
         .unwrap_or_else(home_dir);
 
-    let mut cmd = match (&tmux_session, tmux::program()) {
-        (Some(name), Some(binary)) => {
-            let mut cmd = CommandBuilder::new(binary);
-            for arg in tmux::attach_argv(name, &working_dir, chosen_shell.as_deref()) {
+    // What is actually being run, as a head and a tail rather than one list,
+    // because the head is the only part `CommandBuilder` takes by itself — and
+    // because it is about to stop being the first thing on the command line.
+    let (head, tail): (std::ffi::OsString, Vec<std::ffi::OsString>) =
+        match (&tmux_session, tmux::program()) {
+            (Some(name), Some(binary)) => (
+                binary.clone().into_os_string(),
+                tmux::attach_argv(name, &working_dir, chosen_shell.as_deref())
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+            ),
+            _ => {
+                // macOS graphical apps inherit a bare environment, and the
+                // user's PATH lives in their login files, so the shell is
+                // started as a login one. Linux desktop sessions already export
+                // it, and a login shell there reads a different file than an
+                // interactive one (`.bash_profile`, not `.bashrc`) — which
+                // would surprise people. So this is deliberately not symmetric.
+                //
+                // Not reached on the tmux path above: `-l` there would be an
+                // argument to tmux, which has its own meaning for it, and the
+                // login shell question belongs to tmux's `default-command`
+                // anyway.
+                //
+                // Two bindings rather than a `push` behind a `cfg`, because the
+                // push is the whole of the macOS vector and clippy rejects
+                // building one that way — on macOS only, where nothing builds
+                // until CI does.
+                #[cfg(target_os = "macos")]
+                let tail: Vec<std::ffi::OsString> = vec!["-l".into()];
+                #[cfg(not(target_os = "macos"))]
+                let tail: Vec<std::ffi::OsString> = Vec::new();
+
+                (program.clone().into(), tail)
+            }
+        };
+
+    // Put the shell in a cgroup of its own where that is possible, so that a
+    // job it starts and cannot pay for is killed without the kill reaching
+    // jterm or any other tab. See `crate::isolation` — including why this
+    // wrapping does not cost the pid that `pty_probe` depends on.
+    //
+    // Wrapped on the tmux path too. The client is short-lived there, but it is
+    // the process that starts the server when there is not one yet, and a
+    // server that inherits jterm's scope puts every tmux-backed pane back in
+    // the blast radius this is trying to empty.
+    let mut cmd = match isolation::runner() {
+        Some(runner) => {
+            let mut cmd = CommandBuilder::new(runner);
+            for arg in isolation::scope_args(&id) {
                 cmd.arg(arg);
             }
+            cmd.arg(&head);
             cmd
         }
-        _ => {
-            // `mut` only on macOS, which is the one platform that adds an
-            // argument below.
-            #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
-            let mut cmd = CommandBuilder::new(&program);
-            // macOS graphical apps inherit a bare environment, and the user's
-            // PATH lives in their login files. Linux desktop sessions already
-            // export it, and a login shell there reads a different file than an
-            // interactive one (`.bash_profile`, not `.bashrc`) — which would
-            // surprise people. So this is deliberately not symmetric.
-            //
-            // Not reached on the tmux path above: `-l` there would be an
-            // argument to tmux, which has its own meaning for it, and the login
-            // shell question belongs to tmux's `default-command` anyway.
-            #[cfg(target_os = "macos")]
-            cmd.arg("-l");
-            cmd
-        }
+        None => CommandBuilder::new(&head),
     };
+    for arg in &tail {
+        cmd.arg(arg);
+    }
 
     cmd.cwd(&working_dir);
 
