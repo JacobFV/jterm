@@ -44,6 +44,7 @@ export type ActionId =
   | "view.zoomIn"
   | "view.zoomOut"
   | "view.zoomReset"
+  | "history.search"
   | "window.fullscreen"
   | "window.settings"
   | "terminal.eof"
@@ -99,6 +100,11 @@ export const BINDINGS: Spec[] = [
   { id: "view.zoomIn", keys: "Mod+=", label: "Larger text", group: "View" },
   { id: "view.zoomOut", keys: "Mod+-", label: "Smaller text", group: "View" },
   { id: "view.zoomReset", keys: "Mod+0", label: "Default text size", group: "View" },
+
+  // Shift, because plain `Mod+R` is the shell's own reverse search and this is
+  // not a replacement for it — the shell's searches the shell it is in, this
+  // one searches every pane jterm still has a log for.
+  { id: "history.search", keys: "Mod+Shift+R", label: "Search what you have typed", group: "View" },
 
   { id: "window.fullscreen", keys: "F11", label: "Full screen", group: "Window" },
   { id: "window.settings", keys: "Mod+,", label: "Settings", group: "Window" },

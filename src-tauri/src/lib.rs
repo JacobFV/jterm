@@ -142,6 +142,7 @@ pub fn run() {
             files::dir_home,
             history::history_append,
             history::history_read,
+            history::history_search,
             history::history_drop,
             history::history_prune,
             history::history_export,

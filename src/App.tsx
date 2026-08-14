@@ -21,6 +21,7 @@ import { FileTree } from "@/components/shell/FileTree";
 import type { PaneMenuActions } from "@/components/shell/PaneMenu";
 import { ResizeHandles } from "@/components/shell/ResizeHandles";
 import { TabStrip } from "@/components/shell/TabStrip";
+import { HistorySearch } from "@/components/shell/HistorySearch";
 import { TmuxSessions } from "@/components/shell/TmuxSessions";
 import { WindowFrame } from "@/components/shell/WindowFrame";
 import {
@@ -86,6 +87,13 @@ export function App() {
   // cannot usefully change while the window is open.
   const [hasTmux, setHasTmux] = useState(false);
   const [pickingSession, setPickingSession] = useState(false);
+  const [searchingHistory, setSearchingHistory] = useState(false);
+  // Asked once, and only so the history list can print `~/src` rather than the
+  // whole path. A failure here costs the abbreviation and nothing else.
+  const [home, setHome] = useState<string | null>(null);
+  useEffect(() => {
+    void fs.home().then(setHome).catch(() => setHome(null));
+  }, []);
   useEffect(() => {
     void tmuxAvailable().then(setHasTmux);
   }, []);
@@ -562,6 +570,10 @@ export function App() {
           zoomText("reset");
           return;
 
+        case "history.search":
+          setSearchingHistory(true);
+          return;
+
         case "window.fullscreen":
           void toggleFullscreen();
           return;
@@ -673,6 +685,22 @@ export function App() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-surface-0">
+      {searchingHistory ? (
+        <HistorySearch
+          home={home}
+          onClose={() => setSearchingHistory(false)}
+          onPick={(command) => {
+            // Typed at the prompt, never submitted — the same promise the
+            // restored draft line makes. See `HistorySearch`.
+            const tab = activeTab(workspaceRef.current);
+            if (tab === null) return;
+            const handle = terminalHandle(tab.focusedPaneId);
+            handle?.paste(command);
+            handle?.focus();
+          }}
+        />
+      ) : null}
+
       {pickingSession ? (
         <TmuxSessions
           onClose={() => setPickingSession(false)}

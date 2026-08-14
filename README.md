@@ -62,6 +62,19 @@ runs on your behalf.
   own output is flooding and lets it settle when the prompt comes back, so a
   long build is visible out of the corner of your eye without occupying a pixel
   of chrome; at zero it runs on a plain clock.
+- **Remembers what you typed, across every pane.**
+  <kbd>Mod</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> searches every line you have
+  submitted at a prompt — in any pane, from any day jterm still has a log for —
+  with the directory it was run in and how long ago. The shell's own
+  <kbd>Ctrl</kbd>+<kbd>R</kbd> is per-shell and dies with it; this one answers
+  "that command, in that repo, some weeks ago, in a tab I have since closed".
+  Choosing one **types it at the prompt without running it**, which is the same
+  promise the restored draft line makes.
+
+  It is every submitted line, not only shell commands: jterm mirrors what you
+  type and cannot tell a shell's prompt from a REPL's or an agent's, so those
+  are in there too. Telling them apart needs the shell to say where its prompts
+  begin.
 - **Settles in a settings window.** Theme, type sizes, cursor, scrollback,
   shell, and every shortcut — in a second window rather than a modal, so you can
   watch the terminal change as you drag.
@@ -83,6 +96,7 @@ runs on your behalf.
 | <kbd>Mod</kbd>+<kbd>S</kbd> | Save (in a text pane) |
 | <kbd>Mod</kbd>+<kbd>=</kbd> / <kbd>Mod</kbd>+<kbd>-</kbd> | Larger / smaller text |
 | <kbd>Mod</kbd>+<kbd>0</kbd> | Back to the default text size |
+| <kbd>Mod</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> | Search what you have typed |
 | <kbd>Mod</kbd>+<kbd>,</kbd> | Settings |
 | <kbd>F11</kbd> | Full screen |
 

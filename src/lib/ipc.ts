@@ -232,6 +232,14 @@ export interface ExportSummary {
   bytes: number;
 }
 
+/** One command that `history.search` found, and where it was run. */
+export interface HistoryHit {
+  pane: string;
+  text: string;
+  cwd: string | null;
+  at: string | null;
+}
+
 /**
  * The JSONL every terminal writes, and the single file the whole session folds
  * into. See `src-tauri/src/history.rs` for the format.
@@ -241,6 +249,10 @@ export const history = {
     call("history_append", { id, record: JSON.stringify(record) }, undefined),
 
   read: (id: string): Promise<string> => call("history_read", { id }, ""),
+
+  /** Every recorded command matching `query`, newest first, deduplicated. */
+  search: (query: string, limit?: number): Promise<HistoryHit[]> =>
+    call("history_search", { query, limit }, []),
 
   drop: (id: string) => call("history_drop", { id }, undefined),
 
