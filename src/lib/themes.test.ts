@@ -83,6 +83,7 @@ describe("themeVars", () => {
       "--text-2",
       "--text-3",
       "--text-4",
+      "--ground",
       "--brand",
       "--brand-foreground",
       "--warn",
@@ -151,6 +152,23 @@ describe("themeVars", () => {
       } else {
         expect(vars["--term-bg"], theme.id).toBe(theme.palette.bg);
       }
+    }
+  });
+
+  it("stands the ground down only where a backdrop is actually drawn", () => {
+    // `--ground` is what a pane's own box paints itself in, and it has to say
+    // "nothing at all" exactly when there is a drawing behind it — which is a
+    // question about this theme *and* the presence slider, not about the root.
+    for (const theme of THEMES) {
+      const vars = themeVars(theme);
+      // The surface it stands in for is `--bg-0`, written out rather than
+      // referred to, so a box wearing this theme is painted correctly whatever
+      // its ancestors did or did not declare.
+      const opaque = `hsl(${vars["--bg-0"]})`;
+      expect(vars["--ground"], theme.id).toBe(theme.ambient ? "transparent" : opaque);
+      // Presence at zero is not a drawing you cannot see — it is no drawing,
+      // and a transparent pane would then be showing the desktop.
+      expect(themeVars(theme, 0)["--ground"], theme.id).toBe(opaque);
     }
   });
 

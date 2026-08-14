@@ -39,10 +39,15 @@ runs on your behalf.
   around it. Or attach in **control mode**, where a tmux window becomes a jterm
   tab and a tmux pane becomes a real jterm pane: no nested status bar, no tmux
   drawn inside a box. Either way, from the **+** menu.
-- **Changes its colours from the tab.** Right-click any tab — or click its kind
-  icon — for **Theme ▸**, and pointing at an entry *applies* it: the terminal you
-  are already looking at repaints under the pointer, and leaving the menu puts
-  back what you had. Twenty of them, from Gruvbox and Solarized through a
+- **Changes its colours at whatever depth you meant.** The whole app in
+  **Settings → Appearance**; one tab from **Tab theme ▸** — right-click the tab,
+  or click its kind icon; one pane of a split from **Pane theme ▸** in its
+  header. Each falls back to the one above until you say otherwise, so two panes
+  side by side can wear different themes and switching tabs can be a change of
+  scenery — the titlebar and the file tree follow the tab you are on. Pointing
+  at an entry *applies* it: the terminal you are already looking at repaints
+  under the pointer, and leaving the menu puts back what you had. Twenty of
+  them, from Gruvbox and Solarized through a
   green phosphor CRT and Windows 3.1's Hotdog Stand, plus ten that are alive —
   a Mandelbrot breathing in and out of itself, a Julia set turning inside out,
   drifting nebulae, aurora, digital rain, a starfield, a lava lamp, a sunflower
@@ -54,7 +59,7 @@ runs on your behalf.
   running: a still frame of a fractal tells you nothing about the one thing you
   are choosing it for.
 - **And lets you turn all of that down.** Three sliders in **Settings →
-  Appearance**, shown only when the theme actually draws something. **Motion**
+  Appearance**. **Motion**
   at zero settles the drawing and then holds it — a still wallpaper in the
   theme's colours, rather than a choice between weather and giving the theme
   up. **Presence** is how much shows through the terminal, and at zero there is
@@ -167,7 +172,8 @@ Settings → Keyboard and <kbd>Ctrl</kbd>+<kbd>D</kbd> goes back to the shell.
 A window, not a modal, because nearly everything in it is a thing you adjust
 while looking at the result — and five tabs rather than one long page, so the
 shortcut table is somewhere you arrive at rather than somewhere you scroll past.
-Between them: theme (including following the system), the
+Between them: the app's theme (including following the system), which is what a
+tab or a pane falls back to when it has not been given one of its own; the
 interface's type size and the one the terminals and text panes share, font,
 line height, cursor shape and blink, scrollback, which shell to start, whether
 an opened file becomes a tab or a split and which side that split goes, the

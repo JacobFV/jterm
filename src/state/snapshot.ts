@@ -12,7 +12,9 @@
  * takes that path too.
  */
 
+import { isThemeId } from "@/lib/themes";
 import type { PaneContent } from "./content";
+import type { ThemeChoice } from "./settings";
 import type { Node } from "./tree";
 import { clampRatio, hasPane, paneIds } from "./tree";
 import type { PaneKind, PaneState, Tab, Workspace } from "./workspace";
@@ -185,11 +187,24 @@ function decodeTab(raw: unknown): Tab | null {
   return {
     id: raw.id,
     title: typeof raw.title === "string" && raw.title ? raw.title : undefined,
+    theme: decodeTheme(raw.theme),
     root,
     panes,
     focusedPaneId,
     zoomedPaneId,
   };
+}
+
+/**
+ * A tab's or a pane's own theme, if it still names one.
+ *
+ * `undefined` is both "never chose one" and "chose one this build no longer
+ * has", and the two want the same treatment: fall back to the level above,
+ * which always resolves to something. A theme that went away should cost the
+ * theme, not the tab.
+ */
+function decodeTheme(raw: unknown): ThemeChoice | undefined {
+  return isThemeId(raw) ? raw : undefined;
 }
 
 const KINDS: PaneKind[] = ["terminal", "notepad", "browser", "image", "media", "model"];
@@ -199,6 +214,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
   const kind = raw.kind;
   if (typeof kind !== "string" || !KINDS.includes(kind as PaneKind)) return null;
   const title = typeof raw.title === "string" && raw.title ? raw.title.slice(0, 200) : undefined;
+  const theme = decodeTheme(raw.theme);
 
   switch (kind as PaneKind) {
     case "terminal":
@@ -206,6 +222,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         id,
         kind: "terminal",
         title,
+        theme,
         cwd: typeof raw.cwd === "string" ? raw.cwd : undefined,
         // Length-capped like every other string out of this file: a session
         // name reaches tmux as an argument, and a hand-edited snapshot is not
@@ -217,6 +234,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         id,
         kind: "notepad",
         title,
+        theme,
         path: typeof raw.path === "string" && raw.path ? raw.path : undefined,
         dirty: raw.dirty === true,
       };
@@ -227,13 +245,14 @@ function decodePane(id: string, raw: unknown): PaneState | null {
     case "media":
     case "model": {
       if (typeof raw.path !== "string" || !raw.path) return null;
-      return { id, kind: kind as "image" | "media" | "model", title, path: raw.path };
+      return { id, kind: kind as "image" | "media" | "model", title, theme, path: raw.path };
     }
     case "browser":
       return {
         id,
         kind: "browser",
         title,
+        theme,
         // Only http(s) is restored. A `file:` or `javascript:` URL in this file
         // would otherwise be a way to make the app open something it should
         // not, using a file the app itself is expected to trust.

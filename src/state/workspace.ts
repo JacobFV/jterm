@@ -13,6 +13,7 @@
  */
 
 import { newId } from "@/lib/utils";
+import type { ThemeChoice } from "@/state/settings";
 import {
   panesFor,
   toNode,
@@ -47,6 +48,17 @@ interface PaneCommon {
   id: string;
   /** Set by the pane itself — a shell's title, a page's title, a file name. */
   title?: string;
+  /**
+   * A theme for this pane alone. Absent — which is the default and stays the
+   * default — means it wears whatever its tab is wearing.
+   *
+   * The innermost of the three levels: app, tab, pane. It is stored here rather
+   * than in the settings file because it belongs to *this* pane in *this*
+   * session, the way its working directory does; a preference is the thing you
+   * would copy to another machine, and "the pane on the right is Solarized" is
+   * not that.
+   */
+  theme?: ThemeChoice;
 }
 
 export interface TerminalPaneState extends PaneCommon {
@@ -120,6 +132,15 @@ export interface Tab {
   id: string;
   /** A name the user typed. Absent means the focused pane names the tab. */
   title?: string;
+  /**
+   * A theme for this tab and everything in it. Absent means it follows the app.
+   *
+   * The middle of the three levels, and the one that makes switching tabs a
+   * change of scenery: the window's chrome wears the active tab's theme, so a
+   * tab set to Solarized repaints the strip and the sidebar as well as its own
+   * panes. See `setTabTheme` in `lib/appearance.ts`.
+   */
+  theme?: ThemeChoice;
   root: Node;
   panes: Record<string, PaneState>;
   focusedPaneId: string;
@@ -185,6 +206,22 @@ export function focusedPane(tab: Tab): PaneState | null {
 }
 
 /**
+ * Which theme something is actually wearing.
+ *
+ * The whole of the three-level rule, in one line: the innermost choice that was
+ * actually made wins, and `app` — which is the setting, and always has a value
+ * — is what the chain ends at. Pass as much as applies: a tab and no pane asks
+ * what that tab is wearing, neither asks what the window is.
+ */
+export function themeOf(
+  app: ThemeChoice,
+  tab?: Tab | null,
+  pane?: PaneState | null,
+): ThemeChoice {
+  return pane?.theme ?? tab?.theme ?? app;
+}
+
+/**
  * What the tab strip shows.
  *
  * A user-set name wins; otherwise the focused pane speaks for the tab, because
@@ -243,6 +280,8 @@ export type Action =
   | { type: "tab/selectIndex"; index: number }
   | { type: "tab/reorder"; tabId: string; toIndex: number }
   | { type: "tab/rename"; tabId: string; title: string | undefined }
+  /** `undefined` puts the tab back to following the app's theme. */
+  | { type: "tab/theme"; tabId: string; theme: ThemeChoice | undefined }
   | {
       type: "tab/graft";
       sourceTabId: string;
@@ -286,6 +325,8 @@ export type Action =
   | { type: "pane/nudge"; tabId: string; direction: Direction }
   | { type: "pane/zoom"; tabId: string; paneId?: string }
   | { type: "pane/meta"; tabId: string; paneId: string; patch: Partial<PaneState> }
+  /** `undefined` puts the pane back to following its tab. */
+  | { type: "pane/theme"; tabId: string; paneId: string; theme: ThemeChoice | undefined }
   /** tmux has described a control session; make the tabs agree with it. */
   | { type: "tmux/sync"; session: string; windows: TmuxWindow[] }
   /** A control session ended or was detached from; its tabs go with it. */
@@ -364,6 +405,11 @@ export function reduce(state: Workspace, action: Action): Workspace {
         title: action.title?.trim() ? action.title.trim() : undefined,
       }));
 
+    case "tab/theme":
+      return mapTab(state, action.tabId, (tab) =>
+        tab.theme === action.theme ? tab : { ...tab, theme: action.theme },
+      );
+
     /**
      * A tab dropped into another tab's workspace.
      *
@@ -441,6 +487,10 @@ export function reduce(state: Workspace, action: Action): Workspace {
       };
       const evicted: Tab = {
         id: newId(),
+        // The pane leaves looking as it did. It was wearing the target tab's
+        // theme a moment ago, and a move that destroys nothing should not
+        // repaint the thing it moved either.
+        theme: target.theme,
         root: leaf(newId(), displaced.id),
         panes: { [displaced.id]: displaced },
         focusedPaneId: displaced.id,
@@ -614,6 +664,16 @@ export function reduce(state: Workspace, action: Action): Workspace {
         return { ...tab, panes: { ...tab.panes, [action.paneId]: next } };
       });
 
+    case "pane/theme":
+      return mapTab(state, action.tabId, (tab) => {
+        const pane = tab.panes[action.paneId];
+        if (!pane || pane.theme === action.theme) return tab;
+        return {
+          ...tab,
+          panes: { ...tab.panes, [action.paneId]: { ...pane, theme: action.theme } },
+        };
+      });
+
     /**
      * Make the tabs of one control session say what tmux says.
      *
@@ -722,6 +782,11 @@ function syncTab(tab: Tab, session: string, window: TmuxWindow): Tab {
  * views of the same shell, each fighting the other over how wide it is — so a
  * split gets a session of its own, which the new pane works out for itself from
  * the setting.
+ *
+ * Nor the theme. A pane-level theme is nearly always there to tell one pane
+ * apart from the one beside it — this shell is on production, that one is not —
+ * and a split that copied it would undo the distinction at the exact moment it
+ * is being drawn. A new pane follows its tab, like every other new pane.
  */
 function inheritFrom(source: PaneState | undefined, kind: PaneKind): Partial<PaneState> {
   if (kind === "terminal" && source?.kind === "terminal" && source.cwd) {

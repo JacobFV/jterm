@@ -9,16 +9,17 @@
  * whatever you had — the row you actually clicked, or the theme you came in
  * with if you clicked nothing.
  *
- * That does mean a hover writes the settings file. It is debounced upstream, so
- * running the pointer down the list costs one write when the pointer stops, and
- * the value written is one the user is looking at.
+ * This is the menu for the two *inner* levels, a tab's and a pane's. The app's
+ * own theme is chosen in the Settings window, where the whole set is laid out
+ * as a grid rather than a list. Which level a given menu is editing is entirely
+ * the caller's business: this component is handed the choice in force, told
+ * what deferring is called here, and reports back.
  */
 
 import { useEffect, useRef } from "react";
 
-import { useSettings } from "@/lib/useSettings";
 import { THEME_GROUPS, THEMES, themeById } from "@/lib/themes";
-import { updateSettings } from "@/state/settings";
+import type { ThemeChoice } from "@/state/settings";
 import { MenuHeading, MenuItem } from "./Menu";
 import { ThemeSwatch } from "./ThemeSwatch";
 
@@ -35,62 +36,74 @@ function Swatch({ themeId }: { themeId: string }) {
   return <ThemeSwatch theme={themeById(themeId)} className={SWATCH} />;
 }
 
-export function ThemeMenu({ onPick }: { onPick: () => void }) {
-  const settings = useSettings();
-  const active = settings.theme;
+interface ThemeMenuProps {
+  /** The choice made at this level, or `undefined` where none has been. */
+  value: ThemeChoice | undefined;
+  /**
+   * The first row: what declining to choose means here, and the theme that
+   * currently answers for it. Every level has one — a pane falls back to its
+   * tab, a tab to the app — and it is always the row at the top, so "put this
+   * back" is in the same place wherever the menu was opened from.
+   */
+  defer: { label: string; resolves: ThemeChoice };
+  /** `undefined` for the defer row. Called on hover as well as on click. */
+  onChange: (choice: ThemeChoice | undefined) => void;
+  onPick: () => void;
+}
 
+export function ThemeMenu({ value, defer, onChange, onPick }: ThemeMenuProps) {
   /**
    * What to go back to when the menu closes without a choice.
    *
-   * Captured once, on the first render — after that `settings.theme` is
-   * whatever the pointer is currently previewing, and reading it later would
-   * mean "go back to the last thing you hovered", which is not going back.
+   * Captured once, on the first render — after that `value` is whatever the
+   * pointer is currently previewing, and reading it later would mean "go back
+   * to the last thing you hovered", which is not going back.
    */
-  const committed = useRef(active);
+  const committed = useRef(value);
   const picked = useRef(false);
+  // Read through a ref so the cleanup below can stay a mount-once effect: it
+  // must run when the menu closes and at no other time, and `onChange` is a
+  // fresh closure on every render of the menu's owner.
+  const changeRef = useRef(onChange);
+  changeRef.current = onChange;
 
   useEffect(
     () => () => {
-      if (!picked.current) updateSettings({ theme: committed.current });
+      if (!picked.current) changeRef.current(committed.current);
     },
     [],
   );
 
-  const rows = (group: string) =>
-    THEMES.filter((theme) => theme.group === group).map((theme) => (
-      <MenuItem
-        key={theme.id}
-        label={theme.name}
-        adornment={<Swatch themeId={theme.id} />}
-        selected={active === theme.id}
-        onHover={() => updateSettings({ theme: theme.id })}
-        onSelect={() => {
-          picked.current = true;
-          updateSettings({ theme: theme.id });
-          onPick();
-        }}
-      />
-    ));
+  const choose = (choice: ThemeChoice | undefined) => {
+    picked.current = true;
+    onChange(choice);
+    onPick();
+  };
 
   return (
     <>
       <MenuItem
-        label="System"
-        adornment={<Swatch themeId="system" />}
-        selected={active === "system"}
-        onHover={() => updateSettings({ theme: "system" })}
-        onSelect={() => {
-          picked.current = true;
-          updateSettings({ theme: "system" });
-          onPick();
-        }}
+        label={defer.label}
+        adornment={<Swatch themeId={defer.resolves} />}
+        selected={value === undefined}
+        onHover={() => onChange(undefined)}
+        onSelect={() => choose(undefined)}
       />
       {THEME_GROUPS.map((group) => (
         <div key={group}>
           {/* Every group is ruled off, including the first — the row above it
-              is `System`, which belongs to no group. */}
+              is the defer row, which belongs to no group. */}
           <MenuHeading divided>{group}</MenuHeading>
-          {rows(group)}
+          {THEMES.filter((theme) => theme.group === group).map((theme) => (
+            <MenuItem
+              key={theme.id}
+              label={theme.name}
+              adornment={<Swatch themeId={theme.id} />}
+              selected={value === theme.id}
+              onHover={() => onChange(theme.id)}
+              onSelect={() => choose(theme.id)}
+            />
+          ))}
         </div>
       ))}
     </>

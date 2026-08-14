@@ -1,3 +1,4 @@
+import type { ThemeChoice } from "@/state/settings";
 import type { PaneState } from "@/state/workspace";
 
 /**
@@ -15,6 +16,17 @@ export interface PaneProps<T extends PaneState = PaneState> {
    *  behind a zoomed sibling. Panes that own an expensive resource use this to
    *  stand down without being unmounted. */
   visible: boolean;
+  /**
+   * The theme this pane is standing in — its own, else its tab's, else the
+   * app's.
+   *
+   * Not the colours, and not something a pane needs in order to *be* themed:
+   * the tokens are already on the pane's box and every stylesheet in here reads
+   * them. It is here for the one thing that cannot work that way — xterm copies
+   * the palette into its own styles when it is handed one, so a terminal has to
+   * be told the values have moved. Anything drawn with CSS should ignore this.
+   */
+  theme: ThemeChoice;
   /** Report something the pane discovered about itself: a title, a directory. */
   onMeta: (patch: Partial<T>) => void;
   /** Ask to become the focused pane, e.g. because it was clicked. */

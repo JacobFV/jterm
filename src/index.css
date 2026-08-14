@@ -225,14 +225,19 @@ body,
  *
  * The canvas is behind the pane area, so anything opaque between it and the
  * eye hides it completely. These two are the whole path: the workspace's own
- * ground, and a terminal's box. Both keep their `bg-surface-0` under an
- * ordinary theme — a transparent-by-default terminal would show the desktop —
- * and stand down only when a theme has actually asked for a backdrop.
+ * ground, and a terminal's box. Both are `--bg-0` under an ordinary theme — a
+ * transparent-by-default terminal would show the desktop — and stand down only
+ * where a theme has actually asked for a backdrop.
  *
  * Nothing else is listed. A notepad, a picture and a web page are documents,
  * and a document is meant to be opaque; only the terminal is a window onto
  * something, so only the terminal is treated as one.
+ *
+ * `--ground` carries the answer rather than a `[data-ambient]` selector on the
+ * root, because themes nest: a pane can wear one its tab does not, and each of
+ * these boxes must ask the *nearest* theme whether there is a drawing behind
+ * it. A custom property inherits, so the nearest one wins on its own.
  */
-:root[data-ambient] .pane-ground {
-  background-color: transparent;
+.pane-ground {
+  background-color: var(--ground, hsl(var(--bg-0)));
 }

@@ -60,7 +60,8 @@ interface TabStripProps {
   onReorder: (tabId: string, toIndex: number) => void;
   /** What a tab's kind icon offers — the same menu a split pane's header has,
    *  aimed at whichever pane that tab is focused on. It lives here too because
-   *  a tab holding one pane draws no header of its own. */
+   *  a tab holding one pane draws no header of its own. The one difference is
+   *  scope: from here, Theme dresses the tab rather than a single pane. */
   paneMenu: PaneMenuActions;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
@@ -322,8 +323,12 @@ function TabItem({
         <PaneMenu
           ref={menuRef}
           tabs={tabs}
-          tabId={tab.id}
+          tab={tab}
           pane={pane}
+          // In the strip the icon stands for the tab, so its Theme entry
+          // dresses the whole tab — every pane in it, and the window's chrome
+          // while it is the tab on screen.
+          scope="tab"
           actions={paneMenu}
           muted={!active}
         />

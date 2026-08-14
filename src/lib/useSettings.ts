@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 
+import { subscribeSystemScheme, systemScheme } from "@/lib/appearance";
 import { getSettings, subscribeSettings, type Settings } from "@/state/settings";
 
 /**
@@ -12,4 +13,16 @@ import { getSettings, subscribeSettings, type Settings } from "@/state/settings"
  */
 export function useSettings(): Settings {
   return useSyncExternalStore(subscribeSettings, getSettings, getSettings);
+}
+
+/**
+ * Which foundation the desktop is currently asking for, re-rendering on a flip.
+ *
+ * Only interesting to a component that computes colours during render, which is
+ * to say the one that dresses each pane: a theme chosen for a single pane is
+ * written into that pane's own style attribute, so `system` moving under it has
+ * to reach React rather than only reaching the document. See `themeStyle`.
+ */
+export function useSystemScheme(): "dark" | "light" {
+  return useSyncExternalStore(subscribeSystemScheme, systemScheme, () => "dark");
 }

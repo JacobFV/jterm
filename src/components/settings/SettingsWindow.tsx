@@ -23,7 +23,6 @@ import { dialog } from "@/lib/ipc";
 import { displayKeys, keysFor, type ActionId } from "@/lib/keymap";
 import { MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
 import { useIsFullscreen } from "@/lib/useFullscreen";
-import { resolveTheme } from "@/lib/appearance";
 import { THEME_GROUPS, THEMES } from "@/lib/themes";
 import { tmuxAvailable } from "@/lib/tmux";
 import { cn } from "@/lib/utils";
@@ -173,9 +172,6 @@ function percent(value: number): string {
 export function SettingsWindow() {
   const settings = useSettings();
   const [tab, setTab] = useState<Tab>("Appearance");
-  // What the chosen theme actually resolves to, so the backdrop sliders can ask
-  // whether there is a backdrop. `system` is not itself a theme.
-  const theme = resolveTheme(settings.theme);
 
   // This window is its own webview, so it asks for itself rather than being
   // told — there is nothing shared between the two but the settings file.
@@ -211,10 +207,14 @@ export function SettingsWindow() {
             label="Theme"
             hint={
               <>
-                Also on any tab: right-click it, or click its kind icon, for{" "}
-                <strong className="font-normal text-ink-2">Theme</strong>. Following the system
-                switches with it, live. The <strong className="font-normal text-ink-2">Living</strong>{" "}
-                themes draw behind the panes and go still under reduced motion.
+                The whole app, and what anything unthemed falls back to. A single tab can wear
+                its own — right-click it, or click its icon, for{" "}
+                <strong className="font-normal text-ink-2">Tab theme</strong> — and a single pane
+                in a split tab can wear one the rest of the tab does not, from{" "}
+                <strong className="font-normal text-ink-2">Pane theme</strong> in its header.
+                Following the system switches with it, live. The{" "}
+                <strong className="font-normal text-ink-2">Living</strong> themes draw behind the
+                panes and go still under reduced motion.
               </>
             }
             stacked
@@ -232,52 +232,53 @@ export function SettingsWindow() {
             />
           </Row>
 
-          {/* Only where there is a drawing for them to act on. On the twenty
-              still themes these three would be sliders that visibly do
-              nothing, which reads as a broken setting rather than an absent
-              feature — the same reason the tmux section hides itself. */}
-          {theme.ambient ? (
-            <>
-              <Row
-                label="Backdrop motion"
-                hint="How fast the drawing moves. At zero it settles and then holds — a still wallpaper in the theme's own colours, which is the way to keep a living theme quiet without giving it up."
-              >
-                <Slider
-                  label="Backdrop motion"
-                  value={settings.ambientMotion}
-                  onChange={(ambientMotion) => updateSettings({ ambientMotion })}
-                  {...LIMITS.ambientMotion}
-                  format={percent}
-                />
-              </Row>
+          {/* Shown whatever the theme above is.
 
-              <Row
-                label="Backdrop presence"
-                hint="How much of it shows through the terminal. At zero the terminal is fully opaque and the drawing is hidden entirely."
-              >
-                <Slider
-                  label="Backdrop presence"
-                  value={settings.ambientPresence}
-                  onChange={(ambientPresence) => updateSettings({ ambientPresence })}
-                  {...LIMITS.ambientPresence}
-                  format={percent}
-                />
-              </Row>
+              These used to hide themselves on the twenty still themes, on the
+              grounds that a slider which visibly does nothing reads as broken.
+              A theme can now be chosen for one tab or one pane, and this window
+              cannot see the workspace — so hiding them means that setting a
+              single tab to a living theme leaves its Backdrop presence
+              unreachable, which is the worse of the two failures by some way.
+              They apply wherever a drawing is actually being made. */}
+          <Row
+            label="Backdrop motion"
+            hint="How fast the drawing moves. At zero it settles and then holds — a still wallpaper in the theme's own colours, which is the way to keep a living theme quiet without giving it up."
+          >
+            <Slider
+              label="Backdrop motion"
+              value={settings.ambientMotion}
+              onChange={(ambientMotion) => updateSettings({ ambientMotion })}
+              {...LIMITS.ambientMotion}
+              format={percent}
+            />
+          </Row>
 
-              <Row
-                label="Reacts to the shell"
-                hint="How much your own output speeds the drawing up — a build churns the weather, an idle prompt lets it settle. At zero it runs on a plain clock and ignores what the shells are doing."
-              >
-                <Slider
-                  label="Reacts to the shell"
-                  value={settings.ambientActivity}
-                  onChange={(ambientActivity) => updateSettings({ ambientActivity })}
-                  {...LIMITS.ambientActivity}
-                  format={percent}
-                />
-              </Row>
-            </>
-          ) : null}
+          <Row
+            label="Backdrop presence"
+            hint="How much of it shows through the terminal. At zero the terminal is fully opaque and the drawing is hidden entirely."
+          >
+            <Slider
+              label="Backdrop presence"
+              value={settings.ambientPresence}
+              onChange={(ambientPresence) => updateSettings({ ambientPresence })}
+              {...LIMITS.ambientPresence}
+              format={percent}
+            />
+          </Row>
+
+          <Row
+            label="Reacts to the shell"
+            hint="How much your own output speeds the drawing up — a build churns the weather, an idle prompt lets it settle. At zero it runs on a plain clock and ignores what the shells are doing."
+          >
+            <Slider
+              label="Reacts to the shell"
+              value={settings.ambientActivity}
+              onChange={(ambientActivity) => updateSettings({ ambientActivity })}
+              {...LIMITS.ambientActivity}
+              format={percent}
+            />
+          </Row>
         </Section>
         ) : null}
 

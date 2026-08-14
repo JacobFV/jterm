@@ -29,6 +29,7 @@ import {
   type TabDrag,
   type TabDropTarget,
 } from "@/components/shell/Workspace";
+import { resolveTheme, setTabTheme } from "@/lib/appearance";
 import { readClipboard, writeClipboard } from "@/lib/clipboard";
 import {
   SESSION_IMPORTED_EVENT,
@@ -69,6 +70,7 @@ import {
   emptyWorkspace,
   paneLabel,
   reduce,
+  themeOf,
 } from "@/state/workspace";
 
 function livePaneIds(workspace: Workspace): string[] {
@@ -100,6 +102,22 @@ export function App() {
 
   const workspaceRef = useRef(workspace);
   workspaceRef.current = workspace;
+
+  /**
+   * The tab on screen, and the theme the window is therefore wearing.
+   *
+   * This is what makes a tab-level theme worth having rather than a per-pane
+   * one with extra steps: the choice reaches the titlebar, the file tree and
+   * the menus as well as the panes, so moving between tabs is a change of
+   * scenery and not a patch of colour in the middle of the window. The panes
+   * dress themselves — see `Workspace` — so what this is really for is
+   * everything that is not a pane.
+   */
+  const front = activeTab(workspace);
+  const windowTheme = themeOf(settings.theme, front);
+  useEffect(() => {
+    setTabTheme(front?.theme);
+  }, [front?.theme]);
 
   /* ── Restore ──────────────────────────────────────────────────────── */
 
@@ -392,6 +410,11 @@ export function App() {
           targetTabId: tabId,
           targetPaneId: paneId,
         }),
+      // Two of the three levels a theme can be chosen at. The third is the
+      // app's, which is a preference and lives in the Settings window.
+      onTabTheme: (tabId, theme) => dispatch({ type: "tab/theme", tabId, theme }),
+      onPaneTheme: (tabId, paneId, theme) =>
+        dispatch({ type: "pane/theme", tabId, paneId, theme }),
     }),
     [replacePane],
   );
@@ -759,7 +782,7 @@ export function App() {
         <div className="relative min-h-0 flex-1">
           {/* Under the panes, and drawn whether or not they have loaded yet:
               this is the one thing on screen that has nothing to wait for. */}
-          <AmbientBackdrop />
+          <AmbientBackdrop theme={resolveTheme(windowTheme)} />
           {loaded ? (
             <PaneWorkspace
               tabs={tabs}

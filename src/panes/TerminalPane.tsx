@@ -76,8 +76,20 @@ const DRAFT_LOG_INTERVAL_MS = 1200;
  */
 const CWD_POLL_MS = 1500;
 
-function readTheme(): ITheme {
-  const styles = getComputedStyle(document.documentElement);
+/**
+ * The palette this pane is standing in, as xterm wants it.
+ *
+ * Read from the pane's own element rather than from the document, because a
+ * theme can now be chosen for one pane alone: `Workspace` writes the tokens
+ * onto the pane's box, and every one of them inherits, so computing from here
+ * gives the nearest theme — the pane's if it has one, else its tab's, else the
+ * app's — without this file having to know that any of those levels exist.
+ *
+ * xterm copies these values into its own styles at the moment it is given them,
+ * so unlike everything else on screen it has to be told again when they move.
+ */
+function readTheme(host: HTMLElement | null): ITheme {
+  const styles = getComputedStyle(host ?? document.documentElement);
   const token = (name: string) => styles.getPropertyValue(name).trim();
   return {
     background: token("--term-bg"),
@@ -107,7 +119,14 @@ function readTheme(): ITheme {
   };
 }
 
-export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PaneProps<TerminalPaneState>) {
+export function TerminalPane({
+  pane,
+  theme,
+  focused,
+  visible,
+  onMeta,
+  onFocus,
+}: PaneProps<TerminalPaneState>) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -327,7 +346,7 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
       // xterm keeps its own scrollback for the live session; the file on disk
       // is what survives a restart, and is capped separately.
       scrollback: settings.scrollback,
-      theme: readTheme(),
+      theme: readTheme(host),
       macOptionIsMeta: true,
       // ConPTY re-wraps lines itself and reports the cursor differently from a
       // Unix pty; telling xterm which backend is behind it is what keeps
@@ -403,7 +422,7 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
       term.options.cursorStyle = current.cursorStyle;
       term.options.cursorBlink = current.cursorBlink;
       term.options.scrollback = current.scrollback;
-      term.options.theme = readTheme();
+      term.options.theme = readTheme(host);
       safeFit();
       repaint();
       if (!exitedRef.current) void pty.resize(paneId, term.cols, term.rows);
@@ -637,9 +656,25 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
     if (focused) termRef.current?.focus();
   }, [focused]);
 
+  /**
+   * Hand xterm the palette again when this pane's theme changes.
+   *
+   * A change of *settings* already comes through `applySettings`, but a theme
+   * chosen for this pane or its tab is workspace state and never touches the
+   * settings store. What both paths have in common is that the tokens have
+   * already moved on the DOM by the time this runs — `Workspace` writes them in
+   * the same commit — so re-reading is all there is to do.
+   */
+  useEffect(() => {
+    const term = termRef.current;
+    if (term === null) return;
+    term.options.theme = readTheme(hostRef.current);
+    if (term.rows > 0) term.refresh(0, term.rows - 1);
+  }, [theme]);
+
   return (
     <div
-      className="pane-ground h-full w-full overflow-hidden bg-surface-0 px-1.5 pt-1"
+      className="pane-ground h-full w-full overflow-hidden px-1.5 pt-1"
       onMouseDown={onFocus}
       ref={hostRef}
     />

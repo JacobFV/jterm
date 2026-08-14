@@ -34,10 +34,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GripVertical, Minimize2, X } from "lucide-react";
 
+import { resolveTheme, themeStyle } from "@/lib/appearance";
+import { useSettings, useSystemScheme } from "@/lib/useSettings";
 import { cn } from "@/lib/utils";
 import { paneKind } from "@/panes/registry";
-import { type Action, type Tab, paneLabel } from "@/state/workspace";
+import { type Action, type Tab, paneLabel, themeOf } from "@/state/workspace";
 import { type DropEdge, type Layout, type Rect, countPanes, layout } from "@/state/tree";
+import { AmbientBackdrop } from "./AmbientBackdrop";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { PaneMenu, type PaneMenuActions } from "./PaneMenu";
 
@@ -106,6 +109,7 @@ export function Workspace({
   onTabDropTarget,
 }: WorkspaceProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const settings = useSettings();
   const [paneDrag, setPaneDrag] = useState<PaneDrag | null>(null);
   const [dividerNode, setDividerNode] = useState<string | null>(null);
   const [tabDrop, setTabDrop] = useState<TabDropTarget | null>(null);
@@ -141,6 +145,20 @@ export function Workspace({
     (paneId: string) => placements.get(paneId)?.rect ?? null,
     [placements],
   );
+
+  /**
+   * What the *window* is wearing — the active tab's theme, or the app's.
+   *
+   * Not what a pane wears; every pane below writes its own tokens whatever this
+   * is. It is here for one question only: whether the backdrop `App` draws
+   * across the whole pane area is already the drawing a given pane wants, or
+   * whether that pane has to run one of its own.
+   */
+  const windowChoice = themeOf(settings.theme, active);
+
+  // Colours are computed during render here, so a desktop that flips under a
+  // `system` choice has to reach React and not merely the document.
+  useSystemScheme();
 
   /** Pointer position as a fraction of the grid, for hit-testing. */
   const toFraction = useCallback((clientX: number, clientY: number) => {
@@ -266,7 +284,7 @@ export function Workspace({
   const dividers = active === null ? [] : (layouts.get(active.id)?.dividers ?? []);
 
   return (
-    <div ref={hostRef} className="pane-ground relative h-full w-full overflow-hidden bg-surface-0">
+    <div ref={hostRef} className="pane-ground relative h-full w-full overflow-hidden">
       {order.map((paneId) => {
         const placement = placements.get(paneId);
         if (placement === undefined) return null;
@@ -280,6 +298,19 @@ export function Workspace({
         const focused = tab.focusedPaneId === paneId;
         const split = countPanes(tab.root) > 1;
         const box = isZoomed ? { left: 0, top: 0, width: 100, height: 100 } : rect;
+
+        // "On screen for the user": its tab is up and it is not hidden behind a
+        // zoomed sibling. A media pane mutes itself on this; nothing should be
+        // playing out of a tab you cannot see.
+        const showing = onScreen && (tab.zoomedPaneId === null || isZoomed);
+
+        // The innermost theme actually chosen for this pane: its own, else its
+        // tab's, else the app's.
+        const choice = themeOf(settings.theme, tab, pane);
+        // A drawing of its own, only where the window's is not already the one
+        // this pane wants — and only where it can be seen, for the same reason
+        // the media pane stands down.
+        const ownBackdrop = showing && choice !== windowChoice;
 
         return (
           <div
@@ -300,11 +331,27 @@ export function Workspace({
               visibility: onScreen ? "visible" : "hidden",
               pointerEvents: onScreen ? "auto" : "none",
               zIndex: onScreen ? (isZoomed ? 20 : 1) : 0,
+              // Every colour token, addressed at this box. Custom properties
+              // inherit, so this is the whole of how one pane wears a theme its
+              // neighbour does not: the header, the terminal and a notepad's
+              // syntax colours below all resolve to the nearest declaration,
+              // and nothing had to be told which theme it is in.
+              ...themeStyle(choice, settings.ambientPresence),
             }}
           >
+            {/* A backdrop of this pane's own, for a living theme the window is
+                not already drawing — without it a pane set to Lorenz would be
+                Lorenz's colours over somebody else's weather. Only for the tab
+                on screen: the drawing is an animation, and one running behind a
+                pane nobody can see is a loop burning frames for nothing. */}
+            {ownBackdrop ? <AmbientBackdrop theme={resolveTheme(choice)} /> : null}
+
             <div
               className={cn(
-                "flex h-full w-full flex-col",
+                // `relative` so it paints over the backdrop above rather than
+                // under it — an absolutely positioned sibling would otherwise
+                // come last in the painting order whatever the source order.
+                "relative flex h-full w-full flex-col",
                 // The focused pane is marked by its border, the quietest signal
                 // that still works when every pane is showing black text.
                 split && "border",
@@ -335,8 +382,12 @@ export function Workspace({
                   {onScreen ? (
                     <PaneMenu
                       tabs={tabs}
-                      tabId={tab.id}
+                      tab={tab}
                       pane={pane}
+                      // A header only exists where the tab is split, so this
+                      // icon always has a sibling to be told apart from — which
+                      // is exactly when theming one pane alone means anything.
+                      scope="pane"
                       actions={paneMenu}
                       muted={!focused}
                     />
@@ -383,12 +434,9 @@ export function Workspace({
                 <ErrorBoundary label={paneLabel(pane)}>
                   <definition.Component
                     pane={pane}
+                    theme={choice}
                     focused={onScreen && focused}
-                    // "On screen for the user": its tab is up and it is not
-                    // hidden behind a zoomed sibling. A media pane mutes itself
-                    // on this; nothing should be playing out of a tab you cannot
-                    // see.
-                    visible={onScreen && (tab.zoomedPaneId === null || isZoomed)}
+                    visible={showing}
                     onFocus={() => dispatch({ type: "pane/focus", tabId: tab.id, paneId })}
                     onMeta={(patch) =>
                       dispatch({ type: "pane/meta", tabId: tab.id, paneId, patch })

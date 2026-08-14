@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { countPanes, layout, paneIds } from "./tree";
-import { type Workspace, emptyWorkspace, reduce } from "./workspace";
+import { type Workspace, emptyWorkspace, reduce, themeOf } from "./workspace";
 
 /**
  * Two tabs: the first a lone terminal, the second split into two.
@@ -277,6 +277,91 @@ describe("pane/split", () => {
     expect(second).toBe(setup.targetPaneId);
     expect(tab.panes[first]).toMatchObject({ kind: "notepad", path: "/tmp/notes.md" });
     expect(tab.focusedPaneId).toBe(first);
+  });
+});
+
+describe("themes at three levels", () => {
+  it("resolves the innermost choice that was actually made", () => {
+    const state = emptyWorkspace();
+    const tab = state.tabs[0];
+    const pane = tab.panes[tab.focusedPaneId];
+
+    expect(themeOf("dark", tab, pane)).toBe("dark");
+    expect(themeOf("dark", { ...tab, theme: "nord" }, pane)).toBe("nord");
+    expect(themeOf("dark", { ...tab, theme: "nord" }, { ...pane, theme: "gruvbox" })).toBe(
+      "gruvbox",
+    );
+    // A pane with a theme still answers for itself in a tab without one.
+    expect(themeOf("dark", tab, { ...pane, theme: "gruvbox" })).toBe("gruvbox");
+  });
+
+  it("dresses a tab, and puts it back", () => {
+    const start = emptyWorkspace();
+    const tabId = start.tabs[0].id;
+    const dressed = reduce(start, { type: "tab/theme", tabId, theme: "nord" });
+    expect(dressed.tabs[0].theme).toBe("nord");
+    const bare = reduce(dressed, { type: "tab/theme", tabId, theme: undefined });
+    expect(bare.tabs[0].theme).toBeUndefined();
+  });
+
+  it("dresses one pane of a split without touching its sibling", () => {
+    const setup = twoTabs();
+    const tab = setup.state.tabs[1];
+    const [first, second] = paneIds(tab.root);
+    const next = reduce(setup.state, {
+      type: "pane/theme",
+      tabId: setup.sourceTabId,
+      paneId: first,
+      theme: "gruvbox",
+    });
+    expect(next.tabs[1].panes[first].theme).toBe("gruvbox");
+    expect(next.tabs[1].panes[second].theme).toBeUndefined();
+  });
+
+  it("leaves the state alone when nothing would change", () => {
+    const start = emptyWorkspace();
+    const tabId = start.tabs[0].id;
+    // Every hover in the theme menu dispatches, so the no-op case is the common
+    // one: re-rendering the whole workspace for it would be a repaint per row.
+    expect(reduce(start, { type: "tab/theme", tabId, theme: undefined })).toBe(start);
+    const dressed = reduce(start, { type: "tab/theme", tabId, theme: "nord" });
+    expect(reduce(dressed, { type: "tab/theme", tabId, theme: "nord" })).toBe(dressed);
+  });
+
+  it("keeps a split from inheriting the pane it was split off", () => {
+    const setup = twoTabs();
+    const dressed = reduce(setup.state, {
+      type: "pane/theme",
+      tabId: setup.targetTabId,
+      paneId: setup.targetPaneId,
+      theme: "gruvbox",
+    });
+    const next = reduce(dressed, {
+      type: "pane/split",
+      tabId: setup.targetTabId,
+      paneId: setup.targetPaneId,
+      axis: "x",
+      kind: "terminal",
+    });
+    const fresh = next.tabs[0].panes[next.tabs[0].focusedPaneId];
+    expect(fresh.theme).toBeUndefined();
+  });
+
+  it("sends a pane out of an absorbed tab still wearing what it wore", () => {
+    const setup = twoTabs();
+    const dressed = reduce(setup.state, {
+      type: "tab/theme",
+      tabId: setup.targetTabId,
+      theme: "nord",
+    });
+    const next = reduce(dressed, {
+      type: "tab/absorb",
+      sourceTabId: setup.sourceTabId,
+      targetTabId: setup.targetTabId,
+      targetPaneId: setup.targetPaneId,
+    });
+    const evicted = next.tabs.find((tab) => tab.panes[setup.targetPaneId]);
+    expect(evicted?.theme).toBe("nord");
   });
 });
 

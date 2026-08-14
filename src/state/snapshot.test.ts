@@ -80,3 +80,45 @@ describe("control-mode tabs in the snapshot", () => {
     expect(decode(JSON.stringify(json))!.controlSessions[0]).toHaveLength(128);
   });
 });
+
+describe("themes in the snapshot", () => {
+  /** One tab wearing a theme, with one of its panes wearing another. */
+  function dressed(): Workspace {
+    const start = emptyWorkspace();
+    const tabId = start.tabs[0].id;
+    const paneId = start.tabs[0].focusedPaneId;
+    return reduce(reduce(start, { type: "tab/theme", tabId, theme: "nord" }), {
+      type: "pane/theme",
+      tabId,
+      paneId,
+      theme: "gruvbox",
+    });
+  }
+
+  it("brings both levels back", () => {
+    const before = dressed();
+    const tab = decode(encode(before, {}))!.workspace.tabs[0];
+    expect(tab.theme).toBe("nord");
+    expect(tab.panes[tab.focusedPaneId].theme).toBe("gruvbox");
+  });
+
+  it("costs the theme rather than the tab when the theme has gone", () => {
+    // A file written by a build that had a theme this one does not — or one
+    // that was hand-edited. The tab is still perfectly usable without it.
+    const json = JSON.parse(encode(dressed(), {}));
+    const tab = json.workspace.tabs[0];
+    tab.theme = "chartreuse";
+    tab.panes[tab.focusedPaneId].theme = { not: "a theme" };
+
+    const restored = decode(JSON.stringify(json))!.workspace.tabs[0];
+    expect(restored.theme).toBeUndefined();
+    expect(restored.panes[restored.focusedPaneId].theme).toBeUndefined();
+    expect(restored.id).toBe(tab.id);
+  });
+
+  it("leaves a file from before this feature undressed", () => {
+    const tab = decode(encode(emptyWorkspace(), {}))!.workspace.tabs[0];
+    expect(tab.theme).toBeUndefined();
+    expect(tab.panes[tab.focusedPaneId].theme).toBeUndefined();
+  });
+});

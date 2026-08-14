@@ -185,8 +185,16 @@ export function themeVars(theme: Theme, presence = 1): Record<string, string> {
   // different hues — which is a perfectly good accent and unreadable text.
   const brandForeground = lightness(rgb(accent)) > 0.5 ? "#000000" : "#ffffff";
 
+  // Whether this theme draws a backdrop *here*, as opposed to anywhere.
+  // Presence at zero is not "a drawing you cannot see" — it is no drawing, and
+  // the surfaces that stand down for one must not stand down for nothing.
+  const drawing = theme.ambient !== undefined && presence > 0;
+  // Named because `--ground` below is either this or nothing, and the two must
+  // not be able to drift apart.
+  const surface0 = hslTriple(mix(ground, ink, SURFACE[0]));
+
   const vars: Record<string, string> = {
-    "--bg-0": hslTriple(mix(ground, ink, SURFACE[0])),
+    "--bg-0": surface0,
     "--bg-1": hslTriple(mix(ground, ink, SURFACE[1])),
     "--bg-2": hslTriple(mix(ground, ink, SURFACE[2])),
     "--bg-3": hslTriple(mix(ground, ink, SURFACE[3])),
@@ -198,6 +206,16 @@ export function themeVars(theme: Theme, presence = 1): Record<string, string> {
     "--text-2": hslTriple(mix(ink, ground, INK[1])),
     "--text-3": hslTriple(mix(ink, ground, INK[2])),
     "--text-4": hslTriple(mix(ink, ground, INK[3])),
+
+    // What the pane area is painted in — or nothing at all, where a backdrop is
+    // being drawn behind it and anything opaque would hide it completely.
+    //
+    // A property rather than a class or a `[data-ambient]` selector because
+    // themes now nest: a pane may wear a different one from its tab, and the
+    // question "is there a drawing behind *this* box" has to be answered by the
+    // nearest theme rather than by the outermost. Inheritance does that for
+    // free; a descendant selector cannot.
+    "--ground": drawing ? "transparent" : `hsl(${surface0})`,
 
     "--brand": hslTriple(rgb(accent)),
     "--brand-foreground": hslTriple(rgb(brandForeground)),
