@@ -22,11 +22,12 @@ import { useEffect, useRef, useState } from "react";
 import { Layers, PanelLeft, Plus, Settings as SettingsIcon, X } from "lucide-react";
 
 import { MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
+import { useIsFullscreen } from "@/lib/useFullscreen";
 import { cn } from "@/lib/utils";
 import { NEW_PANE_MENU } from "@/panes/registry";
 import { type PaneKind, type Tab, focusedPane, tabLabel } from "@/state/workspace";
 import { Menu, MenuItem, useMenu } from "./Menu";
-import { PaneMenu, type PaneMenuActions } from "./PaneMenu";
+import { PaneMenu, type PaneMenuActions, type PaneMenuHandle } from "./PaneMenu";
 import type { TabDrag } from "./Workspace";
 import { WindowControls } from "./WindowControls";
 
@@ -90,12 +91,17 @@ export function TabStrip({
 }: TabStripProps) {
   // macOS keeps its native traffic lights, which float over the top-left of the
   // webview. Without this the first tab sits underneath them.
-  const [leadingInset, setLeadingInset] = useState(0);
+  //
+  // In fullscreen they slide away, and the space held clear for them becomes a
+  // notch of nothing at the start of the strip — the macOS half of the same
+  // thing `WindowControls` does about its own buttons.
+  const fullscreen = useIsFullscreen();
+  const [native, setNative] = useState(false);
   useEffect(() => {
-    setLeadingInset(
-      (usesNativeWindowChrome() ? MACOS_TRAFFIC_LIGHT_INSET_PX : 0) + WINDOW_GRAB_INSET_PX,
-    );
+    setNative(usesNativeWindowChrome());
   }, []);
+  const leadingInset =
+    (native && !fullscreen ? MACOS_TRAFFIC_LIGHT_INSET_PX : 0) + WINDOW_GRAB_INSET_PX;
 
   const tabRefs = useRef(new Map<string, HTMLDivElement>());
   const stripRef = useRef<HTMLDivElement | null>(null);
@@ -202,79 +208,29 @@ export function TabStrip({
           than sitting outside it, which is what lets tabs grow first and the
           window's drag handle take only what is genuinely spare. */}
       <div className="no-scrollbar flex min-w-0 flex-1 items-stretch overflow-x-auto">
-        {tabs.map((tab) => {
-          const isActive = tab.id === activeTabId;
-          const pane = focusedPane(tab);
-          return (
-            <div
-              key={tab.id}
-              ref={(node) => {
-                if (node) tabRefs.current.set(tab.id, node);
-                else tabRefs.current.delete(tab.id);
-              }}
-              onPointerDown={beginTabDrag(tab.id)}
-              className={cn(
-                // Chrome's sizing rule, and the one people expect: tabs share
-                // the strip evenly, widening to a comfortable maximum when
-                // there are few and narrowing to a legible minimum as more
-                // open. Only once they are all at the minimum does the strip
-                // scroll — a basis of `auto` here would leave every tab at its
-                // text width and start scrolling with the bar half empty.
-                "group flex min-w-[112px] max-w-[240px] flex-1 basis-0 items-center gap-1.5 border-r border-border px-2.5",
-                isActive
-                  ? "bg-surface-0 shadow-[inset_0_-2px_0_hsl(var(--brand))]"
-                  : "hover:bg-surface-2",
-                dragging === tab.id && "opacity-60",
-              )}
-            >
-              {/* Outside the select button rather than in it: it is a control
-                  of its own, and a button inside a button is neither valid nor
-                  clickable. */}
-              {pane ? (
-                <PaneMenu
-                  tabs={tabs}
-                  tabId={tab.id}
-                  pane={pane}
-                  actions={paneMenu}
-                  muted={!isActive}
-                />
-              ) : null}
-              <button
-                type="button"
-                className="flex min-w-0 flex-1 items-center text-left"
-                onClick={() => {
-                  if (suppressClick.current) {
-                    suppressClick.current = false;
-                    return;
-                  }
-                  onSelect(tab.id);
-                }}
-                aria-current={isActive}
-                title={tabLabel(tab)}
-              >
-                <span
-                  className={cn("truncate text-[length:var(--fs-11)]", isActive ? "text-ink-1" : "text-ink-3")}
-                >
-                  {tabLabel(tab)}
-                </span>
-              </button>
-              {/* The active tab's close control is always visible rather than
-                  waiting for a hover, since it is the one most likely wanted. */}
-              <button
-                type="button"
-                title="Close tab"
-                aria-label={`Close ${tabLabel(tab)}`}
-                className={cn(
-                  "shrink-0 rounded-sm p-0.5 text-ink-4 hover:text-ink-1 group-hover:opacity-100",
-                  isActive ? "opacity-100" : "opacity-0",
-                )}
-                onClick={() => onClose(tab.id)}
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </div>
-          );
-        })}
+        {tabs.map((tab) => (
+          <TabItem
+            key={tab.id}
+            tab={tab}
+            tabs={tabs}
+            active={tab.id === activeTabId}
+            dragging={dragging === tab.id}
+            register={(node) => {
+              if (node) tabRefs.current.set(tab.id, node);
+              else tabRefs.current.delete(tab.id);
+            }}
+            onPointerDown={beginTabDrag(tab.id)}
+            onSelect={() => {
+              if (suppressClick.current) {
+                suppressClick.current = false;
+                return;
+              }
+              onSelect(tab.id);
+            }}
+            onClose={() => onClose(tab.id)}
+            paneMenu={paneMenu}
+          />
+        ))}
 
         {/* Left gravity: the new-tab control sits against the rightmost tab and
             travels with it, rather than parking at the far edge of the strip. */}
@@ -303,6 +259,102 @@ export function TabStrip({
       </div>
 
       <WindowControls />
+    </div>
+  );
+}
+
+/**
+ * One tab.
+ *
+ * A component of its own rather than markup in the loop above, because it needs
+ * a handle on the menu its kind icon owns: right-clicking anywhere on the tab
+ * opens that same menu at the pointer. The two gestures reach the same place on
+ * purpose — the icon is a small target, and "menu for this tab" is what both of
+ * them mean.
+ */
+function TabItem({
+  tab,
+  tabs,
+  active,
+  dragging,
+  register,
+  onPointerDown,
+  onSelect,
+  onClose,
+  paneMenu,
+}: {
+  tab: Tab;
+  tabs: Tab[];
+  active: boolean;
+  dragging: boolean;
+  register: (node: HTMLDivElement | null) => void;
+  onPointerDown: (event: React.PointerEvent) => void;
+  onSelect: () => void;
+  onClose: () => void;
+  paneMenu: PaneMenuActions;
+}) {
+  const menuRef = useRef<PaneMenuHandle | null>(null);
+  const pane = focusedPane(tab);
+
+  return (
+    <div
+      ref={register}
+      onPointerDown={onPointerDown}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        menuRef.current?.openAt(event.clientX, event.clientY);
+      }}
+      className={cn(
+        // Chrome's sizing rule, and the one people expect: tabs share the strip
+        // evenly, widening to a comfortable maximum when there are few and
+        // narrowing to a legible minimum as more open. Only once they are all
+        // at the minimum does the strip scroll — a basis of `auto` here would
+        // leave every tab at its text width and start scrolling with the bar
+        // half empty.
+        "group flex min-w-[112px] max-w-[240px] flex-1 basis-0 items-center gap-1.5 border-r border-border px-2.5",
+        active ? "bg-surface-0 shadow-[inset_0_-2px_0_hsl(var(--brand))]" : "hover:bg-surface-2",
+        dragging && "opacity-60",
+      )}
+    >
+      {/* Outside the select button rather than in it: it is a control of its
+          own, and a button inside a button is neither valid nor clickable. */}
+      {pane ? (
+        <PaneMenu
+          ref={menuRef}
+          tabs={tabs}
+          tabId={tab.id}
+          pane={pane}
+          actions={paneMenu}
+          muted={!active}
+        />
+      ) : null}
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-center text-left"
+        onClick={onSelect}
+        aria-current={active}
+        title={tabLabel(tab)}
+      >
+        <span
+          className={cn("truncate text-[length:var(--fs-11)]", active ? "text-ink-1" : "text-ink-3")}
+        >
+          {tabLabel(tab)}
+        </span>
+      </button>
+      {/* The active tab's close control is always visible rather than waiting
+          for a hover, since it is the one most likely wanted. */}
+      <button
+        type="button"
+        title="Close tab"
+        aria-label={`Close ${tabLabel(tab)}`}
+        className={cn(
+          "shrink-0 rounded-sm p-0.5 text-ink-4 hover:text-ink-1 group-hover:opacity-100",
+          active ? "opacity-100" : "opacity-0",
+        )}
+        onClick={onClose}
+      >
+        <X className="h-3 w-3" />
+      </button>
     </div>
   );
 }
@@ -404,35 +456,33 @@ function NewTabButton({
         <Plus className="h-3.5 w-3.5" />
       </button>
 
-      {menu.anchor ? (
-        <Menu anchor={menu.anchor} menuRef={menu.menuRef}>
-          {NEW_PANE_MENU.map((choice) => (
-            <MenuItem
-              key={choice.action === "open" ? "open" : choice.kind}
-              icon={choice.icon}
-              label={choice.label}
-              onSelect={() => {
-                menu.close();
-                if (choice.action === "open") onOpenFile();
-                else onNew(choice.kind);
-              }}
-            />
-          ))}
-          {/* Kept out of `NEW_PANE_MENU` because it is not a pane kind. It
-              makes a terminal like the first entry does — the difference is
-              what that terminal is attached to. */}
-          {onTmuxSessions ? (
-            <MenuItem
-              icon={Layers}
-              label="tmux session…"
-              onSelect={() => {
-                menu.close();
-                onTmuxSessions();
-              }}
-            />
-          ) : null}
-        </Menu>
-      ) : null}
+      <Menu menu={menu}>
+        {NEW_PANE_MENU.map((choice) => (
+          <MenuItem
+            key={choice.action === "open" ? "open" : choice.kind}
+            icon={choice.icon}
+            label={choice.label}
+            onSelect={() => {
+              menu.close();
+              if (choice.action === "open") onOpenFile();
+              else onNew(choice.kind);
+            }}
+          />
+        ))}
+        {/* Kept out of `NEW_PANE_MENU` because it is not a pane kind. It makes
+            a terminal like the first entry does — the difference is what that
+            terminal is attached to. */}
+        {onTmuxSessions ? (
+          <MenuItem
+            icon={Layers}
+            label="tmux session…"
+            onSelect={() => {
+              menu.close();
+              onTmuxSessions();
+            }}
+          />
+        ) : null}
+      </Menu>
     </div>
   );
 }

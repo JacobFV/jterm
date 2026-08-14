@@ -41,6 +41,9 @@ export type ActionId =
   | "pane.growRight"
   | "pane.growUp"
   | "pane.growDown"
+  | "view.zoomIn"
+  | "view.zoomOut"
+  | "view.zoomReset"
   | "window.fullscreen"
   | "window.settings"
   | "terminal.eof"
@@ -48,7 +51,7 @@ export type ActionId =
   | "edit.paste";
 
 /** Headings the shortcut list is grouped under, in the order they appear. */
-export type ActionGroup = "Tabs" | "Panes" | "Window" | "Terminal";
+export type ActionGroup = "Tabs" | "Panes" | "View" | "Window" | "Terminal";
 
 export interface Spec {
   id: ActionId;
@@ -89,6 +92,14 @@ export const BINDINGS: Spec[] = [
   { id: "pane.growUp", keys: "Mod+Shift+ArrowUp", label: "Grow pane up", group: "Panes" },
   { id: "pane.growDown", keys: "Mod+Shift+ArrowDown", label: "Grow pane down", group: "Panes" },
 
+  // "Larger text" rather than "Zoom in", because `pane.zoom` above already
+  // spends the word `zoom` on maximising a pane — tmux's meaning of it, and the
+  // one a terminal's users arrive with. Two zooms in one shortcut table would
+  // be a table you have to read twice.
+  { id: "view.zoomIn", keys: "Mod+=", label: "Larger text", group: "View" },
+  { id: "view.zoomOut", keys: "Mod+-", label: "Smaller text", group: "View" },
+  { id: "view.zoomReset", keys: "Mod+0", label: "Default text size", group: "View" },
+
   { id: "window.fullscreen", keys: "F11", label: "Full screen", group: "Window" },
   { id: "window.settings", keys: "Mod+,", label: "Settings", group: "Window" },
 
@@ -128,6 +139,47 @@ interface Chord {
 function normalizeKey(key: string): string {
   return key === " " ? "space" : key.toLowerCase();
 }
+
+/**
+ * Keys that answer to more than one press.
+ *
+ * Zoom is why this exists. `Ctrl+=` and `Ctrl++` are one gesture on one key —
+ * the second is the first with a finger on Shift — and every browser and editor
+ * treats them as the same shortcut. So is the `+` on the numeric keypad, which
+ * sends its own `code` and no Shift at all. A table that compared the character
+ * exactly would answer perhaps a third of the presses aimed at it.
+ *
+ * `shifted` is the character the same physical key sends with Shift held, and
+ * its presence is also what makes Shift optional for a chord on that key.
+ * `codes` are physical keys that count as this key whatever the layout has
+ * printed on them, which is what brings the keypad in — and what keeps `Mod+-`
+ * reachable on a layout where `-` is somewhere else entirely.
+ *
+ * Only keys where this is genuinely one gesture belong here. It is not a
+ * general "ignore Shift" escape hatch: `Mod+D` and `Mod+Shift+D` are two
+ * different shortcuts and must stay that way.
+ */
+const ALIASES: Record<string, { shifted?: string; codes: string[] }> = {
+  "=": { shifted: "+", codes: ["equal", "numpadadd"] },
+  // Deliberately no `shifted` here, though `_` is what the key sends with Shift.
+  // `Ctrl+_` is readline's **undo** — the thing bash does when you have mangled
+  // a line and want it back — and nobody reaches for Shift to make something
+  // smaller, since `-` needs no Shift to type in the first place. Taking that
+  // key to save a keystroke nobody presses would be the `Ctrl+D` mistake again.
+  "-": { codes: ["minus", "numpadsubtract"] },
+  // `0` tolerates Shift for the layouts where the digit is *itself* the shifted
+  // face of the key — AZERTY and QWERTZ both put punctuation on the number row
+  // and ask for Shift to get a number. Nothing in a shell answers to `Ctrl+)`,
+  // so this one costs nothing.
+  "0": { shifted: ")", codes: ["digit0", "numpad0"] },
+};
+
+/** The unshifted key a shifted character shares its physical key with. */
+const UNSHIFTED: Record<string, string> = Object.fromEntries(
+  Object.entries(ALIASES)
+    .filter(([, alias]) => alias.shifted !== undefined)
+    .map(([key, alias]) => [alias.shifted!, key]),
+);
 
 function parse(keys: string): Chord {
   const parts = keys.split("+");
@@ -192,12 +244,19 @@ function matches(chord: Chord, event: KeyboardEvent): boolean {
   const heldMod = isMacOS() ? event.metaKey || event.ctrlKey : event.ctrlKey;
   if (wantsMod !== heldMod) return false;
   if (chord.mod && !mod && !isMacOS()) return false;
-  if (chord.shift !== event.shiftKey) return false;
   if (chord.alt !== event.altKey) return false;
 
+  const alias = ALIASES[chord.key];
+  // Shift is part of a chord, except on a key where holding it is only how you
+  // reach the character in the first place — see `ALIASES`.
+  const shiftOptional = alias?.shifted !== undefined && !chord.shift;
+  if (chord.shift !== event.shiftKey && !shiftOptional) return false;
+
   const key = normalizeKey(event.key);
+  if (key === chord.key || key === alias?.shifted) return true;
   // `event.code` is the fallback for layouts where a modifier changes `key`.
-  return key === chord.key || event.code.toLowerCase() === `key${chord.key}`;
+  const code = event.code.toLowerCase();
+  return code === `key${chord.key}` || (alias?.codes.includes(code) ?? false);
 }
 
 /**
@@ -224,13 +283,21 @@ export function resolve(event: KeyboardEvent): { id: ActionId; index?: number } 
  * The chord a key press describes, written the way this file stores them.
  *
  * Returns `null` for a press that cannot stand on its own: a bare modifier,
- * which arrives while the user is still reaching for the real key, and `+`,
- * which is the separator and so cannot also be a key name.
+ * which arrives while the user is still reaching for the real key.
+ *
+ * A character that is the shifted face of an aliased key is written down as the
+ * key itself, with the Shift dropped — pressing `Ctrl+Shift+=` records `Mod+=`.
+ * That is the same press as far as `matches` is concerned, so recording it any
+ * other way would store a chord that answers fewer presses than the one the
+ * user just performed. It also keeps `+` out of the stored form, which matters
+ * because `+` is the separator and so cannot also be a key name.
  */
 export function chordFromEvent(event: KeyboardEvent): string | null {
-  const key = event.key;
-  if (key === "Control" || key === "Shift" || key === "Alt" || key === "Meta") return null;
-  if (key === "+") return null;
+  const raw = event.key;
+  if (raw === "Control" || raw === "Shift" || raw === "Alt" || raw === "Meta") return null;
+
+  const folded = UNSHIFTED[raw];
+  const key = folded ?? raw;
 
   const parts: string[] = [];
   if (isMacOS()) {
@@ -239,7 +306,7 @@ export function chordFromEvent(event: KeyboardEvent): string | null {
   } else if (event.ctrlKey) {
     parts.push("Mod");
   }
-  if (event.shiftKey) parts.push("Shift");
+  if (event.shiftKey && folded === undefined) parts.push("Shift");
   if (event.altKey) parts.push("Alt");
 
   parts.push(key === " " ? "Space" : key.length === 1 ? key.toUpperCase() : key);

@@ -16,11 +16,13 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
+import { AmbientBackdrop } from "@/components/shell/AmbientBackdrop";
 import { FileTree } from "@/components/shell/FileTree";
 import type { PaneMenuActions } from "@/components/shell/PaneMenu";
 import { ResizeHandles } from "@/components/shell/ResizeHandles";
 import { TabStrip } from "@/components/shell/TabStrip";
 import { TmuxSessions } from "@/components/shell/TmuxSessions";
+import { WindowFrame } from "@/components/shell/WindowFrame";
 import {
   Workspace as PaneWorkspace,
   type TabDrag,
@@ -56,7 +58,7 @@ import { useSettings } from "@/lib/useSettings";
 import { disposePane } from "@/panes/registry";
 import { loadContent, onContentChange, snapshotContent } from "@/state/content";
 import { decode, encode } from "@/state/snapshot";
-import { getSettings, type FileOpenTarget } from "@/state/settings";
+import { getSettings, zoomText, type FileOpenTarget } from "@/state/settings";
 import { type Direction, splitPlacement } from "@/state/tree";
 import {
   type PaneKind,
@@ -550,6 +552,16 @@ export function App() {
           }
           return;
 
+        case "view.zoomIn":
+          zoomText("in");
+          return;
+        case "view.zoomOut":
+          zoomText("out");
+          return;
+        case "view.zoomReset":
+          zoomText("reset");
+          return;
+
         case "window.fullscreen":
           void toggleFullscreen();
           return;
@@ -717,6 +729,9 @@ export function App() {
         ) : null}
 
         <div className="relative min-h-0 flex-1">
+          {/* Under the panes, and drawn whether or not they have loaded yet:
+              this is the one thing on screen that has nothing to wait for. */}
+          <AmbientBackdrop />
           {loaded ? (
             <PaneWorkspace
               tabs={tabs}
@@ -732,6 +747,7 @@ export function App() {
       </div>
 
       <ResizeHandles />
+      <WindowFrame />
     </div>
   );
 }

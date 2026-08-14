@@ -18,6 +18,13 @@
  * slots. It lives here rather than in the terminal component because the point
  * of keeping it here is that the shell chrome and the terminal contents cannot
  * drift apart: a theme change is one edit, not two.
+ *
+ * The colours below are now only the *first paint* — what is on screen for the
+ * moment between the document appearing and the settings file being read.
+ * Every one of them is overwritten as an inline style by `lib/appearance.ts`
+ * from the chosen theme in `lib/themes.ts`, which is where a colour is actually
+ * decided and where a new theme is added. They are kept here, matching the two
+ * foundations exactly, so that moment is not a flash of the wrong app.
  */
 
 @layer base {
@@ -56,6 +63,11 @@
       "DejaVu Sans Mono", monospace;
     --font-mono: var(--font-mono-default);
 
+    /* The size monospaced content is drawn at — the terminal and the text
+       pane, which zoom together. `lib/appearance.ts` overwrites it; this is
+       what the first paint uses, before the settings file has been read. */
+    --mono-font-size: 13px;
+
     /* The interface's type scale. Every size in the chrome is computed from
        `--ui-font-size` rather than inherited from it, so a size set here is the
        size on screen and nothing compounds down the tree. `lib/appearance.ts`
@@ -74,6 +86,10 @@
        Muted and low-chroma on purpose: a terminal that shouts in eight
        saturated hues fights the hairline chrome around it. */
     --term-bg: #000000;
+    /* The same, with no alpha. A living theme gives `--term-bg` one so its
+       backdrop shows through the text; this is what the places that need
+       something opaque to sit on read instead. */
+    --term-bg-solid: #000000;
     --term-fg: #ededed;
     --term-cursor: #f2cd6b;
     --term-selection: rgba(242, 205, 107, 0.24);
@@ -119,6 +135,7 @@
     --danger: 0 72% 51%;
 
     --term-bg: #ffffff;
+    --term-bg-solid: #ffffff;
     --term-fg: #1a1a1c;
     --term-cursor: #a8760a;
     --term-selection: rgba(168, 118, 10, 0.2);
@@ -201,4 +218,21 @@ body,
 /* xterm renders its own scrollbar on the viewport; match the app's. */
 .xterm .xterm-viewport {
   background-color: transparent !important;
+}
+
+/*
+ * The two surfaces a living theme's backdrop has to come through.
+ *
+ * The canvas is behind the pane area, so anything opaque between it and the
+ * eye hides it completely. These two are the whole path: the workspace's own
+ * ground, and a terminal's box. Both keep their `bg-surface-0` under an
+ * ordinary theme — a transparent-by-default terminal would show the desktop —
+ * and stand down only when a theme has actually asked for a backdrop.
+ *
+ * Nothing else is listed. A notepad, a picture and a web page are documents,
+ * and a document is meant to be opaque; only the terminal is a window onto
+ * something, so only the terminal is treated as one.
+ */
+:root[data-ambient] .pane-ground {
+  background-color: transparent;
 }

@@ -83,7 +83,10 @@ function readTheme(): ITheme {
     background: token("--term-bg"),
     foreground: token("--term-fg"),
     cursor: token("--term-cursor"),
-    cursorAccent: token("--term-bg"),
+    // The solid one: this is the colour the character *under* a block cursor is
+    // drawn in, and a translucent theme would leave it reading through to the
+    // backdrop rather than against the cursor.
+    cursorAccent: token("--term-bg-solid"),
     selectionBackground: token("--term-selection"),
     black: token("--term-black"),
     red: token("--term-red"),
@@ -296,6 +299,11 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
     const settings = getSettings();
     const term = new Terminal({
       allowProposedApi: true,
+      // Always, rather than only for the themes that need it. A theme whose
+      // background has no alpha renders identically either way, and the option
+      // is fixed at construction — leaving it off would mean a living theme
+      // could not be chosen without rebuilding every terminal on screen.
+      allowTransparency: true,
       cursorBlink: settings.cursorBlink,
       cursorStyle: settings.cursorStyle,
       // Read from the variable rather than from the setting: `lib/appearance`
@@ -600,7 +608,7 @@ export function TerminalPane({ pane, focused, visible, onMeta, onFocus }: PanePr
 
   return (
     <div
-      className="h-full w-full overflow-hidden bg-surface-0 px-1.5 pt-1"
+      className="pane-ground h-full w-full overflow-hidden bg-surface-0 px-1.5 pt-1"
       onMouseDown={onFocus}
       ref={hostRef}
     />

@@ -1,6 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { DEFAULTS, LIMITS, decodeSettings } from "./settings";
+import {
+  DEFAULTS,
+  LIMITS,
+  decodeSettings,
+  getSettings,
+  resetSettings,
+  updateSettings,
+  zoomText,
+} from "./settings";
 
 describe("decodeSettings", () => {
   it("treats a missing or unreadable file as no settings at all", () => {
@@ -72,5 +80,44 @@ describe("decodeSettings", () => {
     // is written down, and it has to survive a round trip through the file.
     const decoded = decodeSettings(JSON.stringify({ keys: { "pane.close": "" } }))!;
     expect(decoded.keys).toEqual({ "pane.close": "" });
+  });
+});
+
+describe("zoomText", () => {
+  // The store is module state, so a test that moves it has to put it back.
+  afterEach(() => resetSettings());
+
+  it("steps the font size the settings slider shows", () => {
+    zoomText("in");
+    expect(getSettings().fontSize).toBe(DEFAULTS.fontSize + LIMITS.fontSize.step);
+    zoomText("out");
+    zoomText("out");
+    expect(getSettings().fontSize).toBe(DEFAULTS.fontSize - LIMITS.fontSize.step);
+  });
+
+  it("stops where the slider stops", () => {
+    updateSettings({ fontSize: LIMITS.fontSize.max });
+    zoomText("in");
+    expect(getSettings().fontSize).toBe(LIMITS.fontSize.max);
+
+    updateSettings({ fontSize: LIMITS.fontSize.min });
+    zoomText("out");
+    expect(getSettings().fontSize).toBe(LIMITS.fontSize.min);
+  });
+
+  it("resets to the size jterm ships with, not to wherever you were", () => {
+    // The honest consequence of zoom being the setting rather than a second
+    // number laid over it — there is no earlier size of yours to return to.
+    updateSettings({ fontSize: DEFAULTS.fontSize + 5 });
+    zoomText("in");
+    zoomText("reset");
+    expect(getSettings().fontSize).toBe(DEFAULTS.fontSize);
+  });
+
+  it("leaves every other setting alone", () => {
+    updateSettings({ theme: "light", scrollback: 500 });
+    zoomText("in");
+    expect(getSettings().theme).toBe("light");
+    expect(getSettings().scrollback).toBe(500);
   });
 });

@@ -17,15 +17,109 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ResizeHandles } from "@/components/shell/ResizeHandles";
 import { WindowControls } from "@/components/shell/WindowControls";
+import { WindowFrame } from "@/components/shell/WindowFrame";
 import { dialog } from "@/lib/ipc";
-import type { ActionId } from "@/lib/keymap";
+import { displayKeys, keysFor, type ActionId } from "@/lib/keymap";
 import { MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
+import { useIsFullscreen } from "@/lib/useFullscreen";
+import { swatch, THEME_GROUPS, THEMES } from "@/lib/themes";
 import { tmuxAvailable } from "@/lib/tmux";
+import { cn } from "@/lib/utils";
 import { DEFAULTS, LIMITS, resetSettings, updateSettings } from "@/state/settings";
 import { useSettings } from "@/lib/useSettings";
 import { KeyBindings } from "./KeyBindings";
 import { SessionData } from "./SessionData";
 import { Button, NumberInput, Row, Section, Segmented, Slider, TextInput, Toggle } from "./controls";
+
+/**
+ * Every theme, as a grid of the thing itself.
+ *
+ * A list of names would be useless here: nobody knows what "Kanagawa" looks
+ * like, and the whole reason this window is a window is so a choice can be
+ * seen. Each cell is a miniature of a terminal in that theme — its own
+ * background, a hairline in its own border colour, and a line of its own hues —
+ * so the grid answers the question the names cannot.
+ */
+function ThemePicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Theme" className="space-y-3">
+      {["", ...THEME_GROUPS].map((group) => {
+        // The empty group is `system`, which has no palette and so no cell of
+        // its own kind; it gets the first row to itself.
+        const items = group === "" ? [null] : THEMES.filter((theme) => theme.group === group);
+        return (
+          <div key={group || "system"}>
+            {group ? (
+              <div className="pane-title mb-1.5 text-[length:var(--fs-9)]">{group}</div>
+            ) : null}
+            <div className="grid grid-cols-3 gap-1.5">
+              {items.map((theme) => {
+                const id = theme?.id ?? "system";
+                const active = value === id;
+                const hues = theme ? swatch(theme) : null;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => onChange(id)}
+                    title={theme ? theme.name : "Follow the desktop"}
+                    className={cn(
+                      "flex flex-col gap-1 border p-1.5 text-left",
+                      active
+                        ? "border-brand"
+                        : "border-hairline-strong hover:border-ink-4",
+                    )}
+                  >
+                    <span
+                      className="flex h-6 items-end gap-px overflow-hidden px-1 pb-1"
+                      style={{
+                        background: hues ? hues[0] : "linear-gradient(90deg, #000 50%, #fff 50%)",
+                      }}
+                    >
+                      {(hues ?? []).slice(1).map((hue, index) => (
+                        <span
+                          key={index}
+                          className="flex-1"
+                          // Stepped heights, so the row reads as a little bar
+                          // chart of the palette rather than as a flat ribbon.
+                          style={{ background: hue, height: `${5 + (index % 3) * 4}px` }}
+                        />
+                      ))}
+                    </span>
+                    <span
+                      className={cn(
+                        "truncate text-[length:var(--fs-10)]",
+                        active ? "text-brand" : "text-ink-2",
+                      )}
+                    >
+                      {theme ? theme.name : "System"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
+ * The keyboard's half of the font size, named rather than described.
+ *
+ * Read from the binding table rather than written out, so rebinding zoom in
+ * the section below rewrites this sentence too — and unbinding it removes the
+ * sentence instead of leaving a shortcut that no longer exists in a hint.
+ */
+function zoomHint(): string {
+  const zoomIn = keysFor("view.zoomIn");
+  const zoomOut = keysFor("view.zoomOut");
+  if (!zoomIn || !zoomOut) return "";
+  return ` ${displayKeys(zoomIn)} and ${displayKeys(zoomOut)} move it from the keyboard.`;
+}
 
 export function SettingsWindow() {
   const settings = useSettings();
@@ -55,17 +149,19 @@ export function SettingsWindow() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Section title="Appearance">
-          <Row label="Theme" hint="Following the system switches with it, live.">
-            <Segmented
-              label="Theme"
-              value={settings.theme}
-              onChange={(theme) => updateSettings({ theme })}
-              options={[
-                { value: "system", label: "System" },
-                { value: "dark", label: "Dark" },
-                { value: "light", label: "Light" },
-              ]}
-            />
+          <Row
+            label="Theme"
+            hint={
+              <>
+                Also on any tab: right-click it, or click its kind icon, for{" "}
+                <strong className="font-normal text-ink-2">Theme</strong>. Following the system
+                switches with it, live. The <strong className="font-normal text-ink-2">Living</strong>{" "}
+                themes draw behind the panes and go still under reduced motion.
+              </>
+            }
+            stacked
+          >
+            <ThemePicker value={settings.theme} onChange={(theme) => updateSettings({ theme })} />
           </Row>
 
           <Row label="Interface size" hint="Tabs, the file tree, pane titles — not the terminal.">
@@ -93,9 +189,12 @@ export function SettingsWindow() {
             />
           </Row>
 
-          <Row label="Font size">
+          <Row
+            label="Font size"
+            hint={`The terminal and the text panes, which are drawn at one size on purpose.${zoomHint()}`}
+          >
             <Slider
-              label="Terminal font size"
+              label="Font size"
               value={settings.fontSize}
               onChange={(fontSize) => updateSettings({ fontSize })}
               {...LIMITS.fontSize}
@@ -268,6 +367,7 @@ export function SettingsWindow() {
       </div>
 
       <ResizeHandles />
+      <WindowFrame />
     </div>
   );
 }
@@ -281,7 +381,11 @@ export function SettingsWindow() {
  * nothing about which window they are in.
  */
 function TitleBar() {
-  const inset = usesNativeWindowChrome() ? MACOS_TRAFFIC_LIGHT_INSET_PX : 0;
+  // Asked per window, so this answers for the settings window rather than for
+  // the app's. It is unlikely ever to be true here, but a rule that holds only
+  // where someone expected it to be needed is the kind that stops holding.
+  const fullscreen = useIsFullscreen();
+  const inset = usesNativeWindowChrome() && !fullscreen ? MACOS_TRAFFIC_LIGHT_INSET_PX : 0;
   return (
     <div
       data-tauri-drag-region

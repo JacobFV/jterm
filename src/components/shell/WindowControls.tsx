@@ -5,6 +5,11 @@
  * `lib/platform.ts`. On Windows and Linux the app owes the user replacements,
  * and they live at the far right of the tab strip.
  *
+ * Not rendered in fullscreen either, on any platform. These stand in for a
+ * window frame, and a fullscreen window does not have one — every desktop hides
+ * its own buttons there, macOS included, and an app that keeps drawing them is
+ * offering to minimise something that is not in a stack of windows.
+ *
  * The two platforms get genuinely different buttons, because their desktops
  * disagree about what a window button *is*. Windows draws full-height hit
  * targets with hairline glyphs and a red close. GNOME draws small circles with
@@ -24,6 +29,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { isTauri } from "@/lib/tauri";
 import { isLinux, usesNativeWindowChrome } from "@/lib/platform";
+import { useIsFullscreen } from "@/lib/useFullscreen";
 
 const HOVER_EVENT = "window-chrome://maximize-hover";
 
@@ -151,6 +157,11 @@ export function WindowControls({ maximize = true }: { maximize?: boolean }) {
   const [snapHover, setSnapHover] = useState(false);
   const [gtk, setGtk] = useState(false);
   const maximizeRef = useRef<HTMLButtonElement | null>(null);
+  // A fullscreen window has no frame to stand in for, so there is nothing for
+  // these to replace. Leaving it fullscreen is the shortcut's job, or the
+  // desktop's, and both still work with the buttons gone.
+  const fullscreen = useIsFullscreen();
+  const shown = available && !fullscreen;
 
   useEffect(() => {
     setGtk(isLinux());
@@ -186,17 +197,24 @@ export function WindowControls({ maximize = true }: { maximize?: boolean }) {
   /**
    * Publish the maximise button's viewport rect so the backend can hit-test it.
    * Re-reported on every resize because the strip's contents move as tabs open.
+   *
+   * A zero-size rect is how the region is *given back*: the backend reads any
+   * empty rectangle as "there is no button" and stops answering `HTMAXBUTTON`
+   * there. That matters more than it sounds, because a claimed rectangle is
+   * non-client and the webview receives no mouse events over it — a stale one
+   * left behind after the button goes would be an invisible dead band across
+   * the tab strip, on precisely the fullscreen window where the strip is all
+   * there is.
    */
   const publishRect = useCallback(() => {
-    const node = maximizeRef.current;
-    if (node === null || !isTauri()) return;
-    const rect = node.getBoundingClientRect();
+    if (!isTauri()) return;
+    const rect = maximizeRef.current?.getBoundingClientRect();
     void import("@tauri-apps/api/core").then(({ invoke }) =>
       invoke("set_maximize_button_rect", {
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
+        x: rect?.left ?? 0,
+        y: rect?.top ?? 0,
+        width: rect?.width ?? 0,
+        height: rect?.height ?? 0,
       }).catch(() => {
         /* Non-Windows builds have nothing to do with this. */
       }),
@@ -206,10 +224,15 @@ export function WindowControls({ maximize = true }: { maximize?: boolean }) {
   useEffect(() => {
     // Only Windows hit-tests the button natively; on Linux publishing its
     // rectangle would be a message a minute for nobody to read.
-    if (!available || gtk || !maximize) return;
+    if (gtk || !maximize) return;
+
+    // Gated on `shown` rather than `available`, and it runs either way: when
+    // the button has gone the ref is already null, so this publishes the empty
+    // rect that hands the region back.
     publishRect();
     const node = maximizeRef.current;
-    if (node === null) return;
+    if (!shown || node === null) return;
+
     const observer = new ResizeObserver(publishRect);
     observer.observe(node);
     window.addEventListener("resize", publishRect);
@@ -217,11 +240,15 @@ export function WindowControls({ maximize = true }: { maximize?: boolean }) {
       observer.disconnect();
       window.removeEventListener("resize", publishRect);
     };
-  }, [available, gtk, maximize, publishRect]);
+  }, [shown, gtk, maximize, publishRect]);
 
   // Hover state for a region the OS owns. Never arrives outside Windows.
   useEffect(() => {
-    if (!available || gtk || !maximize) return;
+    if (!shown || gtk || !maximize) {
+      // Nothing will send a leave for a button that stopped existing mid-hover.
+      setSnapHover(false);
+      return;
+    }
     let disposed = false;
     let unlisten: (() => void) | null = null;
     void (async () => {
@@ -236,9 +263,9 @@ export function WindowControls({ maximize = true }: { maximize?: boolean }) {
       disposed = true;
       unlisten?.();
     };
-  }, [available, gtk, maximize]);
+  }, [shown, gtk, maximize]);
 
-  if (!available) return null;
+  if (!shown) return null;
 
   const act = (run: (win: AppWindow) => Promise<void>) => () => {
     void appWindow().then((win) => (win === null ? undefined : run(win)));

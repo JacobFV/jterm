@@ -265,7 +265,7 @@ export function Workspace({
   const dividers = active === null ? [] : (layouts.get(active.id)?.dividers ?? []);
 
   return (
-    <div ref={hostRef} className="relative h-full w-full overflow-hidden bg-surface-0">
+    <div ref={hostRef} className="pane-ground relative h-full w-full overflow-hidden bg-surface-0">
       {order.map((paneId) => {
         const placement = placements.get(paneId);
         if (placement === undefined) return null;

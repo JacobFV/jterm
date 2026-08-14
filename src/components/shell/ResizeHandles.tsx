@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { isTauri } from "@/lib/tauri";
 import { usesNativeWindowChrome } from "@/lib/platform";
+import { useIsFullscreen } from "@/lib/useFullscreen";
 
 /** Grab widths. Comfortably past the ~4px a bare frame offers. */
 const EDGE_PX = 7;
@@ -82,12 +83,17 @@ const CORNERS: Grip[] = [
 
 export function ResizeHandles() {
   const [enabled, setEnabled] = useState(false);
+  // A fullscreen window does not resize, so these would be seven pixels of
+  // nothing laid along each screen edge — and they sit above everything, so the
+  // top strip would take clicks meant for the tabs at the one place a pointer
+  // can always be thrown: the edge itself.
+  const fullscreen = useIsFullscreen();
 
   useEffect(() => {
     setEnabled(isTauri() && !usesNativeWindowChrome());
   }, []);
 
-  if (!enabled) return null;
+  if (!enabled || fullscreen) return null;
 
   const begin = (direction: Direction) => async (event: React.PointerEvent) => {
     // Left button only; a right-drag on an edge should still reach a context

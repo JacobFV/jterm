@@ -20,9 +20,18 @@ import { applyAppearance } from "@/lib/appearance";
 import { SETTINGS_CHANGED_EVENT, listen, settings as settingsApi } from "@/lib/ipc";
 import { ACTION_IDS, setKeyOverrides, type ActionId } from "@/lib/keymap";
 import { isTauri } from "@/lib/tauri";
+import { isThemeId } from "@/lib/themes";
 import type { Direction } from "./tree";
 
-export type ThemeChoice = "system" | "dark" | "light";
+/**
+ * A theme's id, or `system` for "whichever of the two foundations the desktop
+ * is asking for". Not a union, because the set of themes is a table in
+ * `lib/themes.ts` and a second copy of it here would be one more place to
+ * forget: `isThemeId` is what decides whether a stored value still names
+ * something. `dark` and `light` are ids like any other, which is what lets a
+ * settings file from before there were themes still select the right one.
+ */
+export type ThemeChoice = string;
 export type CursorStyle = "bar" | "block" | "underline";
 /** Where a file goes when you open one: a tab of its own, or a split. */
 export type FileOpenTarget = "tab" | "pane";
@@ -111,7 +120,6 @@ export const DEFAULTS: Settings = {
   keys: {},
 };
 
-const THEMES: ThemeChoice[] = ["system", "dark", "light"];
 const CURSORS: CursorStyle[] = ["bar", "block", "underline"];
 const FILE_OPEN_TARGETS: FileOpenTarget[] = ["tab", "pane"];
 const SHELL_BACKENDS: ShellBackend[] = ["direct", "tmux"];
@@ -136,7 +144,9 @@ export function decodeSettings(json: string | null | undefined): Settings | null
   if (!isRecord(parsed)) return null;
 
   return {
-    theme: pick(parsed.theme, THEMES, DEFAULTS.theme),
+    // A theme that no longer exists — one removed since, or one from a build
+    // that had more of them — costs the theme rather than the whole file.
+    theme: isThemeId(parsed.theme) ? parsed.theme : DEFAULTS.theme,
     uiFontSize: clamp(parsed.uiFontSize, LIMITS.uiFontSize, DEFAULTS.uiFontSize),
     fontFamily: text(parsed.fontFamily, DEFAULTS.fontFamily),
     fontSize: clamp(parsed.fontSize, LIMITS.fontSize, DEFAULTS.fontSize),
@@ -242,6 +252,34 @@ export function updateSettings(patch: Partial<Settings>): void {
 
 export function resetSettings(): void {
   updateSettings(DEFAULTS);
+}
+
+/**
+ * Zoom: the type size the terminal and the text panes are drawn at.
+ *
+ * This moves the same `fontSize` the Settings window edits rather than keeping
+ * a second multiplier beside it, and that is the whole design. One number means
+ * the slider you are looking at is the size you are looking at — zoom in from
+ * the keyboard and the setting has moved, because it *is* the setting. It also
+ * means a zoom survives a restart without anything new being written down, and
+ * that a size chosen with the slider can be nudged from the keyboard without
+ * the two disagreeing about which of them is in charge.
+ *
+ * The cost is what `reset` can mean. With one number there is no earlier size
+ * of yours to go back to, so it goes back to the size jterm ships with — the
+ * same thing `Mod+0` does in a browser, where the base size is likewise a
+ * preference rather than a memory of where you were.
+ *
+ * Steps and stops come from `LIMITS`, so the keyboard cannot reach a size the
+ * slider refuses to show.
+ */
+export function zoomText(direction: "in" | "out" | "reset"): void {
+  const { min, max, step } = LIMITS.fontSize;
+  const fontSize =
+    direction === "reset"
+      ? DEFAULTS.fontSize
+      : Math.min(max, Math.max(min, current.fontSize + (direction === "in" ? step : -step)));
+  updateSettings({ fontSize });
 }
 
 /** Quiet period before a change reaches the disk and the other window. */

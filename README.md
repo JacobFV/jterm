@@ -39,6 +39,15 @@ runs on your behalf.
   around it. Or attach in **control mode**, where a tmux window becomes a jterm
   tab and a tmux pane becomes a real jterm pane: no nested status bar, no tmux
   drawn inside a box. Either way, from the **+** menu.
+- **Changes its colours from the tab.** Right-click any tab — or click its kind
+  icon — for **Theme ▸**, and pointing at an entry *applies* it: the terminal you
+  are already looking at repaints under the pointer, and leaving the menu puts
+  back what you had. Twenty of them, from Gruvbox and Solarized through a
+  green phosphor CRT and Windows 3.1's Hotdog Stand, plus seven that are alive —
+  a Mandelbrot breathing in and out of itself, a Julia set turning inside out,
+  drifting nebulae, aurora, digital rain, a starfield, a lava lamp — drawn
+  behind the panes with the terminal translucent over them, in the theme's own
+  colours. They hold still under `prefers-reduced-motion`.
 - **Settles in a settings window.** Theme, type sizes, cursor, scrollback,
   shell, and every shortcut — in a second window rather than a modal, so you can
   watch the terminal change as you drag.
@@ -58,6 +67,8 @@ runs on your behalf.
 | <kbd>Mod</kbd>+<kbd>T</kbd> / <kbd>Mod</kbd>+<kbd>1…9</kbd> | New tab / go to tab |
 | <kbd>Mod</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> | Close pane |
 | <kbd>Mod</kbd>+<kbd>S</kbd> | Save (in a text pane) |
+| <kbd>Mod</kbd>+<kbd>=</kbd> / <kbd>Mod</kbd>+<kbd>-</kbd> | Larger / smaller text |
+| <kbd>Mod</kbd>+<kbd>0</kbd> | Back to the default text size |
 | <kbd>Mod</kbd>+<kbd>,</kbd> | Settings |
 | <kbd>F11</kbd> | Full screen |
 
@@ -69,6 +80,28 @@ had it, rather than leaving two racing for the same key press.
 Hold the **+** in the tab bar for Notepad, Open file…, or Browser. Click a
 pane's kind icon — the small terminal or page glyph in its header, or on its tab
 — to change what that pane holds.
+
+### About zooming
+
+<kbd>Mod</kbd>+<kbd>=</kbd> and <kbd>Mod</kbd>+<kbd>-</kbd> change the type size
+of the terminals *and* the text panes, together, because it is one size — the
+same one **Settings → Terminal → Font size** shows, moved from the keyboard
+rather than kept beside it. Zoom in and the slider has moved; drag the slider
+and the next <kbd>Mod</kbd>+<kbd>=</kbd> carries on from where you left it. It
+follows that <kbd>Mod</kbd>+<kbd>0</kbd> goes back to the size jterm ships with
+rather than to some earlier size of yours, since there is only the one number
+and it is not remembering a second.
+
+The interface around them — tabs, the file tree, pane titles — has a size of its
+own and does not move, the same way zooming a page does not zoom the browser.
+That size is **Settings → Appearance → Interface size**.
+
+<kbd>Mod</kbd>+<kbd>=</kbd>, <kbd>Mod</kbd>+<kbd>Shift</kbd>+<kbd>=</kbd> and the
+<kbd>+</kbd> on the numeric keypad are all the same press here, because they are
+all the same key; you should not have to know which one the table was written
+down with. Going the other way is plain <kbd>Mod</kbd>+<kbd>-</kbd> only —
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>-</kbd> is <kbd>Ctrl</kbd>+<kbd>_</kbd>,
+which is readline's undo, and that still belongs to the shell.
 
 ### About <kbd>Ctrl</kbd>+<kbd>D</kbd>
 
@@ -82,12 +115,13 @@ Settings → Keyboard and <kbd>Ctrl</kbd>+<kbd>D</kbd> goes back to the shell.
 ## Settings
 
 A window, not a modal, because nearly everything in it is a thing you adjust
-while looking at the result: theme (including following the system), interface
-and terminal type sizes, font, line height, cursor shape and blink, scrollback,
-which shell to start, whether an opened file becomes a tab or a split and which
-side that split goes, the file tree's width and whether it shows dotfiles, and
-the shortcut table. Changes are written as you make them and reach the main
-window immediately — there is no OK button.
+while looking at the result: theme (including following the system), the
+interface's type size and the one the terminals and text panes share, font,
+line height, cursor shape and blink, scrollback, which shell to start, whether
+an opened file becomes a tab or a split and which side that split goes, the
+file tree's width and whether it shows dotfiles, and the shortcut table.
+Changes are written as you make them and reach the main window immediately —
+there is no OK button.
 
 ## How the crash-safety works
 

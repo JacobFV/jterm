@@ -38,6 +38,7 @@ import { dialog, files } from "@/lib/ipc";
 import { fileName, languageFor } from "@/lib/filetypes";
 import { cn } from "@/lib/utils";
 import { getContent, updateContent } from "@/state/content";
+import { subscribeSettings } from "@/state/settings";
 import type { NotepadPaneState } from "@/state/workspace";
 import type { PaneProps } from "./types";
 
@@ -71,7 +72,10 @@ const THEME = EditorView.theme(
       height: "100%",
       backgroundColor: "transparent",
       color: "var(--term-fg)",
-      fontSize: "12.5px",
+      // The same size the terminal is drawn at, and the same variable, so
+      // `Mod+=` moves both. A pane showing a file beside a shell printing the
+      // same file should not be two sizes of the same font.
+      fontSize: "var(--mono-font-size)",
     },
     ".cm-content": {
       fontFamily: "var(--font-mono)",
@@ -177,6 +181,17 @@ export function NotepadPane({ pane, focused, onMeta, onFocus }: PaneProps<Notepa
       viewRef.current = null;
     };
   }, [paneId, record]);
+
+  /**
+   * Re-measure when the type size moves.
+   *
+   * CodeMirror caches the character width and line height it took from the last
+   * layout, and the size reaches it as a CSS variable — nothing it wrote, so
+   * nothing it is watching. Left alone after a zoom it draws the text at the
+   * new size and puts the cursor, the gutter and the scroll height where the
+   * old one had them.
+   */
+  useEffect(() => subscribeSettings(() => viewRef.current?.requestMeasure()), []);
 
   /* ── The file, when there is one ──────────────────────────────────── */
 

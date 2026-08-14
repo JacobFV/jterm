@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
 
 type Overrides = Partial<Record<ActionId, string>>;
 
-const GROUPS: ActionGroup[] = ["Tabs", "Panes", "Window", "Terminal"];
+const GROUPS: ActionGroup[] = ["Tabs", "Panes", "View", "Window", "Terminal"];
 
 export function KeyBindings({
   keys,

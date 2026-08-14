@@ -18,11 +18,11 @@ import {
  */
 function press(
   key: string,
-  mods: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean } = {},
+  mods: { ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean; code?: string } = {},
 ): KeyboardEvent {
   return {
     key,
-    code: "",
+    code: mods.code ?? "",
     ctrlKey: mods.ctrl ?? false,
     shiftKey: mods.shift ?? false,
     altKey: mods.alt ?? false,
@@ -66,6 +66,54 @@ describe("resolve", () => {
     expect(resolve(press("t", { ctrl: true }))).toEqual({ id: "tab.new" });
   });
 
+  it("answers every press that means zoom", () => {
+    expect(resolve(press("=", { ctrl: true }))).toEqual({ id: "view.zoomIn" });
+    // The same physical key with a finger on Shift — which is how anyone who
+    // thinks of the shortcut as "Ctrl and plus" actually performs it.
+    expect(resolve(press("+", { ctrl: true, shift: true }))).toEqual({ id: "view.zoomIn" });
+    // And the keypad, which sends `+` with no Shift and a code of its own.
+    expect(resolve(press("+", { ctrl: true, code: "NumpadAdd" }))).toEqual({ id: "view.zoomIn" });
+
+    expect(resolve(press("-", { ctrl: true }))).toEqual({ id: "view.zoomOut" });
+    expect(resolve(press("-", { ctrl: true, code: "NumpadSubtract" }))).toEqual({
+      id: "view.zoomOut",
+    });
+    expect(resolve(press("0", { ctrl: true }))).toEqual({ id: "view.zoomReset" });
+  });
+
+  it("leaves Ctrl+_ to the shell", () => {
+    // Readline's undo. `-` needs no Shift to type, so tolerating Shift on it
+    // would buy a press nobody performs at the cost of one bash answers to.
+    expect(resolve(press("_", { ctrl: true, shift: true }))).toBeNull();
+  });
+
+  it("reaches the default size on a layout where digits need Shift", () => {
+    // AZERTY and QWERTZ put punctuation on the number row, so `0` arrives with
+    // Shift held — the press is the same one, spelled differently by the OS.
+    expect(resolve(press("0", { ctrl: true, shift: true, code: "Digit0" }))).toEqual({
+      id: "view.zoomReset",
+    });
+  });
+
+  it("reaches an aliased key by its physical position", () => {
+    // A layout that puts something else on the key still zooms: the fallback is
+    // where the key *is*, not what is printed on it.
+    expect(resolve(press("Dead", { ctrl: true, code: "Minus" }))).toEqual({ id: "view.zoomOut" });
+  });
+
+  it("does not let an aliased key make Shift optional for everything", () => {
+    // The relaxation is per key and only for the keys that need it. Mod+D and
+    // Mod+Shift+D remain two different shortcuts.
+    expect(resolve(press("d", { ctrl: true, shift: true }))).toEqual({ id: "pane.splitDown" });
+    expect(resolve(press("t", { ctrl: true, shift: true }))).toBeNull();
+  });
+
+  it("keeps the numbered tabs out of zoom's way", () => {
+    // Mod+0 is zoom and Mod+1…9 are tabs; there is no tab zero.
+    expect(resolve(press("1", { ctrl: true }))).toEqual({ id: "tab.byIndex", index: 0 });
+    expect(resolve(press("0", { ctrl: true }))).toEqual({ id: "view.zoomReset" });
+  });
+
   it("round-trips a recorded chord, space included", () => {
     // The space bar arrives as `" "`, which is also the shape of a separator in
     // a written chord — so it is stored under a name, and both ends agree.
@@ -93,8 +141,17 @@ describe("chordFromEvent", () => {
     expect(chordFromEvent(press("Control", { ctrl: true }))).toBeNull();
   });
 
-  it("declines the separator itself", () => {
-    expect(chordFromEvent(press("+", { ctrl: true }))).toBeNull();
+  it("records a shifted key as the key itself", () => {
+    // Both of these are the same press to `matches`, so both have to be stored
+    // as the chord that answers both — and it keeps `+`, the separator, out of
+    // a stored chord where it could not be told from a join.
+    expect(chordFromEvent(press("+", { ctrl: true, shift: true }))).toBe("Mod+=");
+    expect(chordFromEvent(press("+", { ctrl: true }))).toBe("Mod+=");
+    expect(chordFromEvent(press(")", { ctrl: true, shift: true }))).toBe("Mod+0");
+  });
+
+  it("still records Shift where Shift is part of the chord", () => {
+    expect(chordFromEvent(press("d", { ctrl: true, shift: true }))).toBe("Mod+Shift+D");
   });
 });
 
