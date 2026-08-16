@@ -21,6 +21,7 @@
 import { useEffect, useRef } from "react";
 
 import { startAmbient, type AmbientTuning } from "@/lib/ambient";
+import { startFormulaAmbient } from "@/lib/formulaAmbient";
 import type { Theme } from "@/lib/themes";
 import { useSettings } from "@/lib/useSettings";
 
@@ -47,20 +48,19 @@ export function AmbientBackdrop({ theme }: { theme: Theme }) {
   const tuning = useRef<AmbientTuning>({ motion: 1, activity: 1 });
   tuning.current = { motion: settings.ambientMotion, activity: settings.ambientActivity };
 
-  // Keyed on the theme's id rather than on the ambient's: two themes can name
-  // the same drawing in different colours, and the palette is read once when
-  // the loop starts. Restarting is cheap; a running loop holding the previous
-  // theme's colours would be wrong for as long as it lived.
-  // Nothing to show it through, so nothing to draw and no loop to run. This is
-  // the one setting that can switch a living theme's drawing off entirely, and
-  // it should cost nothing when it has.
-  const hidden = ambient === null || settings.ambientPresence === 0;
+  // The formula theme deliberately reuses the living-theme plumbing while
+  // owning its renderer in a separate module. That keeps `ambient.ts`'s painter
+  // table unchanged and makes the imported artwork auditable in one small file.
+  const formula = theme.id === "formula";
+  const hidden = (!formula && ambient === null) || settings.ambientPresence === 0;
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (canvas === null || ambient === null || hidden) return;
+    if (canvas === null || hidden) return;
+    if (formula) return startFormulaAmbient(canvas, theme.palette, () => tuning.current);
+    if (ambient === null) return;
     return startAmbient(canvas, ambient, theme.palette, () => tuning.current);
-  }, [ambient, hidden, theme.id, theme.palette]);
+  }, [ambient, formula, hidden, theme.id, theme.palette]);
 
   if (hidden) return null;
 
