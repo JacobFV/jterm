@@ -18,6 +18,7 @@
 
 import { useEffect, useRef } from "react";
 
+import { FORMULA_THEME } from "@/lib/formulaTheme";
 import { THEME_GROUPS, THEMES, themeById } from "@/lib/themes";
 import type { ThemeChoice } from "@/state/settings";
 import { MenuHeading, MenuItem } from "./Menu";
@@ -33,7 +34,8 @@ import { ThemeSwatch } from "./ThemeSwatch";
 const SWATCH = "h-[18px] w-[18px]";
 
 function Swatch({ themeId }: { themeId: string }) {
-  return <ThemeSwatch theme={themeById(themeId)} className={SWATCH} />;
+  const theme = themeId === FORMULA_THEME.id ? FORMULA_THEME : themeById(themeId);
+  return <ThemeSwatch theme={theme} className={SWATCH} />;
 }
 
 interface ThemeMenuProps {
@@ -89,23 +91,29 @@ export function ThemeMenu({ value, defer, onChange, onPick }: ThemeMenuProps) {
         onHover={() => onChange(undefined)}
         onSelect={() => choose(undefined)}
       />
-      {THEME_GROUPS.map((group) => (
-        <div key={group}>
-          {/* Every group is ruled off, including the first — the row above it
-              is the defer row, which belongs to no group. */}
-          <MenuHeading divided>{group}</MenuHeading>
-          {THEMES.filter((theme) => theme.group === group).map((theme) => (
-            <MenuItem
-              key={theme.id}
-              label={theme.name}
-              adornment={<Swatch themeId={theme.id} />}
-              selected={value === theme.id}
-              onHover={() => onChange(theme.id)}
-              onSelect={() => choose(theme.id)}
-            />
-          ))}
-        </div>
-      ))}
+      {THEME_GROUPS.map((group) => {
+        const themes =
+          group === "Living"
+            ? [...THEMES.filter((theme) => theme.group === group), FORMULA_THEME]
+            : THEMES.filter((theme) => theme.group === group);
+        return (
+          <div key={group}>
+            {/* Every group is ruled off, including the first — the row above it
+                is the defer row, which belongs to no group. */}
+            <MenuHeading divided>{group}</MenuHeading>
+            {themes.map((theme) => (
+              <MenuItem
+                key={theme.id}
+                label={theme.name}
+                adornment={<Swatch themeId={theme.id} />}
+                selected={value === theme.id}
+                onHover={() => onChange(theme.id)}
+                onSelect={() => choose(theme.id)}
+              />
+            ))}
+          </div>
+        );
+      })}
     </>
   );
 }
