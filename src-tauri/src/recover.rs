@@ -89,26 +89,32 @@ pub fn install(window: &tauri::WebviewWindow) {
         // handler was connected and where it will be delivered.
         let budget = std::cell::RefCell::new(Budget::default());
 
-        platform.inner().connect_web_process_terminated(move |view, reason| {
-            let now = std::time::Instant::now();
-            let mut budget = budget.borrow_mut();
-            let allowed = budget.allows(now);
-            crate::append_record(
-                &root,
-                &format!(
-                    "webkit's web process died ({reason:?}); \
+        platform
+            .inner()
+            .connect_web_process_terminated(move |view, reason| {
+                let now = std::time::Instant::now();
+                let mut budget = budget.borrow_mut();
+                let allowed = budget.allows(now);
+                crate::append_record(
+                    &root,
+                    &format!(
+                        "webkit's web process died ({reason:?}); \
                      crash {} in the last {}s — {}",
-                    budget.spent(),
-                    WINDOW.as_secs(),
-                    if allowed { "reloading" } else { "not reloading again" }
-                ),
-            );
-            if allowed {
-                // The shells are untouched by this; what comes back attaches
-                // to them again. See `pty::pty_attach`.
-                view.reload();
-            }
-        });
+                        budget.spent(),
+                        WINDOW.as_secs(),
+                        if allowed {
+                            "reloading"
+                        } else {
+                            "not reloading again"
+                        }
+                    ),
+                );
+                if allowed {
+                    // The shells are untouched by this; what comes back attaches
+                    // to them again. See `pty::pty_attach`.
+                    view.reload();
+                }
+            });
     });
 }
 
@@ -127,7 +133,10 @@ mod tests {
         for nth in 1..=BUDGET {
             assert!(budget.allows(start), "reload {nth} is within budget");
         }
-        assert!(!budget.allows(start), "the reload after the budget is refused");
+        assert!(
+            !budget.allows(start),
+            "the reload after the budget is refused"
+        );
         assert!(!budget.allows(start), "and it stays refused");
     }
 
