@@ -5,6 +5,7 @@
 //!   - `history`       — the JSONL every terminal leaves behind, and export/import
 //!   - `isolation`     — keeping one tab's collapse away from the rest of the app
 //!   - `pty`           — a pseudoterminal per terminal pane
+//!   - `recover`       — putting the window back when WebKit's renderer dies
 //!   - `store`         — session snapshots and scrollback on disk
 //!   - `window_chrome` — the native half of the custom titlebar
 //!
@@ -17,6 +18,7 @@ pub mod files;
 pub mod history;
 pub mod isolation;
 pub mod pty;
+pub mod recover;
 pub mod store;
 pub mod tmux;
 #[cfg(windows)]
@@ -33,7 +35,7 @@ use window_chrome::MaximizeButtonBounds;
 /// Where session state lives, per platform convention:
 /// `~/.local/share/jterm`, `~/Library/Application Support/…`,
 /// `%APPDATA%\…`.
-fn data_dir() -> PathBuf {
+pub(crate) fn data_dir() -> PathBuf {
     dirs_next::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("jterm")
@@ -72,11 +74,29 @@ fn install_panic_log(root: PathBuf) {
 /// Append one line about a panic, or give up quietly.
 ///
 /// Split from the hook because a hook cannot be called in a test — there is no
-/// way to construct the payload it is handed — while everything that can
-/// actually go wrong is here: the directory, the open, the write. Best effort
-/// throughout, since a panic handler that can itself panic on a full disk would
-/// turn a survivable bug into the abort this all exists to avoid.
+/// way to construct the payload it is handed — while the part that can be wrong
+/// is the sentence it builds.
 fn append_panic(root: &std::path::Path, thread: &str, where_: &str, message: &str) {
+    append_record(
+        root,
+        &format!("panicked in thread {thread} at {where_}: {message}"),
+    );
+}
+
+/// Append one line to the record beside the session data, or give up quietly.
+///
+/// Everything that can actually go wrong is here: the directory, the open, the
+/// write. Best effort throughout, since this is called from a panic hook and
+/// from a crash handler, and one that could itself panic on a full disk would
+/// turn a survivable failure into the abort all of this exists to avoid.
+///
+/// Kept to one file, appended to and never rotated. Both of the things that
+/// write here are rare enough that the log is a handful of lines, and a
+/// rotation scheme would be more machinery than the thing it manages. The name
+/// is `panic.log` for the same reason the format leads with the version: the
+/// next launch can be asked what happened to the last one, and it is the first
+/// place anyone already looks.
+pub(crate) fn append_record(root: &std::path::Path, line: &str) {
     use std::io::Write;
     let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
@@ -85,11 +105,7 @@ fn append_panic(root: &std::path::Path, thread: &str, where_: &str, message: &st
     else {
         return;
     };
-    let _ = writeln!(
-        file,
-        "jterm {} panicked in thread {thread} at {where_}: {message}",
-        env!("CARGO_PKG_VERSION")
-    );
+    let _ = writeln!(file, "jterm {} {line}", env!("CARGO_PKG_VERSION"));
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -118,6 +134,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             pty::pty_probe,
+            pty::pty_attach,
             tmux::tmux_available,
             tmux::tmux_sessions,
             tmux::tmux_pane_command,
@@ -154,6 +171,9 @@ pub fn run() {
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
                 window_chrome::snap::install(&window);
+                // Nothing is kept from this: the handler owns what it needs
+                // and the webview owns the handler, for as long as both exist.
+                recover::install(&window);
             }
             Ok(())
         })

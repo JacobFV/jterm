@@ -90,6 +90,10 @@ struct Session {
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
+    /// The program this pane was started with. Held because `pty_attach` has
+    /// to answer the same question `pty_spawn` does, and by then the fallback
+    /// chain that chose it has long since run.
+    shell: String,
     /// Set when jterm started this pane inside tmux, which settles the recording
     /// question for the pane's whole life — unlike a tmux the user attaches and
     /// later leaves.
@@ -367,6 +371,7 @@ pub fn pty_spawn(
         master: Mutex::new(pair.master),
         writer: Mutex::new(writer),
         child: Mutex::new(child),
+        shell: program.clone(),
         tmux: tmux_session.clone(),
         recording: recording.clone(),
     });
@@ -529,6 +534,63 @@ fn pty_kill_inner(registry: &PtyRegistry, id: &str) {
     }
 }
 
+/// Reconnect tab `id` to the shell it already has, if that shell is still there.
+///
+/// This is what makes a webview reload survivable, and it exists because
+/// `pty_spawn` cannot be it. Spawning into a live id *kills the shell first* —
+/// deliberately, because for the case it was written for (a pane whose shell
+/// exited, restarted by pressing Enter) leaving the old one behind would orphan
+/// a process nothing could reach. But the frontend calls it on mount, and a
+/// mount is exactly what a reload causes for every pane at once. Without a way
+/// to say "reattach, do not restart", recovering the window would cost every
+/// tab the work it was in the middle of — which is worse than the frozen window
+/// being recovered from.
+///
+/// So: `None` means there is nothing to attach to and the caller should spawn,
+/// and anything else means the shell is still running and has been handed back.
+/// A pane's absence from the registry is a reliable answer, because the reader
+/// thread removes a session the moment its child exits.
+///
+/// The resize is not incidental. The window this attaches to is rarely the size
+/// the old one was, and a shell still holding the previous geometry redraws
+/// full-screen programs at the wrong width until something else happens to
+/// resize it.
+#[tauri::command]
+pub fn pty_attach(
+    registry: tauri::State<'_, Arc<PtyRegistry>>,
+    control: tauri::State<'_, Arc<ControlRegistry>>,
+    id: String,
+    cols: u16,
+    rows: u16,
+) -> Option<SpawnInfo> {
+    // A control-mode pane's shell belongs to tmux, not to this registry, and
+    // the control client is re-established by its own path.
+    if control.has(&id) {
+        return None;
+    }
+    let session = registry.get(&id)?;
+
+    let _ = session.master.lock().resize(PtySize {
+        rows: rows.max(1),
+        cols: cols.max(1),
+        pixel_width: 0,
+        pixel_height: 0,
+    });
+
+    let pid = session.child.lock().process_id();
+    Some(SpawnInfo {
+        pid,
+        shell: session.shell.clone(),
+        // Asked of the process rather than remembered, because a shell that has
+        // been running since before the crash has almost certainly been `cd`ed
+        // somewhere since it started.
+        cwd: pid
+            .and_then(cwd_of)
+            .unwrap_or_else(|| home_dir().to_string_lossy().into_owned()),
+        tmux: session.tmux.clone(),
+    })
+}
+
 /// Look at a live pane: where its shell is, and whether tmux is in front of it.
 ///
 /// Two questions in one call because they are asked together, on the same poll,
@@ -591,22 +653,30 @@ pub fn pty_probe(
         }
     }
 
-    let cwd = pid.and_then(|pid| {
-        #[cfg(target_os = "linux")]
-        {
-            std::fs::read_link(format!("/proc/{pid}/cwd"))
-                .ok()
-                .map(|path| path.to_string_lossy().into_owned())
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            // Consumed so the binding is not flagged as unused off Linux.
-            let _ = pid;
-            None
-        }
-    });
+    Probe {
+        cwd: pid.and_then(cwd_of),
+        tmux: in_tmux,
+    }
+}
 
-    Probe { cwd, tmux: in_tmux }
+/// Where a live process has its working directory, when the platform will say.
+///
+/// Only Linux answers. Elsewhere the frontend learns this from the OSC 7 the
+/// shell emits, so `None` is an ordinary outcome rather than a failure — see
+/// `pty_probe`.
+fn cwd_of(pid: u32) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_link(format!("/proc/{pid}/cwd"))
+            .ok()
+            .map(|path| path.to_string_lossy().into_owned())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // Consumed so the binding is not flagged as unused off Linux.
+        let _ = pid;
+        None
+    }
 }
 
 /// Written into the log where recording stops because tmux took over.

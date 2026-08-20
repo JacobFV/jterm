@@ -37,6 +37,17 @@ portable-pty = "0.9"
 parking_lot = "0.12"
 dirs-next = "2"
 
+# The webview's own crash signal, for `src/recover.rs`. Pinned to exactly what
+# wry depends on: `PlatformWebview::inner()` hands back a `webkit2gtk::WebView`
+# from *its* copy of this crate, and two different versions in the graph would
+# make that a different type than the one this code connects a handler to —
+# which fails to compile in a way that reads as nonsense ("expected WebView,
+# found WebView"). `v2_20` is the release that added the signal; wry already
+# turns on far more than that, but naming it here keeps this working if wry ever
+# asks for less.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.2", features = ["v2_20"] }
+
 [target.'cfg(windows)'.dependencies]
 # Snap Layouts needs a WM_NCHITTEST subclass; see src/win32_snap.rs.
 windows = { version = "0.61", features = [

@@ -247,6 +247,33 @@ files, gets a line naming the thread, the source location and the message. An
 app launched from a desktop menu has no stderr anyone will ever read, which is
 how "it crashes randomly" turns into a report with nothing attached to it.
 
+### The window can come back without the shells restarting
+
+On Linux the interface is a WebKitGTK webview, and WebKitGTK draws in a separate
+process from the one the app runs in. That process can die on its own. When it
+does, jterm does not: the shells keep running, the pty readers keep recording
+scrollback, and every background job carries on. What is gone is the surface —
+and with it the close button, because that button is a DOM element inside the
+process that just died. The window turns into a blank rectangle that ignores
+the mouse, which looks exactly like a hang, and the only way out is to kill an
+app whose tabs were all still working.
+
+So the webview's own `web-process-terminated` signal is watched, and answered by
+reloading the page. Everything the reload needs to come back to is deliberately
+not in the renderer: the shells belong to the pty registry, the scrollback to
+the store. A pane that finds its shell still running adopts it rather than
+starting a new one — it prints `── reconnected ──` under the restored
+scrollback instead of `── session restored ──`, and the shell never notices.
+
+The reload is budgeted at three in a minute. A renderer dying on something in
+the page itself will die again the moment the page returns, and answering every
+death with a reload would spin on that forever; past the budget jterm stops and
+says so in `panic.log`. That leaves the frozen window it started with — but with
+a reason recorded, and with every shell still running underneath it.
+
+Off Linux there is nothing here to do. The macOS and Windows webviews do not
+hand their rendering to a child process that can fail this way.
+
 ## tmux
 
 All of the above reconstructs a shell from what jterm wrote down. tmux does not
