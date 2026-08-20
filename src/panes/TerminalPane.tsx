@@ -600,21 +600,59 @@ export function TerminalPane({
           : undefined;
       if (disposed) return;
 
+      // Asked before anything is drawn, because the answer changes what the
+      // pane does next. A mount is not always a new pane: the webview reloads
+      // after WebKit's renderer dies (see `recover.rs`), and every pane in the
+      // window remounts against a shell that never stopped running. Spawning
+      // into one of those would kill it — `pty_spawn` closes a live id first,
+      // by design — so a shell that is still there is adopted instead.
+      //
+      // The bus comes first, for a sharper reason than on the spawn path.
+      // There the listener has to exist before the shell's first output, which
+      // is the prompt. Here the shell is already running and already talking,
+      // so a listener attached late misses whatever arrived in the meantime —
+      // and if nothing calls `ready()` at all, as nothing on this path used to,
+      // the pane reconnects to a live shell and then draws none of it. `spawn`
+      // awaits this too; adopting has to do it itself.
+      await ptyBusReady();
+      const adopted = await pty.attach(paneId, term.cols, term.rows);
+      if (disposed) return;
+
       // Neither of these is right in front of a tmux attach. The log would
       // paint a picture of the session that tmux is about to redraw properly,
       // and the draft belongs to a shell that still has it.
       if (sessionRef.current === undefined) {
         // Scrollback first, so the shell's new prompt lands underneath the
-        // output it is continuing from rather than on top of it.
+        // output it is continuing from rather than on top of it. On an adopt
+        // this is also the only copy of what the shell printed while there was
+        // no webview to print it to: the reader thread kept recording
+        // throughout, which is the whole reason that is not simply lost.
         const previous = await scrollbackApi.read(paneId);
         if (disposed) return;
         if (previous) {
           term.write(previous);
-          term.write("\x1b[0m\r\n\x1b[2m── session restored ──\x1b[0m\r\n");
+          term.write(
+            adopted
+              ? "\x1b[0m\r\n\x1b[2m── reconnected ──\x1b[0m\r\n"
+              : "\x1b[0m\r\n\x1b[2m── session restored ──\x1b[0m\r\n",
+          );
         }
       }
 
-      await spawn(initialRef.current.cwd);
+      if (adopted) {
+        // The same bookkeeping `spawn` does on the way back, minus the history
+        // entry: nothing started, so there is no spawn to record.
+        exitedRef.current = false;
+        cwdRef.current = adopted.cwd;
+        sessionRef.current = adopted.tmux ?? undefined;
+        metaRef.current({
+          cwd: adopted.cwd,
+          exited: false,
+          tmux: adopted.tmux ?? undefined,
+        });
+      } else {
+        await spawn(initialRef.current.cwd);
+      }
       if (disposed) return;
 
       // A control-mode pane has a screenful of history already, and no way to
@@ -622,7 +660,12 @@ export function TerminalPane({
       // is the same message that would have carried it. Asked for here, with
       // the subscription above already in place.
       if (initialRef.current.control) tmuxControlApi.capture(paneId);
-      if (sessionRef.current === undefined) armReplay(initialRef.current.draft);
+      // Not after an adopt, for the reason tmux is excluded just above: the
+      // draft is a record of what the user had typed but not sent, and a shell
+      // that is still running still has it sitting in its line editor —
+      // echoed, so it is in the scrollback written out above too. Replaying it
+      // would type the half-finished command a second time.
+      if (!adopted && sessionRef.current === undefined) armReplay(initialRef.current.draft);
       // The prompt lands shortly after this; a repaint once the pane has
       // settled is what makes a restored session look restored rather than
       // empty.

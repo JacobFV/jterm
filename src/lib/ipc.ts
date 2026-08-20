@@ -64,6 +64,17 @@ export const pty = {
     tmux?: string;
   }): Promise<SpawnInfo | null> => call("pty_spawn", args, null),
 
+  /**
+   * Reconnect to the shell `id` already has, or `null` if it has none.
+   *
+   * The counterpart to `spawn`, which restarts. A pane mounts on every reload
+   * of the webview — including the one `recover.rs` performs after WebKit's
+   * renderer dies — and spawning there would kill a shell that never stopped
+   * running. See `pty_attach` on the Rust side.
+   */
+  attach: (id: string, cols: number, rows: number): Promise<SpawnInfo | null> =>
+    call("pty_attach", { id, cols, rows }, null),
+
   write: (id: string, data: string) => call("pty_write", { id, data }, undefined),
 
   resize: (id: string, cols: number, rows: number) =>
