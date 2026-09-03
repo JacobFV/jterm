@@ -17,6 +17,7 @@
 //! the workspace layout and the raw scrollback into one file of the same
 //! format, which `import` reads back.
 
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -25,7 +26,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::store::Store;
+use crate::store::{valid_pane_id, Store};
 
 /// A terminal's log is trimmed once it passes this.
 const HISTORY_MAX: u64 = 4 * 1024 * 1024;
@@ -39,10 +40,7 @@ const HISTORY_KEEP: usize = 1024 * 1024;
 /// IPC and are used to build a path, which is exactly the shape of bug worth
 /// closing off rather than reasoning about.
 fn safe_id(id: &str) -> Result<&str, String> {
-    let ok = !id.is_empty()
-        && id.len() <= 64
-        && id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-');
-    if ok {
+    if valid_pane_id(id) {
         Ok(id)
     } else {
         Err("invalid pane id".into())
@@ -95,7 +93,11 @@ fn trim(path: &Path) {
         return;
     }
     // Cut at a line break so the file never begins with half a record.
-    let tail = &text[text.len() - HISTORY_KEEP..];
+    let mut cut = text.len() - HISTORY_KEEP;
+    while !text.is_char_boundary(cut) {
+        cut += 1;
+    }
+    let tail = &text[cut..];
     let start = tail.find('\n').map(|index| index + 1).unwrap_or(0);
     let _ = fs::write(path, &tail[start..]);
 }
@@ -295,6 +297,106 @@ fn line(kind: &str, fields: Vec<(&str, Value)>) -> String {
     Value::Object(map).to_string()
 }
 
+/// Check the part of the snapshot schema that decides whether the frontend
+/// can restore anything at all. The frontend remains responsible for
+/// normalising optional fields, but the importer must never replace a known
+/// good snapshot with bytes its decoder will reject wholesale.
+fn validate_snapshot(value: &Value) -> Result<(), String> {
+    let Some(snapshot) = value.as_object() else {
+        return Err("the imported session is not a JSON object".into());
+    };
+    if snapshot.get("version").and_then(Value::as_u64) != Some(1) {
+        return Err("the imported session has an unsupported version".into());
+    }
+    let Some(tabs) = snapshot
+        .get("workspace")
+        .and_then(Value::as_object)
+        .and_then(|workspace| workspace.get("tabs"))
+        .and_then(Value::as_array)
+    else {
+        return Err("the imported session has no workspace tabs".into());
+    };
+
+    if tabs.iter().take(64).any(valid_snapshot_tab) {
+        Ok(())
+    } else {
+        Err("the imported session contains no restorable tabs".into())
+    }
+}
+
+fn valid_snapshot_tab(value: &Value) -> bool {
+    let Some(tab) = value.as_object() else {
+        return false;
+    };
+    if tab
+        .get("id")
+        .and_then(Value::as_str)
+        .is_none_or(str::is_empty)
+    {
+        return false;
+    }
+    let Some(panes) = tab.get("panes").and_then(Value::as_object) else {
+        return false;
+    };
+    let valid: HashSet<&str> = panes
+        .iter()
+        .filter_map(|(id, pane)| {
+            (valid_pane_id(id) && valid_snapshot_pane(pane)).then_some(id.as_str())
+        })
+        .collect();
+    !valid.is_empty()
+        && tab
+            .get("root")
+            .is_some_and(|root| valid_snapshot_node(root, &valid, 0))
+}
+
+fn valid_snapshot_pane(value: &Value) -> bool {
+    let Some(pane) = value.as_object() else {
+        return false;
+    };
+    match pane.get("kind").and_then(Value::as_str) {
+        Some("terminal" | "notepad" | "browser") => true,
+        Some("image" | "media" | "model") => pane
+            .get("path")
+            .and_then(Value::as_str)
+            .is_some_and(|path| !path.is_empty()),
+        _ => false,
+    }
+}
+
+fn valid_snapshot_node(value: &Value, panes: &HashSet<&str>, depth: usize) -> bool {
+    if depth >= 128 {
+        return false;
+    }
+    let Some(node) = value.as_object() else {
+        return false;
+    };
+    if node
+        .get("id")
+        .and_then(Value::as_str)
+        .is_none_or(str::is_empty)
+    {
+        return false;
+    }
+    match node.get("kind").and_then(Value::as_str) {
+        Some("leaf") => node
+            .get("paneId")
+            .and_then(Value::as_str)
+            .is_some_and(|id| panes.contains(id)),
+        Some("split") => node
+            .get("children")
+            .and_then(Value::as_array)
+            .filter(|children| children.len() == 2)
+            .is_some_and(|children| {
+                // The frontend collapses a split whose corrupt side cannot be
+                // decoded, so one usable child is enough here as well.
+                valid_snapshot_node(&children[0], panes, depth + 1)
+                    || valid_snapshot_node(&children[1], panes, depth + 1)
+            }),
+        _ => false,
+    }
+}
+
 /// Fold everything on disk into a single JSONL file.
 ///
 /// Same format as a terminal's own log, one record per line, so the export is
@@ -408,20 +510,28 @@ pub fn import(store: &Store, src: &str) -> Result<Option<String>, String> {
     let mut logs: Vec<(String, String)> = Vec::new();
     let mut scrollbacks: Vec<(String, String)> = Vec::new();
 
-    for raw in text.lines() {
+    for (index, raw) in text.lines().enumerate() {
         let Ok(Value::Object(record)) = serde_json::from_str::<Value>(raw) else {
             continue;
         };
         match record.get("kind").and_then(Value::as_str) {
             Some("session") => {
-                if let Some(data) = record.get("data") {
-                    session = Some(data.to_string());
-                }
+                let data = record.get("data").ok_or_else(|| {
+                    format!("invalid session on line {}: missing data", index + 1)
+                })?;
+                validate_snapshot(data)
+                    .map_err(|err| format!("invalid session on line {}: {err}", index + 1))?;
+                session = Some(data.to_string());
             }
             Some("session_raw") => {
-                if let Some(Value::String(text)) = record.get("text") {
-                    session = Some(text.clone());
-                }
+                let text = record.get("text").and_then(Value::as_str).ok_or_else(|| {
+                    format!("invalid session on line {}: missing text", index + 1)
+                })?;
+                let value: Value = serde_json::from_str(text)
+                    .map_err(|err| format!("invalid session on line {}: {err}", index + 1))?;
+                validate_snapshot(&value)
+                    .map_err(|err| format!("invalid session on line {}: {err}", index + 1))?;
+                session = Some(text.to_owned());
             }
             Some("terminal") => {
                 if let (Some(Value::String(pane)), Some(inner)) =
@@ -441,6 +551,10 @@ pub fn import(store: &Store, src: &str) -> Result<Option<String>, String> {
         }
     }
 
+    for (pane, _) in logs.iter().chain(scrollbacks.iter()) {
+        safe_id(pane).map_err(|err| format!("cannot import pane {pane:?}: {err}"))?;
+    }
+
     // Written only once the whole file has parsed, so a truncated export
     // cannot leave the app with half of one session and half of another.
     let _ = fs::create_dir_all(terminals_dir(store));
@@ -450,10 +564,10 @@ pub fn import(store: &Store, src: &str) -> Result<Option<String>, String> {
         }
     }
     for (pane, record) in &logs {
-        let _ = append(store, pane, record);
+        append(store, pane, record)?;
     }
     for (pane, text) in &scrollbacks {
-        store.replace_scrollback(pane, text.as_bytes());
+        store.replace_scrollback(pane, text.as_bytes())?;
     }
     if let Some(snapshot) = &session {
         store
@@ -560,6 +674,24 @@ mod tests {
         let (store, root) = temp_store();
         assert!(append(&store, "../escape", "{}").is_err());
         assert!(append(&store, "", "{}").is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn trimming_unicode_never_slices_through_a_character() {
+        let (store, root) = temp_store();
+        let path = log_path(&store, "abc");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // The odd byte count makes the nominal cut land halfway through the
+        // final two-byte character in the long prefix.
+        let text = format!("{}x\nkept\n", "é".repeat(HISTORY_KEEP / 2 + 4));
+        assert!(!(text.len() - HISTORY_KEEP).is_multiple_of(2));
+        fs::write(&path, text).unwrap();
+
+        trim(&path);
+
+        let trimmed = fs::read_to_string(path).unwrap();
+        assert!(trimmed.ends_with("kept\n"));
         let _ = fs::remove_dir_all(root);
     }
 
@@ -741,7 +873,9 @@ mod tests {
     fn a_round_trip_preserves_the_session_and_the_logs() {
         let (store, root) = temp_store();
         store
-            .save_session(r#"{"version":1,"workspace":{"tabs":[]}}"#)
+            .save_session(
+                r#"{"version":1,"workspace":{"tabs":[{"id":"tab","panes":{"abc":{"id":"abc","kind":"terminal"}},"root":{"id":"leaf","kind":"leaf","paneId":"abc"},"focusedPaneId":"abc"}],"activeTabId":"tab"},"content":{}}"#,
+            )
             .unwrap();
         append(&store, "abc", r#"{"kind":"command","text":"make"}"#).unwrap();
         store.append_scrollback("abc", b"hello world\n");
@@ -774,6 +908,66 @@ mod tests {
         .unwrap();
         import(&store, dest.to_str().unwrap()).unwrap();
         assert!(read(&store, "abc").contains("ok"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn import_rejects_path_ids_before_writing_any_records() {
+        let (store, root) = temp_store();
+        let dest = root.join("hostile.jsonl");
+        let escaped = root.join("escape.log");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &dest,
+            concat!(
+                "{\"kind\":\"terminal\",\"pane\":\"good\",\"record\":{\"kind\":\"command\",\"text\":\"must not land\"}}\n",
+                "{\"kind\":\"scrollback\",\"pane\":\"../escape\",\"text\":\"owned\"}\n"
+            ),
+        )
+        .unwrap();
+
+        let error = import(&store, dest.to_str().unwrap()).unwrap_err();
+
+        assert!(error.contains("invalid pane id"));
+        assert!(!escaped.exists());
+        assert_eq!(read(&store, "good"), "", "validation happens before writes");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn invalid_raw_session_is_reported_and_does_not_replace_the_saved_one() {
+        let (store, root) = temp_store();
+        let original = r#"{"version":1,"workspace":{"tabs":[]}}"#;
+        store.save_session(original).unwrap();
+        let dest = root.join("invalid-session.jsonl");
+        fs::write(&dest, r#"{"kind":"session_raw","text":"this is not json"}"#).unwrap();
+
+        let error = import(&store, dest.to_str().unwrap()).unwrap_err();
+
+        assert!(error.contains("invalid session on line 1"));
+        assert_eq!(store.load_session().as_deref(), Some(original));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn structurally_unrestorable_session_is_rejected_before_other_writes() {
+        let (store, root) = temp_store();
+        store.save_session(r#"{"old":true}"#).unwrap();
+        let dest = root.join("invalid-shape.jsonl");
+        fs::write(
+            &dest,
+            concat!(
+                "{\"kind\":\"terminal\",\"pane\":\"abc\",\"record\":{\"kind\":\"command\",\"text\":\"nope\"}}\n",
+                "{\"kind\":\"session\",\"data\":{\"version\":1,\"workspace\":{\"tabs\":[]}}}\n"
+            ),
+        )
+        .unwrap();
+
+        let error = import(&store, dest.to_str().unwrap()).unwrap_err();
+
+        assert!(error.contains("no restorable tabs"));
+        assert_eq!(store.load_session().as_deref(), Some(r#"{"old":true}"#));
+        assert_eq!(read(&store, "abc"), "");
         let _ = fs::remove_dir_all(root);
     }
 }
