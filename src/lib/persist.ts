@@ -45,7 +45,12 @@ export function markDirty(): void {
   // Once changes have been arriving for longer than the ceiling, stop deferring
   // and write on the next tick.
   const wait = now - dirtySince >= MAX_DEFER_MS ? 0 : DEBOUNCE_MS;
-  timer = setTimeout(write, wait);
+  timer = setTimeout(() => {
+    // Timer callbacks have nobody to observe a rejected promise. Keep the
+    // queue's rejection (so a later explicit flush can still retry), but do
+    // not leak it as an unhandled rejection from this fire-and-forget path.
+    void write().catch(() => {});
+  }, wait);
 }
 
 /** Write now and resolve when it has actually reached the disk. */
@@ -63,15 +68,19 @@ function write(): Promise<void> {
   if (source === null) return writing;
 
   const json = source();
-  // Re-saving an unchanged snapshot still costs an `fsync`; a terminal that is
-  // only *receiving* output produces a lot of these.
-  if (json === lastWritten) return writing;
-  lastWritten = json;
-
   writing = writing
     .catch(() => {})
-    .then(() => session.save(json))
-    .then(() => {});
+    .then(async () => {
+      // Check when this write reaches the front of the queue, not when it is
+      // enqueued. A different in-flight write may change what is on disk in
+      // the meantime (including changing it away from this snapshot).
+      if (json === lastWritten) return;
+
+      await session.save(json);
+      // A failed save must remain retryable, so only record the snapshot once
+      // the backend confirms that it reached disk.
+      lastWritten = json;
+    });
   return writing;
 }
 
@@ -82,7 +91,10 @@ function write(): Promise<void> {
  */
 export function installFlushTriggers(): () => void {
   const flush = () => {
-    void flushPersistence();
+    // Browser lifecycle events are fire-and-forget. Explicit callers of
+    // flushPersistence still receive failures, while event-triggered writes
+    // avoid producing unhandled promise rejections.
+    void flushPersistence().catch(() => {});
   };
   const onVisibility = () => {
     if (document.visibilityState === "hidden") flush();
