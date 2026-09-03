@@ -320,11 +320,14 @@ fn validate_snapshot(value: &Value) -> Result<(), String> {
         return Err("the imported session has no workspace tabs".into());
     };
 
-    if tabs.iter().take(64).any(valid_snapshot_tab) {
-        Ok(())
-    } else {
-        Err("the imported session contains no restorable tabs".into())
+    let consumed: Vec<&Value> = tabs.iter().take(64).collect();
+    if consumed.is_empty() {
+        return Err("the imported session contains no restorable tabs".into());
     }
+    if !consumed.into_iter().all(valid_snapshot_tab) {
+        return Err("the imported session contains an invalid or over-complex tab".into());
+    }
+    Ok(())
 }
 
 fn valid_snapshot_tab(value: &Value) -> bool {
@@ -1014,7 +1017,54 @@ mod tests {
 
         let error = import(&store, dest.to_str().unwrap()).unwrap_err();
 
-        assert!(error.contains("no restorable tabs"));
+        assert!(error.contains("invalid or over-complex tab"));
+        assert_eq!(store.load_session().as_deref(), Some(original));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn import_checks_a_deep_second_tab_even_when_the_first_tab_is_valid() {
+        let (store, root) = temp_store();
+        let original = r#"{"old":true}"#;
+        store.save_session(original).unwrap();
+        let leaf = serde_json::json!({"kind": "leaf", "id": "leaf", "paneId": "abc"});
+        let mut deep = leaf.clone();
+        for index in 0..=MAX_SNAPSHOT_TREE_DEPTH {
+            deep = serde_json::json!({
+                "kind": "split",
+                "id": format!("deep-{index}"),
+                "axis": "x",
+                "children": [leaf.clone(), deep]
+            });
+        }
+        let pane = serde_json::json!({"id": "abc", "kind": "terminal"});
+        let snapshot = serde_json::json!({
+            "version": 1,
+            "workspace": {
+                "tabs": [
+                    {
+                        "id": "safe-tab",
+                        "panes": {"abc": pane.clone()},
+                        "root": leaf,
+                        "focusedPaneId": "abc"
+                    },
+                    {
+                        "id": "deep-tab",
+                        "panes": {"abc": pane},
+                        "root": deep,
+                        "focusedPaneId": "abc"
+                    }
+                ],
+                "activeTabId": "safe-tab"
+            },
+            "content": {}
+        });
+        let dest = root.join("deep-second-tab.jsonl");
+        fs::write(&dest, line("session", vec![("data", snapshot)])).unwrap();
+
+        let error = import(&store, dest.to_str().unwrap()).unwrap_err();
+
+        assert!(error.contains("invalid or over-complex tab"));
         assert_eq!(store.load_session().as_deref(), Some(original));
         let _ = fs::remove_dir_all(root);
     }
