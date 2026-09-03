@@ -131,7 +131,7 @@ export async function runControlAction(pane: string, id: ActionId): Promise<bool
  * for good and not on an ordinary unmount — so quitting the app leaves every
  * session running, and only a deliberate close takes one down.
  */
-export function disposeSession(paneId: string, session: string | undefined): void {
+export async function disposeSession(paneId: string, session: string | undefined): Promise<void> {
   if (!session || !isOwnSession(paneId, session)) return;
-  void tmuxApi.killSession(session);
+  await tmuxApi.killSession(session);
 }

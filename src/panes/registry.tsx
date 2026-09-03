@@ -54,7 +54,12 @@ export interface PaneKindDef {
    * depends on what it is: a tmux-backed pane has a session to end as well as a
    * pty to close, and only the pane knows which session.
    */
-  dispose?: (pane: PaneState) => void;
+  dispose?: (pane: PaneState, options: DisposePaneOptions) => Promise<void> | void;
+}
+
+export interface DisposePaneOptions {
+  /** Keep history/scrollback that an import has already installed for this id. */
+  preservePersistedData?: boolean;
 }
 
 export const PANE_KINDS: PaneKindDef[] = [
@@ -63,15 +68,26 @@ export const PANE_KINDS: PaneKindDef[] = [
     label: "Terminal",
     icon: TerminalSquare,
     Component: TerminalPane,
-    dispose: (pane) => {
-      void pty.kill(pane.id);
-      void scrollback.drop(pane.id);
-      void history.drop(pane.id);
+    dispose: async (pane, options) => {
       // Closing a pane means the shell is finished with, so the session jterm
       // made for it goes too. Quitting the app does not come through here, and
       // that asymmetry is the feature: what survives a crash is exactly what
       // was never deliberately closed.
-      disposeSession(pane.id, (pane as TerminalPaneState).tmux);
+      // Wait for all ownership to be released. In particular, an imported pane
+      // may reuse this id and must not attach until both the old pty and a
+      // jterm-owned tmux session behind it have finished shutting down.
+      const releases = [
+        pty.kill(pane.id),
+        disposeSession(pane.id, (pane as TerminalPaneState).tmux),
+      ];
+      if (!options.preservePersistedData) {
+        releases.push(scrollback.drop(pane.id), history.drop(pane.id));
+      }
+      const results = await Promise.allSettled(releases);
+      const failure = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (failure) throw failure.reason;
     },
   },
   { kind: "notepad", label: "Notepad", icon: FileText, Component: NotepadPane },
@@ -92,9 +108,15 @@ export function paneKind(kind: PaneKind): PaneKindDef {
 }
 
 /** Everything a closing pane owns, given up in one place. */
-export function disposePane(pane: PaneState): void {
-  BY_KIND.get(pane.kind)?.dispose?.(pane);
+export async function disposePane(
+  pane: PaneState,
+  options: DisposePaneOptions = {},
+): Promise<void> {
+  const disposal = BY_KIND.get(pane.kind)?.dispose?.(pane, options);
+  // Content is local and can disappear immediately; callers that need to reuse
+  // the pane id await the returned promise for its external resources.
   dropContent(pane.id);
+  await disposal;
 }
 
 /* ── What the new-tab menu offers ────────────────────────────────────────── */
