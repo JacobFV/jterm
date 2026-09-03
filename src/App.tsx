@@ -59,12 +59,13 @@ import type { TmuxSessionShape } from "@/lib/tmuxControl";
 import { useSettings } from "@/lib/useSettings";
 import { disposePane } from "@/panes/registry";
 import { loadContent, onContentChange, snapshotContent } from "@/state/content";
-import { decode, encode } from "@/state/snapshot";
+import { decode, encode, type Snapshot } from "@/state/snapshot";
 import { getSettings, zoomText, type FileOpenTarget } from "@/state/settings";
 import { type Direction, splitPlacement } from "@/state/tree";
 import {
   type PaneKind,
   type PaneState,
+  type Tab,
   type Workspace,
   activeTab,
   emptyWorkspace,
@@ -77,9 +78,154 @@ function livePaneIds(workspace: Workspace): string[] {
   return workspace.tabs.flatMap((tab) => Object.keys(tab.panes));
 }
 
+/** A tab drawn from tmux control mode, whose processes belong to tmux. */
+function controlSessionOf(tab: Tab): string | null {
+  for (const pane of Object.values(tab.panes)) {
+    if (pane.kind === "terminal" && pane.tmuxPane !== undefined && pane.tmux) return pane.tmux;
+  }
+  return null;
+}
+
+interface ImportPlan {
+  workspace: Workspace;
+  panesToDispose: PaneState[];
+  controlSessionsToAttach: string[];
+  controlSessionsToDetach: string[];
+}
+
+/**
+ * Work out what an imported snapshot replaces without treating control-mode
+ * panes as ordinary terminals. Their ptys belong to the shared control client,
+ * and disposing one as a normal pane could end a tmux session it does not own.
+ */
+export function planSessionImport(current: Workspace, restored: Snapshot): ImportPlan {
+  const wanted = new Set(restored.controlSessions);
+  const currentControlSessions = new Set<string>();
+  const keptControlTabs: Tab[] = [];
+  const panesToDispose: PaneState[] = [];
+
+  for (const tab of current.tabs) {
+    const controlSession = controlSessionOf(tab);
+    if (controlSession === null) {
+      panesToDispose.push(...Object.values(tab.panes));
+      continue;
+    }
+    currentControlSessions.add(controlSession);
+    if (wanted.has(controlSession)) keptControlTabs.push(tab);
+  }
+
+  return {
+    workspace: {
+      ...restored.workspace,
+      // A session already attached in control mode will not emit its shape a
+      // second time when asked to attach, so retain those live tabs verbatim.
+      tabs: [...restored.workspace.tabs, ...keptControlTabs],
+    },
+    panesToDispose,
+    controlSessionsToAttach: restored.controlSessions.filter(
+      (name) => !currentControlSessions.has(name),
+    ),
+    controlSessionsToDetach: [...currentControlSessions].filter((name) => !wanted.has(name)),
+  };
+}
+
+interface ImportActions {
+  dispose: (pane: PaneState, preservePersistedData: boolean) => Promise<void>;
+  detachControl: (session: string) => Promise<void>;
+  load: (snapshot: Snapshot) => void;
+  restore: (workspace: Workspace) => void;
+  remount: () => void;
+  attachControl: (sessions: string[]) => void;
+}
+
+/** Complete teardown before a replacement pane can mount against a reused id. */
+export async function applySessionImport(
+  plan: ImportPlan,
+  restored: Snapshot,
+  actions: ImportActions,
+): Promise<void> {
+  const importedPaneIds = new Set(livePaneIds(restored.workspace));
+  const results = await Promise.allSettled([
+    ...plan.panesToDispose.map((pane) => actions.dispose(pane, importedPaneIds.has(pane.id))),
+    ...plan.controlSessionsToDetach.map((name) => actions.detachControl(name)),
+  ]);
+  const failure = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failure) throw failure.reason;
+  actions.load(restored);
+  actions.remount();
+  actions.restore(plan.workspace);
+  actions.attachControl(plan.controlSessionsToAttach);
+}
+
+/** A rejecting import is reported but cannot poison every import behind it. */
+export function createImportQueue(
+  reportFailure: (error: unknown) => Promise<void>,
+): (task: () => Promise<void>) => Promise<void> {
+  let tail = Promise.resolve();
+  return (task) => {
+    tail = tail.then(task).catch(async (error: unknown) => {
+      try {
+        await reportFailure(error);
+      } catch (reportError) {
+        // Reporting is best-effort, but neither failure may become an unhandled
+        // rejection or prevent the next queued import from being attempted.
+        console.error("[jterm] could not report session import failure", reportError);
+      }
+    });
+    return tail;
+  };
+}
+
+interface CloseRequestEvent {
+  preventDefault: () => void;
+}
+
+interface CloseableWindow {
+  destroy: () => Promise<void>;
+}
+
+/** Build the one-at-a-time close transaction used by Tauri's window event. */
+export function createCloseRequestHandler(
+  win: CloseableWindow,
+  getWorkspace: () => Workspace,
+): (event: CloseRequestEvent) => Promise<void> {
+  let closing = false;
+  return async (event) => {
+    // Tauri cannot await this callback before closing. Hold the window for both
+    // the prompt and the final persistence write, including the no-prompt path.
+    event.preventDefault();
+    if (closing) return;
+    closing = true;
+
+    try {
+      const unsaved = getWorkspace().tabs.flatMap((tab) =>
+        Object.values(tab.panes).filter((pane) => pane.kind === "notepad" && pane.dirty),
+      );
+      if (unsaved.length > 0) {
+        const names = unsaved.map((pane) => paneLabel(pane)).join(", ");
+        const leave = await dialog.confirm(
+          `${names} ${unsaved.length === 1 ? "has" : "have"} unsaved changes. Close jterm anyway?`,
+          "Unsaved changes",
+        );
+        if (!leave) return;
+      }
+
+      await flushPersistence();
+      await win.destroy();
+    } finally {
+      // A cancelled prompt or failed flush leaves the window usable and lets a
+      // later close request retry. destroy() itself does not request closure.
+      closing = false;
+    }
+  };
+}
+
 export function App() {
   const initialRef = useRef<Workspace>(emptyWorkspace());
   const [workspace, dispatch] = useReducer(reduce, initialRef.current);
+  const [workspaceGeneration, setWorkspaceGeneration] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [sidebarRoot, setSidebarRoot] = useState<string | null>(null);
   const settings = useSettings();
@@ -156,11 +302,32 @@ export function App() {
   useEffect(() => {
     let stop: (() => void) | null = null;
     let disposed = false;
+    const queueImport = createImportQueue(async (error) => {
+      console.error("[jterm] session import failed during teardown", error);
+      await dialog.notify(
+        `The imported session could not replace the current workspace: ${String(error)}`,
+        "Session import failed",
+      );
+    });
     void listen<string>(SESSION_IMPORTED_EVENT, (snapshot) => {
       const restored = decode(snapshot);
       if (!restored) return;
-      loadContent(restored.content);
-      dispatch({ type: "restore", workspace: restored.workspace });
+      // Events can arrive again while teardown is in flight. Serialize them so
+      // each import plans against the workspace installed by the previous one.
+      void queueImport(async () => {
+        const plan = planSessionImport(workspaceRef.current, restored);
+        await applySessionImport(plan, restored, {
+          dispose: (pane, preservePersistedData) =>
+            disposePane(pane, { preservePersistedData }),
+          detachControl: (name) => tmuxControl.detach(name),
+          load: (next) => loadContent(next.content),
+          // Force every pane component through cleanup even when an imported
+          // pane happens to reuse an existing id.
+          remount: () => setWorkspaceGeneration((generation) => generation + 1),
+          restore: (next) => dispatch({ type: "restore", workspace: next }),
+          attachControl: (sessions) => reattachRef.current(sessions),
+        });
+      });
     }).then((unlisten) => {
       if (disposed) unlisten();
       else stop = unlisten;
@@ -345,7 +512,7 @@ export function App() {
       // Disposal happens here rather than in the reducer: killing a shell is not
       // something a pure function should be doing, and a reducer that did it
       // could not be run twice safely.
-      if (tab) for (const pane of Object.values(tab.panes)) disposePane(pane);
+      if (tab) await Promise.all(Object.values(tab.panes).map((pane) => disposePane(pane)));
       dispatch({ type: "tab/close", tabId });
     },
     [confirmDiscard],
@@ -357,7 +524,7 @@ export function App() {
       const pane = tab?.panes[paneId];
       if (!pane) return;
       if (!(await confirmDiscard([pane]))) return;
-      disposePane(pane);
+      await disposePane(pane);
       dispatch({ type: "pane/close", tabId, paneId });
     },
     [confirmDiscard],
@@ -386,7 +553,7 @@ export function App() {
       // a request for that file.
       if (pane.kind === kind && seed === undefined) return;
       if (!(await confirmDiscard([pane]))) return;
-      disposePane(pane);
+      await disposePane(pane);
       dispatch({ type: "pane/replace", tabId, paneId, kind, seed });
     },
     [confirmDiscard],
@@ -475,25 +642,9 @@ export function App() {
     void (async () => {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       const win = getCurrentWindow();
-      const stop = await win.onCloseRequested(async (event) => {
-        const unsaved = workspaceRef.current.tabs.flatMap((tab) =>
-          Object.values(tab.panes).filter((pane) => pane.kind === "notepad" && pane.dirty),
-        );
-        if (unsaved.length === 0) return;
-
-        // Held open while the question is asked; without this the window is
-        // already gone by the time the answer arrives.
-        event.preventDefault();
-        const names = unsaved.map((pane) => paneLabel(pane)).join(", ");
-        const leave = await dialog.confirm(
-          `${names} ${unsaved.length === 1 ? "has" : "have"} unsaved changes. Close jterm anyway?`,
-          "Unsaved changes",
-        );
-        if (leave) {
-          await flushPersistence();
-          await win.destroy();
-        }
-      });
+      const stop = await win.onCloseRequested(
+        createCloseRequestHandler(win, () => workspaceRef.current),
+      );
       if (disposed) stop();
       else unlisten = stop;
     })();
@@ -785,6 +936,7 @@ export function App() {
           <AmbientBackdrop theme={resolveTheme(windowTheme)} />
           {loaded ? (
             <PaneWorkspace
+              key={workspaceGeneration}
               tabs={tabs}
               activeTabId={workspace.activeTabId}
               dispatch={dispatch}
