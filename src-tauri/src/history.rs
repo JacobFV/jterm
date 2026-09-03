@@ -33,6 +33,9 @@ const HISTORY_MAX: u64 = 4 * 1024 * 1024;
 /// How much is kept when it is trimmed. The gap stops a busy pane from
 /// trimming on nearly every write.
 const HISTORY_KEEP: usize = 1024 * 1024;
+/// Keep imported split trees well below the parser and call-stack limits. A
+/// normal terminal layout cannot approach this without becoming unusable.
+const MAX_SNAPSHOT_TREE_DEPTH: usize = 32;
 
 /// Refuse a pane id that could climb out of the directory it names.
 ///
@@ -365,7 +368,7 @@ fn valid_snapshot_pane(value: &Value) -> bool {
 }
 
 fn valid_snapshot_node(value: &Value, panes: &HashSet<&str>, depth: usize) -> bool {
-    if depth >= 128 {
+    if depth >= MAX_SNAPSHOT_TREE_DEPTH {
         return false;
     }
     let Some(node) = value.as_object() else {
@@ -388,10 +391,12 @@ fn valid_snapshot_node(value: &Value, panes: &HashSet<&str>, depth: usize) -> bo
             .and_then(Value::as_array)
             .filter(|children| children.len() == 2)
             .is_some_and(|children| {
-                // The frontend collapses a split whose corrupt side cannot be
-                // decoded, so one usable child is enough here as well.
-                valid_snapshot_node(&children[0], panes, depth + 1)
-                    || valid_snapshot_node(&children[1], panes, depth + 1)
+                // Check both independently: short-circuiting after a valid
+                // first child would let an over-deep second branch reach the
+                // frontend decoder unchecked.
+                let first = valid_snapshot_node(&children[0], panes, depth + 1);
+                let second = valid_snapshot_node(&children[1], panes, depth + 1);
+                first && second
             }),
         _ => false,
     }
@@ -968,6 +973,49 @@ mod tests {
         assert!(error.contains("no restorable tabs"));
         assert_eq!(store.load_session().as_deref(), Some(r#"{"old":true}"#));
         assert_eq!(read(&store, "abc"), "");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn import_checks_an_over_deep_second_branch_even_when_the_first_is_valid() {
+        let (store, root) = temp_store();
+        let original = r#"{"old":true}"#;
+        store.save_session(original).unwrap();
+        let leaf = serde_json::json!({"kind": "leaf", "id": "leaf", "paneId": "abc"});
+        let mut deep = leaf.clone();
+        for index in 0..=MAX_SNAPSHOT_TREE_DEPTH {
+            deep = serde_json::json!({
+                "kind": "split",
+                "id": format!("deep-{index}"),
+                "axis": "x",
+                "children": [leaf.clone(), deep]
+            });
+        }
+        let snapshot = serde_json::json!({
+            "version": 1,
+            "workspace": {
+                "tabs": [{
+                    "id": "tab",
+                    "panes": {"abc": {"id": "abc", "kind": "terminal"}},
+                    "root": {
+                        "kind": "split",
+                        "id": "root",
+                        "axis": "x",
+                        "children": [leaf, deep]
+                    },
+                    "focusedPaneId": "abc"
+                }],
+                "activeTabId": "tab"
+            },
+            "content": {}
+        });
+        let dest = root.join("deep-second-branch.jsonl");
+        fs::write(&dest, line("session", vec![("data", snapshot)])).unwrap();
+
+        let error = import(&store, dest.to_str().unwrap()).unwrap_err();
+
+        assert!(error.contains("no restorable tabs"));
+        assert_eq!(store.load_session().as_deref(), Some(original));
         let _ = fs::remove_dir_all(root);
     }
 }
