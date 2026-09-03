@@ -1,0 +1,32 @@
+import type { Theme } from "./themes";
+
+export const TETRIS_THEME: Theme = {
+  id: "tetris",
+  name: "Falling Blocks",
+  group: "Living",
+  base: "dark",
+  ambient: "lorenz",
+  veil: 0.72,
+  accent: "#8b5cf6",
+  palette: {
+    bg: "#08080f",
+    fg: "#eae8f8",
+    cursor: "#8b5cf6",
+    black: "#141422",
+    red: "#f5455c",
+    green: "#3ddc84",
+    yellow: "#f5c542",
+    blue: "#4287f5",
+    magenta: "#c542f5",
+    cyan: "#42d4f5",
+    white: "#d8d4f0",
+    brightBlack: "#3a3a52",
+    brightRed: "#ff7a8c",
+    brightGreen: "#7cf0ac",
+    brightYellow: "#ffe07a",
+    brightBlue: "#7aabff",
+    brightMagenta: "#e08aff",
+    brightCyan: "#8ae8ff",
+    brightWhite: "#ffffff",
+  },
+};

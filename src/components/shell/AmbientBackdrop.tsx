@@ -21,7 +21,7 @@
 import { useEffect, useRef } from "react";
 
 import { startAmbient, type AmbientTuning } from "@/lib/ambient";
-import { startFormulaAmbient } from "@/lib/formulaAmbient";
+import { customAmbientById } from "@/lib/customAmbients";
 import type { Theme } from "@/lib/themes";
 import { useSettings } from "@/lib/useSettings";
 
@@ -48,19 +48,20 @@ export function AmbientBackdrop({ theme }: { theme: Theme }) {
   const tuning = useRef<AmbientTuning>({ motion: 1, activity: 1 });
   tuning.current = { motion: settings.ambientMotion, activity: settings.ambientActivity };
 
-  // The formula theme deliberately reuses the living-theme plumbing while
-  // owning its renderer in a separate module. That keeps `ambient.ts`'s painter
-  // table unchanged and makes the imported artwork auditable in one small file.
-  const formula = theme.id === "formula";
-  const hidden = (!formula && ambient === null) || settings.ambientPresence === 0;
+  // Custom ambients (Formula, Mario, and the rest of `customAmbients.ts`) all
+  // deliberately reuse the living-theme plumbing while owning their renderers
+  // in separate modules. That keeps `ambient.ts`'s painter table unchanged and
+  // makes each bespoke scene auditable in its own small file.
+  const custom = customAmbientById(theme.id);
+  const hidden = (custom === undefined && ambient === null) || settings.ambientPresence === 0;
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null || hidden) return;
-    if (formula) return startFormulaAmbient(canvas, theme.palette, () => tuning.current);
+    if (custom !== undefined) return custom.start(canvas, theme.palette, () => tuning.current);
     if (ambient === null) return;
     return startAmbient(canvas, ambient, theme.palette, () => tuning.current);
-  }, [ambient, formula, hidden, theme.id, theme.palette]);
+  }, [ambient, custom, hidden, theme.id, theme.palette]);
 
   if (hidden) return null;
 

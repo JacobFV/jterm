@@ -17,19 +17,20 @@
  */
 
 import { applyAppearance } from "@/lib/appearance";
+import { isThemeChoice } from "@/lib/customAmbients";
 import { SETTINGS_CHANGED_EVENT, listen, settings as settingsApi } from "@/lib/ipc";
 import { ACTION_IDS, setKeyOverrides, type ActionId } from "@/lib/keymap";
 import { isTauri } from "@/lib/tauri";
-import { isThemeId } from "@/lib/themes";
 import type { Direction } from "./tree";
 
 /**
  * A theme's id, or `system` for "whichever of the two foundations the desktop
  * is asking for". Not a union, because the set of themes is a table in
- * `lib/themes.ts` and a second copy of it here would be one more place to
- * forget: `isThemeId` is what decides whether a stored value still names
- * something. `dark` and `light` are ids like any other, which is what lets a
- * settings file from before there were themes still select the right one.
+ * `lib/themes.ts` (plus the heavier ones in `lib/customAmbients.ts`) and a
+ * second copy of it here would be one more place to forget: `isThemeChoice`
+ * is what decides whether a stored value still names something. `dark` and
+ * `light` are ids like any other, which is what lets a settings file from
+ * before there were themes still select the right one.
  */
 export type ThemeChoice = string;
 export type CursorStyle = "bar" | "block" | "underline";
@@ -174,7 +175,7 @@ export function decodeSettings(json: string | null | undefined): Settings | null
   return {
     // A theme that no longer exists — one removed since, or one from a build
     // that had more of them — costs the theme rather than the whole file.
-    theme: isThemeId(parsed.theme) ? parsed.theme : DEFAULTS.theme,
+    theme: isThemeChoice(parsed.theme) ? parsed.theme : DEFAULTS.theme,
     uiFontSize: clamp(parsed.uiFontSize, LIMITS.uiFontSize, DEFAULTS.uiFontSize),
     fontFamily: text(parsed.fontFamily, DEFAULTS.fontFamily),
     fontSize: clamp(parsed.fontSize, LIMITS.fontSize, DEFAULTS.fontSize),

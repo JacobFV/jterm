@@ -18,7 +18,7 @@
 
 import { useEffect, useRef } from "react";
 
-import { FORMULA_THEME } from "@/lib/formulaTheme";
+import { CUSTOM_AMBIENTS, customAmbientById } from "@/lib/customAmbients";
 import { THEME_GROUPS, THEMES, themeById } from "@/lib/themes";
 import type { ThemeChoice } from "@/state/settings";
 import { MenuHeading, MenuItem } from "./Menu";
@@ -34,7 +34,7 @@ import { ThemeSwatch } from "./ThemeSwatch";
 const SWATCH = "h-[18px] w-[18px]";
 
 function Swatch({ themeId }: { themeId: string }) {
-  const theme = themeId === FORMULA_THEME.id ? FORMULA_THEME : themeById(themeId);
+  const theme = customAmbientById(themeId)?.theme ?? themeById(themeId);
   return <ThemeSwatch theme={theme} className={SWATCH} />;
 }
 
@@ -94,7 +94,7 @@ export function ThemeMenu({ value, defer, onChange, onPick }: ThemeMenuProps) {
       {THEME_GROUPS.map((group) => {
         const themes =
           group === "Living"
-            ? [...THEMES.filter((theme) => theme.group === group), FORMULA_THEME]
+            ? [...THEMES.filter((theme) => theme.group === group), ...CUSTOM_AMBIENTS.map((c) => c.theme)]
             : THEMES.filter((theme) => theme.group === group);
         return (
           <div key={group}>

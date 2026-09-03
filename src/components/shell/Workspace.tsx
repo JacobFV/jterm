@@ -32,7 +32,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { GripVertical, Minimize2, X } from "lucide-react";
+import { Minimize2, X } from "lucide-react";
 
 import { resolveTheme, themeStyle } from "@/lib/appearance";
 import { useSettings, useSystemScheme } from "@/lib/useSettings";
@@ -360,37 +360,37 @@ export function Workspace({
             >
               {split ? (
                 <div
-                  className="flex shrink-0 items-center gap-1 border-b border-border bg-surface-1 pl-0.5 pr-1"
+                  className="flex shrink-0 cursor-grab touch-none select-none items-center gap-1 border-b border-border bg-surface-1 pl-1 pr-1 active:cursor-grabbing"
                   style={{ height: HEADER_PX }}
-                  onMouseDown={() => dispatch({ type: "pane/focus", tabId: tab.id, paneId })}
+                  title="Drag to rearrange · double-click to zoom"
+                  onPointerDown={(event) => {
+                    dispatch({ type: "pane/focus", tabId: tab.id, paneId });
+                    beginPaneDrag(tab.id, paneId)(event);
+                  }}
+                  onDoubleClick={() => dispatch({ type: "pane/zoom", tabId: tab.id, paneId })}
                 >
-                  <button
-                    type="button"
-                    title="Drag to rearrange"
-                    aria-label={`Move ${paneLabel(pane)}`}
-                    onPointerDown={beginPaneDrag(tab.id, paneId)}
-                    className="shrink-0 cursor-grab touch-none px-0.5 text-ink-4 hover:text-ink-2 active:cursor-grabbing"
-                  >
-                    <GripVertical className="h-3 w-3" />
-                  </button>
                   {/* Only for the tab on screen. The menu is drawn in a portal
                       to escape this container's clipping, which also means the
                       `visibility: hidden` above does not reach it — a menu left
                       open on a tab you have switched away from would hang over
                       the one you switched to. Unmounting takes it with the tab.
-                      Hidden panes keep the icon so the header does not shift. */}
+                      Hidden panes keep the icon so the header does not shift.
+                      Stopped here so a click on the icon opens the menu instead
+                      of starting a drag of the header underneath it. */}
                   {onScreen ? (
-                    <PaneMenu
-                      tabs={tabs}
-                      tab={tab}
-                      pane={pane}
-                      // A header only exists where the tab is split, so this
-                      // icon always has a sibling to be told apart from — which
-                      // is exactly when theming one pane alone means anything.
-                      scope="pane"
-                      actions={paneMenu}
-                      muted={!focused}
-                    />
+                    <span onPointerDown={(event) => event.stopPropagation()}>
+                      <PaneMenu
+                        tabs={tabs}
+                        tab={tab}
+                        pane={pane}
+                        // A header only exists where the tab is split, so this
+                        // icon always has a sibling to be told apart from — which
+                        // is exactly when theming one pane alone means anything.
+                        scope="pane"
+                        actions={paneMenu}
+                        muted={!focused}
+                      />
+                    </span>
                   ) : (
                     <definition.icon className="h-3 w-3 shrink-0 text-ink-4" />
                   )}
@@ -408,7 +408,11 @@ export function Workspace({
                       type="button"
                       title="Unzoom"
                       aria-label="Unzoom"
-                      onClick={() => dispatch({ type: "pane/zoom", tabId: tab.id, paneId })}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        dispatch({ type: "pane/zoom", tabId: tab.id, paneId });
+                      }}
                       className="shrink-0 rounded-sm p-0.5 text-brand hover:bg-surface-2"
                     >
                       <Minimize2 className="h-3 w-3" />
@@ -418,7 +422,11 @@ export function Workspace({
                     type="button"
                     title="Close pane"
                     aria-label={`Close ${paneLabel(pane)}`}
-                    onClick={() => onClosePane(tab.id, paneId)}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onClosePane(tab.id, paneId);
+                    }}
                     className="shrink-0 rounded-sm p-0.5 text-ink-4 hover:bg-surface-2 hover:text-ink-1"
                   >
                     <X className="h-3 w-3" />

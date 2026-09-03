@@ -20,7 +20,7 @@
  * not because it inherited 88% of something that had already shrunk.
  */
 
-import { FORMULA_THEME } from "@/lib/formulaTheme";
+import { customAmbientById } from "@/lib/customAmbients";
 import { type Theme, themeById, themeVars } from "@/lib/themes";
 import type { Settings, ThemeChoice } from "@/state/settings";
 
@@ -44,7 +44,8 @@ export function resolveTheme(choice: ThemeChoice): Theme {
   if (choice === "system") {
     return themeById(systemQuery()?.matches ? "light" : "dark")!;
   }
-  if (choice === FORMULA_THEME.id) return FORMULA_THEME;
+  const custom = customAmbientById(choice);
+  if (custom !== undefined) return custom.theme;
   return themeById(choice) ?? themeById("dark")!;
 }
 

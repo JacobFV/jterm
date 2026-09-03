@@ -1,0 +1,32 @@
+import type { Theme } from "./themes";
+
+export const SNAKE_THEME: Theme = {
+  id: "snake",
+  name: "Snake",
+  group: "Living",
+  base: "dark",
+  ambient: "lorenz",
+  veil: 0.72,
+  accent: "#4ade80",
+  palette: {
+    bg: "#0a1210",
+    fg: "#e8f5ec",
+    cursor: "#4ade80",
+    black: "#16221c",
+    red: "#ff5d5d",
+    green: "#4ade80",
+    yellow: "#f0d878",
+    blue: "#6fb3f0",
+    magenta: "#d78be0",
+    cyan: "#6fe0d0",
+    white: "#c8dcd0",
+    brightBlack: "#3a4d43",
+    brightRed: "#ff8a8a",
+    brightGreen: "#7ef0a8",
+    brightYellow: "#f5e4a0",
+    brightBlue: "#9ccdf5",
+    brightMagenta: "#e6b0ee",
+    brightCyan: "#a0f0e4",
+    brightWhite: "#f0fff5",
+  },
+};

@@ -1,0 +1,32 @@
+import type { Theme } from "./themes";
+
+export const INVADERS_THEME: Theme = {
+  id: "invaders",
+  name: "Invaders",
+  group: "Living",
+  base: "dark",
+  ambient: "lorenz",
+  veil: 0.72,
+  accent: "#33ff66",
+  palette: {
+    bg: "#050506",
+    fg: "#e8ffe8",
+    cursor: "#33ff66",
+    black: "#0e0e10",
+    red: "#ff4d5e",
+    green: "#33ff66",
+    yellow: "#ffd166",
+    blue: "#5ec8ff",
+    magenta: "#ff7ee2",
+    cyan: "#5ef2e0",
+    white: "#d8e8d8",
+    brightBlack: "#3a3a40",
+    brightRed: "#ff8a94",
+    brightGreen: "#7dffa0",
+    brightYellow: "#ffe199",
+    brightBlue: "#9adcff",
+    brightMagenta: "#ffabef",
+    brightCyan: "#a0f7ea",
+    brightWhite: "#ffffff",
+  },
+};

@@ -12,7 +12,7 @@
  * takes that path too.
  */
 
-import { isThemeId } from "@/lib/themes";
+import { isThemeChoice } from "@/lib/customAmbients";
 import type { PaneContent } from "./content";
 import type { ThemeChoice } from "./settings";
 import type { Node } from "./tree";
@@ -204,7 +204,7 @@ function decodeTab(raw: unknown): Tab | null {
  * theme, not the tab.
  */
 function decodeTheme(raw: unknown): ThemeChoice | undefined {
-  return isThemeId(raw) ? raw : undefined;
+  return isThemeChoice(raw) ? raw : undefined;
 }
 
 const KINDS: PaneKind[] = ["terminal", "notepad", "browser", "image", "media", "model"];
