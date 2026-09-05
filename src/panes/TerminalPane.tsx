@@ -28,6 +28,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { ImageAddon } from "@xterm/addon-image";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 
@@ -409,6 +410,28 @@ export function TerminalPane({
     const unicode = new Unicode11Addon();
     term.loadAddon(unicode);
     term.unicode.activeVersion = "11";
+
+    /**
+     * Pictures in the terminal: SIXEL, and iTerm's inline image protocol.
+     *
+     * This is not only about being able to `img2sixel` a photo. Programs ask
+     * whether the terminal can show an image before they offer anything that
+     * needs one — Codex's pets, `chafa`, `timg`, matplotlib's sixel backend,
+     * fzf previews — and the question is asked as a *terminal query*: primary
+     * device attributes (`CSI c`), whose answer must list `4` for sixel, and
+     * the `CSI 14/16/18 t` size reports that say how many pixels a cell is.
+     * A terminal that renders images but never says so is, to all of them,
+     * a terminal without images. The addon answers both, which is most of why
+     * it is here rather than a hand-rolled sixel decoder.
+     *
+     * `storageLimit` is well below the addon's own default of 128 MB, because
+     * that default is written for a page with one terminal on it and jterm can
+     * have a dozen panes alive at once. Images are held as unpacked RGBA, so
+     * the cap is reached faster than the on-screen area suggests; past it the
+     * oldest image in the scrollback is dropped, which is the right thing to
+     * lose. 64 MB still holds a full screen of picture several times over.
+     */
+    term.loadAddon(new ImageAddon({ storageLimit: 64 }));
 
     term.open(host);
     termRef.current = term;
