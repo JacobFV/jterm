@@ -60,6 +60,11 @@ export const RESTORE_RESET = [
   "\x1b[?1005l", //        UTF-8 coordinates
   "\x1b[?1006l", //        SGR coordinates
   "\x1b[?1015l", //        urxvt coordinates
+  // Sixel display mode, which a program that drew a picture without wanting the
+  // cursor moved may have left on. Set, an image paints from the top left of
+  // the viewport and the cursor stays put — so a replayed log that turned it on
+  // and died would stack every later picture in one corner.
+  "\x1b[?80l",
   "\x1b[?1l", // cursor keys back to normal, not application
   "\x1b>", // keypad likewise
   "\x1b[?5l", // screen not reversed

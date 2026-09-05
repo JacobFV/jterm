@@ -17,6 +17,7 @@ const MUST_CLEAR = [
   ["\x1b[?1003l", "mouse any-event tracking"],
   ["\x1b[?1006l", "SGR mouse coordinates"],
   ["\x1b[?25h", "hidden cursor"],
+  ["\x1b[?80l", "sixel display mode — pictures stacked in the top-left corner"],
   ["\x1b[?1l", "application cursor keys — arrows send `ESC O A`"],
   ["\x1b[r", "a scroll region the size of the dead program's window"],
 ] as const;
