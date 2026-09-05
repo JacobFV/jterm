@@ -241,3 +241,141 @@ body,
 .pane-ground {
   background-color: var(--ground, hsl(var(--bg-0)));
 }
+
+/*
+ * A rendered markdown document.
+ *
+ * Written in the terminal's own tokens rather than a stylesheet of its own, so
+ * a README in a Solarized pane is Solarized and the code in it is the colour
+ * the shell beside it would print. Tailwind's preflight strips heading sizes
+ * and list markers from everything, so a document has to put them back — this
+ * is that, and nothing more decorative than that.
+ *
+ * The measure is capped in the component rather than here; body text at a
+ * terminal's width is a wall.
+ */
+.markdown {
+  color: var(--term-fg);
+  font-size: var(--fs-12);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: 1.4em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--term-bright-yellow);
+}
+.markdown h1 {
+  font-size: 1.6em;
+}
+.markdown h2 {
+  font-size: 1.32em;
+  border-bottom: 1px solid hsl(var(--border));
+  padding-bottom: 0.24em;
+}
+.markdown h3 {
+  font-size: 1.14em;
+}
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown table,
+.markdown pre {
+  margin: 0.75em 0;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 1.5em;
+}
+.markdown ul {
+  list-style: disc;
+}
+.markdown ol {
+  list-style: decimal;
+}
+.markdown li {
+  margin: 0.2em 0;
+}
+.markdown li::marker {
+  color: var(--term-bright-black);
+}
+.markdown a {
+  color: var(--term-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.markdown blockquote {
+  border-left: 2px solid var(--term-bright-black);
+  padding-left: 0.9em;
+  color: var(--term-white);
+}
+.markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  color: var(--term-cyan);
+}
+.markdown pre {
+  background-color: hsl(var(--bg-1));
+  border: 1px solid hsl(var(--border));
+  padding: 0.7em 0.85em;
+  overflow-x: auto;
+}
+.markdown pre code {
+  color: var(--term-fg);
+}
+.markdown table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.3em 0.6em;
+  text-align: left;
+}
+.markdown th {
+  color: var(--term-bright-yellow);
+  font-weight: 600;
+}
+.markdown hr {
+  border: 0;
+  border-top: 1px solid hsl(var(--border));
+  margin: 1.4em 0;
+}
+.markdown img,
+.markdown svg {
+  max-width: 100%;
+  height: auto;
+}
+.markdown-mermaid {
+  margin: 1em 0;
+  overflow-x: auto;
+}
+/* A diagram that would not parse is shown as the source it was, with the
+   reason under it: a hole in the document explains nothing. */
+.markdown-mermaid-failed pre {
+  background-color: hsl(var(--bg-1));
+  border: 1px solid hsl(var(--border));
+  padding: 0.7em 0.85em;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+.markdown-mermaid-failed p {
+  color: hsl(var(--danger));
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  margin-top: 0.4em;
+}

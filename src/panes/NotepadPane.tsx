@@ -19,6 +19,11 @@
  * CodeMirror rather than a `<textarea>` because the pane needed highlighting,
  * and because a textarea's undo history is not something that can be reasoned
  * about once the document is also being restored from a snapshot.
+ *
+ * A markdown file opens rendered, with a switch back to the source. Both exist
+ * at once: the editor is hidden rather than torn down, because destroying it
+ * would take the undo history and the caret with it every time someone looked
+ * at the preview. See `MarkdownPreview` for what rendering involves.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -32,14 +37,16 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
-import { Save } from "lucide-react";
+import { Eye, PencilLine, Save } from "lucide-react";
 
 import { dialog, files } from "@/lib/ipc";
 import { fileName, languageFor } from "@/lib/filetypes";
+import { isMarkdownPath } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
 import { getContent, updateContent } from "@/state/content";
 import { subscribeSettings } from "@/state/settings";
 import type { NotepadPaneState } from "@/state/workspace";
+import { MarkdownPreview } from "./MarkdownPreview";
 import type { PaneProps } from "./types";
 
 /**
@@ -142,6 +149,23 @@ export function NotepadPane({ pane, focused, onMeta, onFocus }: PaneProps<Notepa
   const [error, setError] = useState<string | null>(null);
   const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null);
 
+  // Markdown opens as the document it is meant to be read as. Everything else
+  // has no second form to show, so the switch is not drawn at all.
+  const markdown = isMarkdownPath(path);
+  const [mode, setMode] = useState<"preview" | "raw">(markdown ? "preview" : "raw");
+  const previewing = markdown && mode === "preview";
+  /**
+   * The text the preview is showing.
+   *
+   * Taken from the editor at the moment the preview is shown rather than kept
+   * in step with it: the document lives in CodeMirror and in the content store,
+   * and mirroring every keystroke into React state would re-render the pane —
+   * and re-parse the markdown — on each one, for a view that is not on screen.
+   */
+  const [previewText, setPreviewText] = useState("");
+  /** Bumped whenever the document changes underneath the preview. */
+  const [revision, setRevision] = useState(0);
+
   const initialRef = useRef(getContent(paneId));
 
   const record = useCallback(
@@ -181,6 +205,11 @@ export function NotepadPane({ pane, focused, onMeta, onFocus }: PaneProps<Notepa
       viewRef.current = null;
     };
   }, [paneId, record]);
+
+  useEffect(() => {
+    if (!previewing) return;
+    setPreviewText(viewRef.current?.state.doc.toString() ?? "");
+  }, [previewing, revision]);
 
   /**
    * Re-measure when the type size moves.
@@ -228,6 +257,7 @@ export function NotepadPane({ pane, focused, onMeta, onFocus }: PaneProps<Notepa
       });
       updateContent(paneId, { text: file.contents, caret: 0 });
       metaRef.current({ dirty: false });
+      setRevision((value) => value + 1);
     })();
 
     return () => {
@@ -236,8 +266,10 @@ export function NotepadPane({ pane, focused, onMeta, onFocus }: PaneProps<Notepa
   }, [path, paneId]);
 
   useEffect(() => {
-    if (focused) viewRef.current?.focus();
-  }, [focused]);
+    // Not while the preview is up: focusing a hidden editor would put the
+    // caret somewhere nobody can see and swallow the keys meant for scrolling.
+    if (focused && !previewing) viewRef.current?.focus();
+  }, [focused, previewing]);
 
   /* ── Saving ───────────────────────────────────────────────────────── */
 
@@ -260,6 +292,7 @@ export function NotepadPane({ pane, focused, onMeta, onFocus }: PaneProps<Notepa
       savedTextRef.current = text;
       setError(null);
       metaRef.current({ path: target, dirty: false });
+      setRevision((value) => value + 1);
     } catch (cause) {
       setError(String(cause));
     }
@@ -291,6 +324,24 @@ export function NotepadPane({ pane, focused, onMeta, onFocus }: PaneProps<Notepa
             unsaved
           </span>
         ) : null}
+        {markdown ? (
+          <button
+            type="button"
+            title={previewing ? "Show the markdown source" : "Show the rendered document"}
+            aria-label={previewing ? "Show the source" : "Show the preview"}
+            aria-pressed={previewing}
+            onClick={() => {
+              setMode(previewing ? "raw" : "preview");
+              // CodeMirror measured itself last while it was hidden, where
+              // everything is zero. Ask for a fresh one on the way back.
+              if (previewing) requestAnimationFrame(() => viewRef.current?.requestMeasure());
+            }}
+            className="inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-hairline-strong px-1.5 text-[length:var(--fs-10)] text-ink-2 hover:bg-surface-2 hover:text-ink-1"
+          >
+            {previewing ? <PencilLine className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+            {previewing ? "Raw" : "Preview"}
+          </button>
+        ) : null}
         <button
           type="button"
           title={path ? `Save to ${fileName(path)}` : "Save as…"}
@@ -314,7 +365,14 @@ export function NotepadPane({ pane, focused, onMeta, onFocus }: PaneProps<Notepa
         </p>
       ) : null}
 
-      <div ref={hostRef} className="min-h-0 flex-1 overflow-hidden" />
+      {/* Both exist at all times. The editor is hidden rather than unmounted:
+          tearing it down and building it again would drop the undo history and
+          the caret every time the preview was looked at. */}
+      <div
+        ref={hostRef}
+        className={cn("min-h-0 flex-1 overflow-hidden", previewing && "hidden")}
+      />
+      {previewing ? <MarkdownPreview text={previewText} path={path} /> : null}
     </div>
   );
 }

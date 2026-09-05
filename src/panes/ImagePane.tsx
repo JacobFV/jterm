@@ -8,11 +8,16 @@
  *
  * Zoom starts at "fit", because that is the answer to "what is in this file".
  * Clicking switches to 1:1, which is the answer to "is this pixel right".
+ *
+ * An SVG has a second honest answer — it is a text file — so for those the pane
+ * also offers the source. Drawn as text in the pane, never handed to anything
+ * that would execute it: an `<img>` cannot run script in an SVG, and the source
+ * view is exactly that, source.
  */
 
 import { useEffect, useState } from "react";
-import { assetUrl } from "@/lib/ipc";
-import { fileName } from "@/lib/filetypes";
+import { assetUrl, files } from "@/lib/ipc";
+import { extensionOf, fileName } from "@/lib/filetypes";
 import { cn } from "@/lib/utils";
 import type { ImagePaneState } from "@/state/workspace";
 import type { PaneProps } from "./types";
@@ -22,6 +27,9 @@ export function ImagePane({ pane, onFocus }: PaneProps<ImagePaneState>) {
   const [failed, setFailed] = useState(false);
   const [actualSize, setActualSize] = useState(false);
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+  const vector = extensionOf(pane.path) === "svg";
+  const [source, setSource] = useState<string | null>(null);
+  const [showSource, setShowSource] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,6 +42,19 @@ export function ImagePane({ pane, onFocus }: PaneProps<ImagePaneState>) {
     };
   }, [pane.path]);
 
+  // Read only once the source is actually asked for: most pictures are not
+  // SVGs, and most SVGs are looked at rather than read.
+  useEffect(() => {
+    if (!showSource || source !== null) return;
+    let cancelled = false;
+    void files.readText(pane.path).then((file) => {
+      if (!cancelled) setSource(file?.contents ?? "");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showSource, source, pane.path]);
+
   return (
     <div className="flex h-full w-full flex-col bg-surface-0" onMouseDown={onFocus}>
       <div className="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-surface-1 px-2">
@@ -45,22 +66,42 @@ export function ImagePane({ pane, onFocus }: PaneProps<ImagePaneState>) {
             {dimensions.width}×{dimensions.height}
           </span>
         ) : null}
-        <button
-          type="button"
-          onClick={() => setActualSize((value) => !value)}
-          className="shrink-0 rounded-sm border border-hairline-strong px-1.5 text-[length:var(--fs-10)] text-ink-2 hover:bg-surface-2 hover:text-ink-1"
-        >
-          {actualSize ? "Fit" : "1:1"}
-        </button>
+        {vector ? (
+          <button
+            type="button"
+            title={showSource ? "Show the picture" : "Show the SVG source"}
+            onClick={() => setShowSource((value) => !value)}
+            className="shrink-0 rounded-sm border border-hairline-strong px-1.5 text-[length:var(--fs-10)] text-ink-2 hover:bg-surface-2 hover:text-ink-1"
+          >
+            {showSource ? "Preview" : "Raw"}
+          </button>
+        ) : null}
+        {showSource ? null : (
+          <button
+            type="button"
+            onClick={() => setActualSize((value) => !value)}
+            className="shrink-0 rounded-sm border border-hairline-strong px-1.5 text-[length:var(--fs-10)] text-ink-2 hover:bg-surface-2 hover:text-ink-1"
+          >
+            {actualSize ? "Fit" : "1:1"}
+          </button>
+        )}
       </div>
 
       <div
         className={cn(
           "min-h-0 flex-1",
-          actualSize ? "overflow-auto" : "flex items-center justify-center overflow-hidden p-3",
+          showSource
+            ? "overflow-hidden"
+            : actualSize
+              ? "overflow-auto"
+              : "flex items-center justify-center overflow-hidden p-3",
         )}
       >
-        {failed ? (
+        {showSource ? (
+          <pre className="h-full w-full overflow-auto whitespace-pre-wrap p-3 font-mono text-[length:var(--fs-11)] text-ink-2">
+            {source ?? ""}
+          </pre>
+        ) : failed ? (
           <p className="p-4 font-mono text-[length:var(--fs-11)] text-danger">
             {fileName(pane.path)} could not be displayed.
           </p>
