@@ -34,10 +34,11 @@
  * with nothing to tell apart, "this pane" and "this tab" are the same request.
  */
 
-import { forwardRef, useImperativeHandle } from "react";
-import { Columns2, Layers, Move, PictureInPicture2, Palette, Plus } from "lucide-react";
+import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
+import { AppWindow, Columns2, Layers, Move, PictureInPicture2, Palette, Plus } from "lucide-react";
 
 import { useSettings } from "@/lib/useSettings";
+import { otherWindows, type WindowRef } from "@/lib/windows";
 import { cn } from "@/lib/utils";
 import { NEW_PANE_MENU, paneKind } from "@/panes/registry";
 import { countPanes, paneIds } from "@/state/tree";
@@ -68,6 +69,8 @@ export interface PaneMenuActions {
   onPaneTheme: (paneId: string, theme: ThemeChoice | undefined) => void;
   /** Send this pane somewhere else in this window, keeping it running. */
   onMovePane: (paneId: string, to: MoveTarget) => void;
+  /** Send it to another window, or to a new one when the label is `null`. */
+  onMoveToWindow: (paneId: string, label: string | null) => void;
 }
 
 interface PaneMenuProps {
@@ -109,6 +112,26 @@ export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneM
   const others = tabs.filter((other) => other.id !== tab?.id);
 
   useImperativeHandle(ref, () => ({ openAt: menu.revealAt }), [menu.revealAt]);
+
+  /**
+   * The other windows, asked for while the menu is open.
+   *
+   * Not held in the app's state: windows are opened and closed by the platform
+   * as much as by this app, and a list kept up to date all session long would
+   * be a subscription maintained for a submenu almost nobody opens. Asking at
+   * the moment of the question is both simpler and more accurate.
+   */
+  const [windows, setWindows] = useState<WindowRef[]>([]);
+  useEffect(() => {
+    if (!menu.open) return;
+    let cancelled = false;
+    void otherWindows().then((found) => {
+      if (!cancelled) setWindows(found);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [menu.open]);
 
   // The two levels this icon can be standing for, told apart in one place so
   // the menu below reads the same whichever it is. A floating pane has no tab,
@@ -206,6 +229,28 @@ export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneM
                 ))}
               </MenuSubmenu>
             ) : null}
+
+            <MenuSubmenu icon={AppWindow} label="Other windows">
+              {windows.map((other) => (
+                <MenuItem
+                  key={other.label}
+                  icon={AppWindow}
+                  label={other.title || other.label}
+                  onSelect={() => {
+                    menu.close();
+                    actions.onMoveToWindow(pane.id, other.label);
+                  }}
+                />
+              ))}
+              <MenuItem
+                icon={Plus}
+                label="New window"
+                onSelect={() => {
+                  menu.close();
+                  actions.onMoveToWindow(pane.id, null);
+                }}
+              />
+            </MenuSubmenu>
 
             <MenuSubmenu icon={Layers} label="Tabs">
               {others.map((destination) => {

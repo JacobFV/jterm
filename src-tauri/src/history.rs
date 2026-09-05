@@ -432,7 +432,10 @@ pub fn export(store: &Store, dest: &str) -> Result<ExportSummary, String> {
 
     // The workspace: tabs, the split layout, and every pane's unsubmitted
     // prompt, exactly as the crash-recovery snapshot holds them.
-    if let Some(text) = store.load_session() {
+    // The main window's, which is the one an export means: it is the file the
+    // app restores from, and the format has carried exactly one of them since
+    // it was defined.
+    if let Some(text) = store.load_session(crate::store::MAIN_WINDOW) {
         match serde_json::from_str::<Value>(&text) {
             Ok(value) => push(line("session", vec![("data", value)])),
             // A snapshot that will not parse is still worth carrying across;
@@ -579,7 +582,7 @@ pub fn import(store: &Store, src: &str) -> Result<Option<String>, String> {
     }
     if let Some(snapshot) = &session {
         store
-            .save_session(snapshot)
+            .save_session(crate::store::MAIN_WINDOW, snapshot)
             .map_err(|err| format!("cannot restore the session: {err}"))?;
     }
 
@@ -882,6 +885,7 @@ mod tests {
         let (store, root) = temp_store();
         store
             .save_session(
+                crate::store::MAIN_WINDOW,
                 r#"{"version":1,"workspace":{"tabs":[{"id":"tab","panes":{"abc":{"id":"abc","kind":"terminal"}},"root":{"id":"leaf","kind":"leaf","paneId":"abc"},"focusedPaneId":"abc"}],"activeTabId":"tab"},"content":{}}"#,
             )
             .unwrap();
@@ -946,21 +950,28 @@ mod tests {
     fn invalid_raw_session_is_reported_and_does_not_replace_the_saved_one() {
         let (store, root) = temp_store();
         let original = r#"{"version":1,"workspace":{"tabs":[]}}"#;
-        store.save_session(original).unwrap();
+        store
+            .save_session(crate::store::MAIN_WINDOW, original)
+            .unwrap();
         let dest = root.join("invalid-session.jsonl");
         fs::write(&dest, r#"{"kind":"session_raw","text":"this is not json"}"#).unwrap();
 
         let error = import(&store, dest.to_str().unwrap()).unwrap_err();
 
         assert!(error.contains("invalid session on line 1"));
-        assert_eq!(store.load_session().as_deref(), Some(original));
+        assert_eq!(
+            store.load_session(crate::store::MAIN_WINDOW).as_deref(),
+            Some(original)
+        );
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn structurally_unrestorable_session_is_rejected_before_other_writes() {
         let (store, root) = temp_store();
-        store.save_session(r#"{"old":true}"#).unwrap();
+        store
+            .save_session(crate::store::MAIN_WINDOW, r#"{"old":true}"#)
+            .unwrap();
         let dest = root.join("invalid-shape.jsonl");
         fs::write(
             &dest,
@@ -974,7 +985,10 @@ mod tests {
         let error = import(&store, dest.to_str().unwrap()).unwrap_err();
 
         assert!(error.contains("no restorable tabs"));
-        assert_eq!(store.load_session().as_deref(), Some(r#"{"old":true}"#));
+        assert_eq!(
+            store.load_session(crate::store::MAIN_WINDOW).as_deref(),
+            Some(r#"{"old":true}"#)
+        );
         assert_eq!(read(&store, "abc"), "");
         let _ = fs::remove_dir_all(root);
     }
@@ -983,7 +997,9 @@ mod tests {
     fn import_checks_an_over_deep_second_branch_even_when_the_first_is_valid() {
         let (store, root) = temp_store();
         let original = r#"{"old":true}"#;
-        store.save_session(original).unwrap();
+        store
+            .save_session(crate::store::MAIN_WINDOW, original)
+            .unwrap();
         let leaf = serde_json::json!({"kind": "leaf", "id": "leaf", "paneId": "abc"});
         let mut deep = leaf.clone();
         for index in 0..=MAX_SNAPSHOT_TREE_DEPTH {
@@ -1018,7 +1034,10 @@ mod tests {
         let error = import(&store, dest.to_str().unwrap()).unwrap_err();
 
         assert!(error.contains("invalid or over-complex tab"));
-        assert_eq!(store.load_session().as_deref(), Some(original));
+        assert_eq!(
+            store.load_session(crate::store::MAIN_WINDOW).as_deref(),
+            Some(original)
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1026,7 +1045,9 @@ mod tests {
     fn import_checks_a_deep_second_tab_even_when_the_first_tab_is_valid() {
         let (store, root) = temp_store();
         let original = r#"{"old":true}"#;
-        store.save_session(original).unwrap();
+        store
+            .save_session(crate::store::MAIN_WINDOW, original)
+            .unwrap();
         let leaf = serde_json::json!({"kind": "leaf", "id": "leaf", "paneId": "abc"});
         let mut deep = leaf.clone();
         for index in 0..=MAX_SNAPSHOT_TREE_DEPTH {
@@ -1065,7 +1086,10 @@ mod tests {
         let error = import(&store, dest.to_str().unwrap()).unwrap_err();
 
         assert!(error.contains("invalid or over-complex tab"));
-        assert_eq!(store.load_session().as_deref(), Some(original));
+        assert_eq!(
+            store.load_session(crate::store::MAIN_WINDOW).as_deref(),
+            Some(original)
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

@@ -57,8 +57,16 @@ import { terminalHandle } from "@/lib/terminals";
 import { isTmuxAction, runControlAction, runTmuxAction, tmuxAvailable } from "@/lib/tmux";
 import type { TmuxSessionShape } from "@/lib/tmuxControl";
 import { useSettings } from "@/lib/useSettings";
+import {
+  announceReady,
+  isMainWindow,
+  onPaneHandover,
+  openWorkspaceWindow,
+  restoreWorkspaceWindow,
+  sendPaneToWindow,
+} from "@/lib/windows";
 import { disposePane } from "@/panes/registry";
-import { loadContent, onContentChange, snapshotContent } from "@/state/content";
+import { dropContent, getContent, loadContent, onContentChange, snapshotContent, updateContent } from "@/state/content";
 import { decode, encode, type Snapshot } from "@/state/snapshot";
 import { getSettings, zoomText, type FileOpenTarget } from "@/state/settings";
 import { type Direction, splitPlacement } from "@/state/tree";
@@ -73,6 +81,7 @@ import {
   locatePane,
   paneLabel,
   reduce,
+  tabLabel,
   themeOf,
 } from "@/state/workspace";
 
@@ -190,10 +199,19 @@ interface CloseableWindow {
   destroy: () => Promise<void>;
 }
 
-/** Build the one-at-a-time close transaction used by Tauri's window event. */
+/**
+ * Build the one-at-a-time close transaction used by Tauri's window event.
+ *
+ * `forget` is what makes an extra window's snapshot go away when the window
+ * does. It is deliberately not offered for the main window: that file is the
+ * app's own restore point and closing it is how you quit, so the asymmetry is
+ * the same one tmux sessions get — what comes back after a restart is exactly
+ * what was never closed on purpose.
+ */
 export function createCloseRequestHandler(
   win: CloseableWindow,
   getWorkspace: () => Workspace,
+  forget: () => Promise<void> = async () => {},
 ): (event: CloseRequestEvent) => Promise<void> {
   let closing = false;
   return async (event) => {
@@ -219,6 +237,9 @@ export function createCloseRequestHandler(
       }
 
       await flushPersistence();
+      // After the flush, so a window that fails to be forgotten still has a
+      // snapshot worth reopening rather than a stale one.
+      await forget();
       await win.destroy();
     } finally {
       // A cancelled prompt or failed flush leaves the window usable and lets a
@@ -271,6 +292,25 @@ export function App() {
     setTabTheme(front?.theme);
   }, [front?.theme]);
 
+  /**
+   * Name the window after what is in it.
+   *
+   * It was "jterm" and nothing else until there could be more than one window,
+   * at which point the title stopped being decoration: it is what the desktop's
+   * window list shows, and what jterm's own "move this pane to…" menu has to
+   * tell two windows apart by.
+   */
+  const windowName = front ? tabLabel(front) : "jterm";
+  useEffect(() => {
+    const title = windowName === "jterm" ? "jterm" : `${windowName} — jterm`;
+    document.title = title;
+    if (!isTauri()) return;
+    void (async () => {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await getCurrentWindow().setTitle(title);
+    })();
+  }, [windowName]);
+
   /* ── Restore ──────────────────────────────────────────────────────── */
 
   useEffect(() => {
@@ -282,7 +322,34 @@ export function App() {
         loadContent(snapshot.content);
         dispatch({ type: "restore", workspace: snapshot.workspace });
       }
-      const live = livePaneIds(snapshot?.workspace ?? initialRef.current);
+      setLoaded(true);
+      // Other windows can hand panes over as soon as this one is listening,
+      // and a window opened *in order* to receive one is waiting on this.
+      void announceReady();
+      if (snapshot) reattachRef.current(snapshot.controlSessions);
+
+      // Pruning and reopening are the main window's alone. Every window would
+      // otherwise prune against its own panes and delete the scrollback of
+      // every pane in every other window — and every window would reopen every
+      // other, forever.
+      if (!isMainWindow()) return;
+
+      const others = await session.windows();
+      const live = [
+        ...livePaneIds(snapshot?.workspace ?? initialRef.current),
+        // The panes of the windows about to be reopened. Read off disk rather
+        // than waited for: those windows do not exist yet, and their logs must
+        // survive until they do.
+        ...(
+          await Promise.all(
+            others.map(async (label) => {
+              const other = decode(await session.loadWindow(label));
+              return other === null ? [] : livePaneIds(other.workspace);
+            }),
+          )
+        ).flat(),
+      ];
+
       // Anything on disk or in the window belonging to a pane that no longer
       // exists is from a session that ended badly. Nothing else will clean it.
       //
@@ -292,10 +359,29 @@ export function App() {
       // are about to come back.
       void scrollbackApi.prune(live);
       void historyApi.prune(live);
-      setLoaded(true);
-      if (snapshot) reattachRef.current(snapshot.controlSessions);
+
+      for (const label of others) void restoreWorkspaceWindow(label);
     })();
   }, []);
+
+  /**
+   * A pane handed over by another window.
+   *
+   * Its content is installed before the pane is, so the terminal that is about
+   * to mount finds its draft where it expects it — the same order the restore
+   * above uses, for the same reason. Nothing is spawned: `TerminalPane` will
+   * find the shell still running and adopt it. See `lib/windows`.
+   */
+  useEffect(
+    () =>
+      onPaneHandover(({ pane, content, as }) => {
+        if (content.draft !== undefined || content.text !== undefined) {
+          updateContent(pane.id, content);
+        }
+        dispatch({ type: "pane/adopt", pane, as });
+      }),
+    [],
+  );
 
   /**
    * A session imported from the settings window.
@@ -316,6 +402,10 @@ export function App() {
       );
     });
     void listen<string>(SESSION_IMPORTED_EVENT, (snapshot) => {
+      // The event reaches every window; an import replaces *the* session, and
+      // the main window is the one whose snapshot that means. Without this,
+      // three windows would each build the same tabs from it.
+      if (!isMainWindow()) return;
       const restored = decode(snapshot);
       if (!restored) return;
       // Events can arrive again while teardown is in flight. Serialize them so
@@ -584,6 +674,48 @@ export function App() {
     [confirmDiscard],
   );
 
+  /**
+   * Hand a pane to another window, or to one opened for it.
+   *
+   * The order matters and is the whole of the risk: the pane is removed here
+   * only once the other window has confirmed the handover. A pane taken out
+   * first and delivered nowhere would be a shell still running with nothing on
+   * screen attached to it and no way to get back to it. Nothing is disposed —
+   * `pane/eject` exists precisely so that leaving cannot be mistaken for
+   * being killed.
+   */
+  const moveToWindow = useCallback(async (paneId: string, label: string | null) => {
+    const found = locatePane(workspaceRef.current, paneId);
+    if (found === null) return;
+
+    // A window opened for this pane is not listening the moment it exists, so
+    // the handover waits for it to say it has mounted. If it never does, the
+    // pane stays exactly where it is.
+    const opened = label === null ? await openWorkspaceWindow() : null;
+    const target = label ?? opened?.label ?? null;
+    if (target === null) return;
+    if (opened !== null) {
+      const up = await opened.ready.then(
+        () => true,
+        () => false,
+      );
+      if (!up) return;
+    }
+
+    const sent = await sendPaneToWindow(target, {
+      pane: found.pane,
+      content: getContent(paneId),
+      // It arrives as whatever it already was: floating stays floating.
+      as: found.tabId === null ? "popup" : "tab",
+    });
+    if (!sent) return;
+
+    dispatch({ type: "pane/eject", paneId });
+    // The content has been handed over; keeping a copy here would put the note
+    // back into this window's snapshot as a pane that is no longer in it.
+    dropContent(paneId);
+  }, []);
+
   const paneMenu = useMemo<PaneMenuActions>(
     () => ({
       onReplace: (paneId, kind) => void replacePane(paneId, kind),
@@ -596,6 +728,7 @@ export function App() {
       // A move is not a close: the pane keeps its id and the shell behind it
       // never notices, so there is nothing to confirm and nothing to dispose.
       onMovePane: (paneId, to) => dispatch({ type: "pane/moveTo", paneId, to }),
+      onMoveToWindow: (paneId, label) => void moveToWindow(paneId, label),
       // Nothing is destroyed by this one, so it needs no confirmation and no
       // disposal — see `tab/absorb`.
       onAbsorbTab: (tabId, paneId, sourceTabId) =>
@@ -610,7 +743,7 @@ export function App() {
       onTabTheme: (tabId, theme) => dispatch({ type: "tab/theme", tabId, theme }),
       onPaneTheme: (paneId, theme) => dispatch({ type: "pane/theme", paneId, theme }),
     }),
-    [replacePane],
+    [replacePane, moveToWindow],
   );
 
   /* ── Dragging a tab into the workspace ────────────────────────────── */
@@ -670,7 +803,13 @@ export function App() {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       const win = getCurrentWindow();
       const stop = await win.onCloseRequested(
-        createCloseRequestHandler(win, () => workspaceRef.current),
+        createCloseRequestHandler(
+          win,
+          () => workspaceRef.current,
+          async () => {
+            if (!isMainWindow()) await session.drop();
+          },
+        ),
       );
       if (disposed) stop();
       else unlisten = stop;

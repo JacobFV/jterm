@@ -135,9 +135,24 @@ export const TMUX_WINDOWS_EVENT = "tmux://windows";
 /** Raised when a control session ends, however it ended. */
 export const TMUX_CLOSED_EVENT = "tmux://closed";
 
+/**
+ * The session snapshot, which is per *window*.
+ *
+ * `save` and `load` are always about the window that called them — the backend
+ * takes the label from the webview rather than from an argument, so no window
+ * can write over another's file. `loadWindow` is the one exception, and exists
+ * for the one job that needs it: the main window reads the others' snapshots at
+ * launch to work out which panes are still live before pruning anything.
+ */
 export const session = {
   save: (json: string) => call("session_save", { json }, undefined),
   load: (): Promise<string | null> => call("session_load", {}, null),
+  /** Forget this window's snapshot, because it was closed on purpose. */
+  drop: () => call("session_drop", {}, undefined),
+  /** The labels of extra windows with a snapshot, for the main one to reopen. */
+  windows: (): Promise<string[]> => call("session_windows", {}, []),
+  loadWindow: (label: string): Promise<string | null> =>
+    call("session_load_window", { label }, null),
   dir: (): Promise<string> => call("session_dir", {}, ""),
 };
 

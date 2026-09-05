@@ -294,6 +294,17 @@ function decodeTheme(raw: unknown): ThemeChoice | undefined {
 
 const KINDS: PaneKind[] = ["terminal", "notepad", "browser", "image", "media", "model"];
 
+/**
+ * One pane, validated.
+ *
+ * Exported because the session file is no longer the only place a pane arrives
+ * from as loose data: a pane handed over from another window comes off the
+ * event bus, and deserves exactly the same suspicion. See `lib/windows`.
+ */
+export function decodePaneState(id: string, raw: unknown): PaneState | null {
+  return decodePane(id, raw);
+}
+
 function decodePane(id: string, raw: unknown): PaneState | null {
   if (!isRecord(raw)) return null;
   const kind = raw.kind;

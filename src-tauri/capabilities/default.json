@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What jterm's windows are allowed to ask of the system.",
+  "description": "What jterm's windows are allowed to ask of the system. `w-*` is a workspace window opened during the session: it is the same page as `main` and needs the same permissions, so the pattern is here rather than a second capability that would drift from this one.",
   "windows": [
     "main",
-    "settings"
+    "settings",
+    "w-*"
   ],
   "permissions": [
     "core:default",
@@ -30,6 +31,10 @@
     "core:window:allow-destroy",
     "dialog:allow-confirm",
     "dialog:allow-message",
-    "opener:allow-open-path"
+    "opener:allow-open-path",
+    "core:event:allow-emit-to",
+    "core:event:allow-unlisten",
+    "core:webview:allow-get-all-webviews",
+    "core:window:allow-title"
   ]
 }

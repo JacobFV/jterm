@@ -146,6 +146,9 @@ pub fn run() {
             control::tmux_control_capture,
             store::session_save,
             store::session_load,
+            store::session_load_window,
+            store::session_drop,
+            store::session_windows,
             store::session_dir,
             store::settings_save,
             store::settings_load,
@@ -176,6 +179,23 @@ pub fn run() {
                 recover::install(&window);
             }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // A workspace window opened during the session needs the same two
+            // hooks the main one is given in `setup`, and there is no "window
+            // created" callback to hang them on. Its first focus is the
+            // earliest moment the platform handle is certainly real, and
+            // installing twice is not a problem: both hooks replace whatever
+            // they had rather than stacking.
+            if let tauri::WindowEvent::Focused(true) = event {
+                use tauri::Manager;
+                if window.label() != "main" && window.label() != "settings" {
+                    if let Some(webview) = window.get_webview_window(window.label()) {
+                        window_chrome::snap::install(&webview);
+                        recover::install(&webview);
+                    }
+                }
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running jterm");

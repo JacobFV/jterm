@@ -38,6 +38,19 @@ const FLUSH_BYTES: usize = 64 * 1024;
 /// one place so scrollback cannot accidentally accept a path that history
 /// rejects (particularly during import, where ids come from an arbitrary
 /// file).
+/// The window whose snapshot is the app's own restore point.
+pub const MAIN_WINDOW: &str = "main";
+
+/// Window labels become filenames, so they are held to the same rule pane ids
+/// are: nothing that could climb out of the directory, nothing unbounded.
+pub(crate) fn valid_window_label(label: &str) -> bool {
+    !label.is_empty()
+        && label.len() <= 64
+        && label
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+}
+
 pub(crate) fn valid_pane_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
 }
@@ -68,8 +81,18 @@ impl Store {
         &self.root
     }
 
-    fn session_path(&self) -> PathBuf {
-        self.root.join("session.json")
+    /// Where one window's snapshot lives.
+    ///
+    /// The main window keeps `session.json`, unchanged and unversioned, because
+    /// it is the file every previous release wrote and reading it back is how a
+    /// session survives an upgrade. Every other window gets a file named after
+    /// its label beside it.
+    fn session_path(&self, window: &str) -> PathBuf {
+        if window == MAIN_WINDOW {
+            self.root.join("session.json")
+        } else {
+            self.root.join(format!("session-{window}.json"))
+        }
     }
 
     fn settings_path(&self) -> PathBuf {
@@ -85,13 +108,48 @@ impl Store {
 
     /* ── Session snapshot ────────────────────────────────────────────── */
 
-    /// Replace the snapshot atomically and durably.
-    pub fn save_session(&self, json: &str) -> std::io::Result<()> {
-        self.write_atomic(&self.session_path(), json)
+    /// Replace one window's snapshot atomically and durably.
+    pub fn save_session(&self, window: &str, json: &str) -> std::io::Result<()> {
+        self.write_atomic(&self.session_path(window), json)
     }
 
-    pub fn load_session(&self) -> Option<String> {
-        fs::read_to_string(self.session_path()).ok()
+    pub fn load_session(&self, window: &str) -> Option<String> {
+        fs::read_to_string(self.session_path(window)).ok()
+    }
+
+    /// Forget a window's snapshot, because the window was closed on purpose.
+    ///
+    /// The asymmetry this creates is the feature, and it is the same one tmux
+    /// sessions get: a window you closed stays closed, and a window that was
+    /// taken from you by a crash comes back. The main window is exempt — its
+    /// file is the app's own restore point, and closing it is how you quit.
+    pub fn drop_session(&self, window: &str) {
+        if window == MAIN_WINDOW {
+            return;
+        }
+        let _ = fs::remove_file(self.session_path(window));
+    }
+
+    /// The labels of the extra windows that have a snapshot on disk.
+    ///
+    /// What the main window reopens at launch. The main window itself is never
+    /// in the list: it exists before anything here is asked.
+    pub fn session_windows(&self) -> Vec<String> {
+        let Ok(entries) = fs::read_dir(&self.root) else {
+            return Vec::new();
+        };
+        let mut labels: Vec<String> = entries
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().into_string().ok()?;
+                let label = name.strip_prefix("session-")?.strip_suffix(".json")?;
+                valid_window_label(label).then(|| label.to_string())
+            })
+            .collect();
+        // Sorted so the windows come back in a stable order rather than in
+        // whatever order the directory happens to be read in.
+        labels.sort();
+        labels
     }
 
     /* ── Settings ────────────────────────────────────────────────────── */
@@ -334,16 +392,54 @@ fn rename_replacing(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /* ── Commands ────────────────────────────────────────────────────────────── */
 
+/// Which window is asking.
+///
+/// Taken from the webview that made the call rather than from an argument: a
+/// window's snapshot is its own, and there is no reason for one window to be
+/// able to name another's file. An unrecognisable label falls back to the main
+/// window's file, which is the safe end of the mistake — a session in the wrong
+/// place beats a session written to a path built out of an arbitrary string.
+fn window_key(window: &tauri::Window) -> String {
+    let label = window.label();
+    if valid_window_label(label) {
+        label.to_string()
+    } else {
+        MAIN_WINDOW.to_string()
+    }
+}
+
 #[tauri::command]
-pub fn session_save(store: tauri::State<'_, Arc<Store>>, json: String) -> Result<(), String> {
+pub fn session_save(
+    window: tauri::Window,
+    store: tauri::State<'_, Arc<Store>>,
+    json: String,
+) -> Result<(), String> {
     store
-        .save_session(&json)
+        .save_session(&window_key(&window), &json)
         .map_err(|err| format!("could not save the session: {err}"))
 }
 
 #[tauri::command]
-pub fn session_load(store: tauri::State<'_, Arc<Store>>) -> Option<String> {
-    store.load_session()
+pub fn session_load(window: tauri::Window, store: tauri::State<'_, Arc<Store>>) -> Option<String> {
+    store.load_session(&window_key(&window))
+}
+
+/// One window's snapshot, read by the window that reopens the others at launch.
+#[tauri::command]
+pub fn session_load_window(store: tauri::State<'_, Arc<Store>>, label: String) -> Option<String> {
+    valid_window_label(&label)
+        .then(|| store.load_session(&label))
+        .flatten()
+}
+
+#[tauri::command]
+pub fn session_drop(window: tauri::Window, store: tauri::State<'_, Arc<Store>>) {
+    store.drop_session(&window_key(&window));
+}
+
+#[tauri::command]
+pub fn session_windows(store: tauri::State<'_, Arc<Store>>) -> Vec<String> {
+    store.session_windows()
 }
 
 #[tauri::command]
@@ -412,22 +508,76 @@ mod tests {
     #[test]
     fn a_saved_session_reads_back() {
         let (store, root) = temp_store();
-        store.save_session(r#"{"tabs":[]}"#).unwrap();
-        assert_eq!(store.load_session().as_deref(), Some(r#"{"tabs":[]}"#));
+        store.save_session(MAIN_WINDOW, r#"{"tabs":[]}"#).unwrap();
+        assert_eq!(
+            store.load_session(MAIN_WINDOW).as_deref(),
+            Some(r#"{"tabs":[]}"#)
+        );
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn saving_twice_leaves_no_temporary_behind() {
         let (store, root) = temp_store();
-        store.save_session("{}").unwrap();
-        store.save_session(r#"{"a":1}"#).unwrap();
-        assert_eq!(store.load_session().as_deref(), Some(r#"{"a":1}"#));
+        store.save_session(MAIN_WINDOW, "{}").unwrap();
+        store.save_session(MAIN_WINDOW, r#"{"a":1}"#).unwrap();
+        assert_eq!(
+            store.load_session(MAIN_WINDOW).as_deref(),
+            Some(r#"{"a":1}"#)
+        );
         assert!(
             !root.join("session.json.tmp").exists(),
             "the temporary file must be renamed away, not left as litter"
         );
         let _ = fs::remove_dir_all(root);
+    }
+
+    /// Each window's snapshot is its own file, and the main window keeps the
+    /// name every earlier release wrote — that file is how a session survives
+    /// an upgrade.
+    #[test]
+    fn windows_keep_their_own_snapshots() {
+        let (store, root) = temp_store();
+        store.save_session(MAIN_WINDOW, r#"{"w":"main"}"#).unwrap();
+        store.save_session("w-abc", r#"{"w":"second"}"#).unwrap();
+
+        assert!(root.join("session.json").exists());
+        assert!(root.join("session-w-abc.json").exists());
+        assert_eq!(
+            store.load_session("w-abc").as_deref(),
+            Some(r#"{"w":"second"}"#)
+        );
+        assert_eq!(store.session_windows(), vec!["w-abc".to_string()]);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// A window closed on purpose stays closed; the main window's file is the
+    /// app's restore point and is never dropped, because closing it is how you
+    /// quit.
+    #[test]
+    fn dropping_forgets_a_window_but_never_the_main_one() {
+        let (store, root) = temp_store();
+        store.save_session(MAIN_WINDOW, "{}").unwrap();
+        store.save_session("w-abc", "{}").unwrap();
+
+        store.drop_session("w-abc");
+        assert!(store.session_windows().is_empty());
+
+        store.drop_session(MAIN_WINDOW);
+        assert_eq!(store.load_session(MAIN_WINDOW).as_deref(), Some("{}"));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// The label reaches the filesystem, so anything that could climb out of
+    /// the directory is refused rather than sanitised into something else.
+    #[test]
+    fn refuses_a_window_label_that_is_a_path() {
+        assert!(valid_window_label("w-abc"));
+        assert!(!valid_window_label("../../etc/passwd"));
+        assert!(!valid_window_label(""));
+        assert!(!valid_window_label(&"w".repeat(65)));
     }
 
     #[test]
