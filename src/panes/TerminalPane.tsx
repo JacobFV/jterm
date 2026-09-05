@@ -37,6 +37,7 @@ import {
   openExternal,
   pty,
   scrollback as scrollbackApi,
+  tmux as tmuxApi,
   tmuxControl as tmuxControlApi,
 } from "@/lib/ipc";
 import { isLinkActivation, linkTarget } from "@/lib/links";
@@ -655,6 +656,24 @@ export function TerminalPane({
           : undefined;
       if (disposed) return;
 
+      /**
+       * Whether the tmux session behind this pane is *already running*.
+       *
+       * `new-session -A` attaches or creates and never says which, and the
+       * difference is the whole of what restoring means here. A session that
+       * survived redraws the screen itself and still holds the half-typed line,
+       * so jterm must stay out of the way. A session that died with the machine
+       * is a brand-new empty one wearing the same name — and that pane deserves
+       * everything a plain shell would get back: its scrollback, and the
+       * command it was in the middle of.
+       *
+       * False for a pane that is not tmux-backed at all, and for a brand-new
+       * pane, where both of those come to nothing anyway.
+       */
+      const sessionAlive =
+        sessionRef.current !== undefined && (await tmuxApi.hasSession(sessionRef.current));
+      if (disposed) return;
+
       // Asked before anything is drawn, because the answer changes what the
       // pane does next. A mount is not always a new pane: the webview reloads
       // after WebKit's renderer dies (see `recover.rs`), and every pane in the
@@ -673,10 +692,12 @@ export function TerminalPane({
       const adopted = await pty.attach(paneId, term.cols, term.rows);
       if (disposed) return;
 
-      // Neither of these is right in front of a tmux attach. The log would
-      // paint a picture of the session that tmux is about to redraw properly,
-      // and the draft belongs to a shell that still has it.
-      if (sessionRef.current === undefined) {
+      // Neither of these is right in front of a *live* tmux session. The log
+      // would paint a picture of the session that tmux is about to redraw
+      // properly, and the draft belongs to a shell that still has it. A session
+      // that is gone leaves nothing to argue with, so the pane is restored the
+      // way a plain shell's would be.
+      if (!sessionAlive) {
         // Scrollback first, so the shell's new prompt lands underneath the
         // output it is continuing from rather than on top of it. On an adopt
         // this is also the only copy of what the shell printed while there was
@@ -725,13 +746,13 @@ export function TerminalPane({
       // that is still running still has it sitting in its line editor —
       // echoed, so it is in the scrollback written out above too. Replaying it
       // would type the half-finished command a second time.
-      if (!adopted && sessionRef.current === undefined) {
+      if (!adopted && !sessionAlive) {
         // The half-typed line if there was one; otherwise the session this pane
         // was in the middle of. Only reached when the shell did *not* survive
-        // — the machine went down, or the app was quit — which is exactly when
-        // "what was I doing" is worth answering. It is typed and not run, the
-        // same promise the draft line makes: `claude --continue` sitting at the
-        // prompt is an offer, not an action.
+        // — no pty to adopt and no tmux session still standing — which is
+        // exactly when "what was I doing" is worth answering. It is typed and
+        // not run, the same promise the draft line makes: `claude --continue`
+        // sitting at the prompt is an offer, not an action.
         armReplay(initialRef.current.draft || initialRef.current.resume || "");
       }
       // The prompt lands shortly after this; a repaint once the pane has

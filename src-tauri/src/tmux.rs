@@ -121,6 +121,33 @@ pub fn tmux_available() -> bool {
     available()
 }
 
+/// Whether a session is running right now.
+///
+/// The question a restoring pane asks before it decides what "restore" means.
+/// `new-session -A` hides the difference between attaching and creating, which
+/// is exactly right for starting a shell and exactly wrong for knowing whether
+/// the *work* survived: a session that is still there brings the process back
+/// and needs nothing else, while one that died with the machine leaves a pane
+/// that should be given its scrollback and its last command again.
+///
+/// `=` is tmux's exact-match prefix. Without it a session called `jterm-ab12`
+/// would answer for `jterm-ab1`, and a pane would decide its shell survived
+/// because a different pane's did.
+#[tauri::command]
+pub fn tmux_has_session(name: String) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let Some(tmux) = program() else {
+        return false;
+    };
+    Command::new(tmux)
+        .args(["has-session", "-t", &format!("={name}")])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 pub fn tmux_sessions() -> Vec<TmuxSession> {
     let Some(stdout) = run(&["list-sessions", "-F", FIELDS]) else {

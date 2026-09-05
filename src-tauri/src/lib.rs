@@ -136,6 +136,7 @@ pub fn run() {
             pty::pty_probe,
             pty::pty_attach,
             tmux::tmux_available,
+            tmux::tmux_has_session,
             tmux::tmux_sessions,
             tmux::tmux_pane_command,
             tmux::tmux_kill_session,

@@ -103,6 +103,9 @@ export interface TmuxSession {
  */
 export const tmux = {
   available: (): Promise<boolean> => call("tmux_available", {}, false),
+  /** Whether a session is running *now* — see `tmux_has_session` for why a
+   *  restoring pane has to ask before it decides what restoring means. */
+  hasSession: (name: string): Promise<boolean> => call("tmux_has_session", { name }, false),
   sessions: (): Promise<TmuxSession[]> => call("tmux_sessions", {}, []),
   /** Resolves to whether tmux took the action; false means jterm should. */
   paneCommand: (session: string, action: string): Promise<boolean> =>
