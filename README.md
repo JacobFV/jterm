@@ -20,21 +20,52 @@ runs on your behalf.
   your keystrokes, saved on a short timer, and restored on launch.
 - **Restores scrollback.** Each pane's output is recorded as it arrives, so a
   recovered session shows what was on screen rather than a bare shell.
+- **Keeps the process, not just the picture.** New terminals run on a tmux
+  session of their own where the machine has tmux, so a build, an `ssh` or an
+  agent halfway through a long job is still running after jterm is not. Where
+  the shell *did* die with the machine, the pane comes back with the session it
+  was in the middle of typed at the prompt — `claude --continue`, or the command
+  itself where re-running it is the resume. Typed, never run.
 - **Splits like tmux.** Split, zoom, move focus by direction, resize from the
   keyboard, and drag a pane by its grip to rearrange the layout.
+- **Floats a pane over everything.** A pop-up sits on a rail along the bottom,
+  overlapping the panes rather than displacing them, and *stays there while you
+  switch tabs* — so the file you opened to refer to is still in front of you two
+  tabs later. Drag it along the rail, minimise it to its title bar, or throw it
+  full screen. Files opened from the tree land in one by default; **Settings →
+  Files** changes that.
+- **Moves a pane anywhere without restarting it.** **Move to ▸** on any pane
+  header, pop-up header, or single-pane tab: onto the rail, beside a named pane,
+  into another tab or a new one — or into another window. The pane keeps its id,
+  so the shell behind it never notices it moved.
+- **Opens more than one window.** Each one keeps its own tabs and its own
+  snapshot, and the ones open when a crash took the app come back with it. A
+  window you close on purpose stays closed.
+- **Says what each pane is for.** A tab running Claude Code, one on a production
+  host and one watching a build should not all wear the same terminal glyph.
+  Each pane shows the program it is running — worked out live from the command,
+  from a catalogue covering AI CLIs, editors, builds, containers, Kubernetes,
+  cloud, databases and the rest — and **Icon ▸** pins one by hand at either the
+  pane or the tab level when the guess is not what you meant.
 - **Folds a tab into a split.** Drag a tab out of the strip and drop it on a
   pane: the tab's panes arrive as a split there, keeping the arrangement they
   already had. Nothing restarts — the shells behind them never notice.
 - **Opens more than shells.** A notepad with syntax highlighting and save, a web
   pane, and viewers for images, video, audio and STL meshes. What opens is
-  chosen from the file you picked; *where* it opens — a new tab, or a split on
-  the side you like — is up to you, in Settings → Files.
+  chosen from the file you picked; *where* it opens — a pop-up, a new tab, or a
+  split on the side you like — is up to you, in Settings → Files.
+- **Reads markdown as a document.** A `.md` file opens rendered — tables, code,
+  images beside it on disk, and **mermaid** diagrams drawn in the pane's own
+  palette — with **Raw** one click away and the editor still holding your undo
+  history behind it. SVGs open as pictures with their source a click away. All
+  of it drawn in the pane rather than in an embedded browser, so it works the
+  same on Linux, where nested webviews do not.
 - **Changes what a pane is.** Click a pane's kind icon, in its header or in the
   tab strip, to replace it with a terminal, a notepad, a browser or a file — or
   to move another open tab into that slot. Moving a tab in is an even trade: the
   pane it displaces leaves as a tab of its own, so nothing is destroyed.
-- **Works through tmux, if you already do.** A terminal can run on a tmux
-  session instead of a bare shell, so what survives a crash is the *shell*
+- **Works through tmux, if you already do.** That is what the default backend
+  above is — a session per terminal, so what survives a crash is the *shell*
   rather than a recording of it — and `Mod+D` splits tmux rather than splitting
   around it. Or attach in **control mode**, where a tmux window becomes a jterm
   tab and a tmux pane becomes a real jterm pane: no nested status bar, no tmux
