@@ -95,6 +95,10 @@ impl Store {
         }
     }
 
+    fn recents_path(&self) -> PathBuf {
+        self.root.join("recents.json")
+    }
+
     fn settings_path(&self) -> PathBuf {
         self.root.join("settings.json")
     }
@@ -150,6 +154,79 @@ impl Store {
         // whatever order the directory happens to be read in.
         labels.sort();
         labels
+    }
+
+    /* ── Recently opened, recently closed ────────────────────────────── */
+
+    /// One entry moved to the front of the list.
+    ///
+    /// Read-modify-write here rather than in the frontend because more than one
+    /// window can be open and all of them share this file. A window that read
+    /// the list, added to it and wrote it back would lose whatever another
+    /// window did in between; doing it in the process that owns the file means
+    /// there is one list and one writer.
+    ///
+    /// Entries are opaque: the shape belongs to the frontend, and the only
+    /// field this side knows about is `key`, which is what "the same thing
+    /// again" means. Anything without one is refused rather than stored,
+    /// because an entry that cannot be deduplicated would fill the list with
+    /// copies of itself.
+    pub fn push_recent(&self, entry: &str, limit: usize) -> std::io::Result<()> {
+        let parsed: serde_json::Value = serde_json::from_str(entry)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+        let Some(key) = parsed
+            .get("key")
+            .and_then(|key| key.as_str())
+            .map(str::to_owned)
+        else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "a recent entry needs a key",
+            ));
+        };
+
+        let mut entries = self.recents();
+        entries.retain(|existing| existing.get("key").and_then(|k| k.as_str()) != Some(&key));
+        entries.insert(0, parsed);
+        entries.truncate(limit.clamp(1, 500));
+
+        self.write_atomic(
+            &self.recents_path(),
+            &serde_json::Value::Array(entries).to_string(),
+        )
+    }
+
+    /// Everything remembered, newest first, as it is on disk.
+    pub fn load_recents(&self) -> String {
+        serde_json::Value::Array(self.recents()).to_string()
+    }
+
+    /// Drop one entry, for a file that has gone or a session nobody wants back.
+    pub fn forget_recent(&self, key: &str) -> std::io::Result<()> {
+        let mut entries = self.recents();
+        let before = entries.len();
+        entries.retain(|existing| existing.get("key").and_then(|k| k.as_str()) != Some(key));
+        if entries.len() == before {
+            return Ok(());
+        }
+        self.write_atomic(
+            &self.recents_path(),
+            &serde_json::Value::Array(entries).to_string(),
+        )
+    }
+
+    /// The list as parsed values, or an empty one for a file that is missing,
+    /// unreadable or not an array — none of which is worth an error: the
+    /// recents list is a convenience, and losing it costs a menu.
+    fn recents(&self) -> Vec<serde_json::Value> {
+        fs::read_to_string(self.recents_path())
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|value| match value {
+                serde_json::Value::Array(entries) => Some(entries),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     /* ── Settings ────────────────────────────────────────────────────── */
@@ -442,6 +519,29 @@ pub fn session_windows(store: tauri::State<'_, Arc<Store>>) -> Vec<String> {
     store.session_windows()
 }
 
+/// How much is remembered. Long enough to find last week's session in, short
+/// enough that the menu is a list rather than an archive.
+const RECENTS_LIMIT: usize = 60;
+
+#[tauri::command]
+pub fn recents_list(store: tauri::State<'_, Arc<Store>>) -> String {
+    store.load_recents()
+}
+
+#[tauri::command]
+pub fn recents_push(store: tauri::State<'_, Arc<Store>>, entry: String) -> Result<(), String> {
+    store
+        .push_recent(&entry, RECENTS_LIMIT)
+        .map_err(|err| format!("could not remember that: {err}"))
+}
+
+#[tauri::command]
+pub fn recents_forget(store: tauri::State<'_, Arc<Store>>, key: String) -> Result<(), String> {
+    store
+        .forget_recent(&key)
+        .map_err(|err| format!("could not forget that: {err}"))
+}
+
 #[tauri::command]
 pub fn session_dir(store: tauri::State<'_, Arc<Store>>) -> String {
     store.root().to_string_lossy().into_owned()
@@ -567,6 +667,64 @@ mod tests {
         store.drop_session(MAIN_WINDOW);
         assert_eq!(store.load_session(MAIN_WINDOW).as_deref(), Some("{}"));
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// Newest first, one copy of each thing, and capped.
+    #[test]
+    fn recents_keep_the_last_of_each_thing() {
+        let (store, root) = temp_store();
+        store
+            .push_recent(r#"{"key":"file:/a","label":"a"}"#, 3)
+            .unwrap();
+        store
+            .push_recent(r#"{"key":"file:/b","label":"b"}"#, 3)
+            .unwrap();
+        // The same thing again moves to the front rather than appearing twice.
+        store
+            .push_recent(r#"{"key":"file:/a","label":"a again"}"#, 3)
+            .unwrap();
+
+        let list: serde_json::Value = serde_json::from_str(&store.load_recents()).unwrap();
+        let entries = list.as_array().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["label"], "a again");
+        assert_eq!(entries[1]["label"], "b");
+
+        store.forget_recent("file:/a").unwrap();
+        let after: serde_json::Value = serde_json::from_str(&store.load_recents()).unwrap();
+        assert_eq!(after.as_array().unwrap().len(), 1);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// An entry with no key could not be deduplicated, so it is refused rather
+    /// than allowed to fill the list with copies of itself.
+    #[test]
+    fn recents_refuse_an_entry_with_nothing_to_match_on() {
+        let (store, root) = temp_store();
+        assert!(store.push_recent(r#"{"label":"nameless"}"#, 10).is_err());
+        assert!(store.push_recent("not json at all", 10).is_err());
+        assert_eq!(store.load_recents(), "[]");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// A list that has been hand-edited into nonsense costs the menu, not the
+    /// launch.
+    #[test]
+    fn recents_survive_a_file_that_is_not_a_list() {
+        let (store, root) = temp_store();
+        fs::write(root.join("recents.json"), "{\"not\":\"a list\"}").unwrap();
+        assert_eq!(store.load_recents(), "[]");
+        store.push_recent(r#"{"key":"file:/a"}"#, 10).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&store.load_recents())
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
         let _ = fs::remove_dir_all(root);
     }
 

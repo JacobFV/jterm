@@ -45,6 +45,8 @@ import {
 } from "@/lib/ipc";
 import { kindForPath } from "@/lib/filetypes";
 import { resolve, type ActionId } from "@/lib/keymap";
+import { resumeLine } from "@/lib/programs";
+import { rememberFile, rememberPane, type Recent } from "@/lib/recents";
 import {
   configurePersistence,
   flushPersistence,
@@ -54,6 +56,7 @@ import {
 import { openSettingsWindow } from "@/lib/settingsWindow";
 import { isTauri } from "@/lib/tauri";
 import { terminalHandle } from "@/lib/terminals";
+import { newId } from "@/lib/utils";
 import { isTmuxAction, runControlAction, runTmuxAction, tmuxAvailable } from "@/lib/tmux";
 import type { TmuxSessionShape } from "@/lib/tmuxControl";
 import { useSettings } from "@/lib/useSettings";
@@ -563,6 +566,12 @@ export function App() {
     const tab = activeTab(workspaceRef.current);
     const where = target ?? settings.openFilesIn;
 
+    // Remembered before it is opened, so the list is right even if opening it
+    // fails: what the menu offers is "files you have opened", not "files that
+    // still exist", and a path that has gone is better shown and refused than
+    // quietly missing.
+    rememberFile(path);
+
     // The default, and the reason it is: a file picked out of the tree is
     // usually something to look at *while* carrying on, not something to
     // rearrange the window for.
@@ -586,6 +595,54 @@ export function App() {
     }
     dispatch({ type: "tab/open", kind, seed });
   }, []);
+
+  /**
+   * Put back something that was open before.
+   *
+   * A file is simply opened again, wherever files go. A closed *pane* cannot be
+   * resurrected — the process it held is gone — so what comes back is a pane in
+   * the same place with the command typed at the prompt, which is the same
+   * offer a pane restored after a crash makes and the same promise: the words
+   * are put there, running them is yours.
+   *
+   * The pane's id is minted here rather than in the reducer so the draft can be
+   * put where the pane will look for it. `newPane` spreads the seed over its
+   * own id, which is what makes that possible.
+   */
+  const openRecent = useCallback(
+    (entry: Recent) => {
+      if (entry.kind === "file") {
+        openPath(entry.path);
+        return;
+      }
+
+      if (entry.pane === "browser" && entry.url) {
+        dispatch({ type: "tab/open", kind: "browser", seed: { url: entry.url } });
+        return;
+      }
+      if (entry.pane !== "terminal") {
+        if (entry.path) openPath(entry.path);
+        return;
+      }
+
+      const id = newId();
+      // A tool that can pick its own session up is asked to; anything else is
+      // handed back the line it was running.
+      const line = resumeLine(entry.command) ?? entry.command;
+      if (line) updateContent(id, { draft: line });
+      dispatch({
+        type: "tab/open",
+        kind: "terminal",
+        seed: {
+          id,
+          cwd: entry.cwd,
+          command: entry.command,
+          profile: entry.profile,
+        } as Partial<PaneState>,
+      });
+    },
+    [openPath],
+  );
 
   const openFile = useCallback(
     async (target?: FileOpenTarget) => {
@@ -615,6 +672,9 @@ export function App() {
     async (tabId: string) => {
       const tab = workspaceRef.current.tabs.find((candidate) => candidate.id === tabId);
       if (tab && !(await confirmDiscard(Object.values(tab.panes)))) return;
+      // Remembered on the way out: this is the only moment the pane's own
+      // record of what it was running still exists.
+      if (tab) for (const pane of Object.values(tab.panes)) rememberPane(pane);
       // Disposal happens here rather than in the reducer: killing a shell is not
       // something a pure function should be doing, and a reducer that did it
       // could not be run twice safely.
@@ -636,6 +696,7 @@ export function App() {
       const found = locatePane(workspaceRef.current, paneId);
       if (found === null) return;
       if (!(await confirmDiscard([found.pane]))) return;
+      rememberPane(found.pane);
       await disposePane(found.pane);
       dispatch(
         found.tabId === null
@@ -1079,6 +1140,7 @@ export function App() {
         // The label says "Open file…" under a new-tab button, so it makes a tab
         // whatever the preference says.
         onOpenFile={() => void openFile("tab")}
+        onOpenRecent={openRecent}
         onTmuxSessions={hasTmux ? () => setPickingSession(true) : null}
         paneMenu={paneMenu}
         sidebarOpen={workspace.sidebarOpen}

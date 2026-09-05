@@ -18,15 +18,23 @@
  * one that knows where the panes are.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { Layers, PanelLeft, Plus, Settings as SettingsIcon, X } from "lucide-react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { Clock, History, Layers, PanelLeft, Plus, Settings as SettingsIcon, X } from "lucide-react";
 
+import { kindForPath } from "@/lib/filetypes";
 import { MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
+import { programById, programForCommand } from "@/lib/programs";
+import {
+  listRecents,
+  type Recent,
+  type RecentFile,
+  type RecentSession,
+} from "@/lib/recents";
 import { useIsFullscreen } from "@/lib/useFullscreen";
 import { cn } from "@/lib/utils";
-import { NEW_PANE_MENU } from "@/panes/registry";
+import { NEW_PANE_MENU, paneKind } from "@/panes/registry";
 import { type PaneKind, type Tab, focusedPane, tabLabel } from "@/state/workspace";
-import { Menu, MenuItem, useMenu } from "./Menu";
+import { Menu, MenuItem, MenuSubmenu, useMenu } from "./Menu";
 import { PaneMenu, type PaneMenuActions, type PaneMenuHandle } from "./PaneMenu";
 import type { TabDrag } from "./Workspace";
 import { WindowControls } from "./WindowControls";
@@ -54,6 +62,9 @@ interface TabStripProps {
   onNew: (kind: PaneKind) => void;
   /** Show the file chooser and open whatever comes back. */
   onOpenFile: () => void;
+  /** Put back something the window has had open before — a file, or a pane
+   *  that was closed. See `lib/recents`. */
+  onOpenRecent: (entry: Recent) => void;
   /** Offer the tmux sessions on this machine, or `null` where there is no tmux
    *  — which is Windows, and any machine without it installed. */
   onTmuxSessions: (() => void) | null;
@@ -81,6 +92,7 @@ export function TabStrip({
   onClose,
   onNew,
   onOpenFile,
+  onOpenRecent,
   onTmuxSessions,
   onReorder,
   paneMenu,
@@ -236,7 +248,12 @@ export function TabStrip({
 
         {/* Left gravity: the new-tab control sits against the rightmost tab and
             travels with it, rather than parking at the far edge of the strip. */}
-        <NewTabButton onNew={onNew} onOpenFile={onOpenFile} onTmuxSessions={onTmuxSessions} />
+        <NewTabButton
+          onNew={onNew}
+          onOpenFile={onOpenFile}
+          onOpenRecent={onOpenRecent}
+          onTmuxSessions={onTmuxSessions}
+        />
 
         {/* The window's drag handle, and where a double-click toggles maximise —
             which Tauri wires to the drag region for us. Zero-basis, so it only
@@ -437,13 +454,42 @@ function ChromeButton({
 function NewTabButton({
   onNew,
   onOpenFile,
+  onOpenRecent,
   onTmuxSessions,
 }: {
   onNew: (kind: PaneKind) => void;
   onOpenFile: () => void;
+  onOpenRecent: (entry: Recent) => void;
   onTmuxSessions: (() => void) | null;
 }) {
   const menu = useMenu();
+
+  /**
+   * What has been open before, fetched while the menu is up.
+   *
+   * Asked for at the moment of the question rather than held all session: the
+   * list is shared by every window and changes whenever any of them closes a
+   * tab, and a menu that opens twice a day is not worth a subscription.
+   */
+  const [recents, setRecents] = useState<Recent[]>([]);
+  useEffect(() => {
+    if (!menu.open) return;
+    let cancelled = false;
+    void listRecents().then((found) => {
+      if (!cancelled) setRecents(found);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [menu.open]);
+
+  const sessions = recents.filter((entry): entry is RecentSession => entry.kind === "session");
+  const files = recents.filter((entry): entry is RecentFile => entry.kind === "file");
+
+  const reopen = (entry: Recent) => {
+    menu.close();
+    onOpenRecent(entry);
+  };
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openedByHold = useRef(false);
 
@@ -496,16 +542,47 @@ function NewTabButton({
 
       <Menu menu={menu}>
         {NEW_PANE_MENU.map((choice) => (
-          <MenuItem
-            key={choice.action === "open" ? "open" : choice.kind}
-            icon={choice.icon}
-            label={choice.label}
-            onSelect={() => {
-              menu.close();
-              if (choice.action === "open") onOpenFile();
-              else onNew(choice.kind);
-            }}
-          />
+          <Fragment key={choice.action === "open" ? "open" : choice.kind}>
+            <MenuItem
+              icon={choice.icon}
+              label={choice.label}
+              onSelect={() => {
+                menu.close();
+                if (choice.action === "open") onOpenFile();
+                else onNew(choice.kind);
+              }}
+            />
+
+            {/* Each of these sits under the thing it is the history of: what
+                you had open under Terminal, what you have opened under Open
+                file. Neither is drawn when there is nothing in it — a submenu
+                that opens onto nothing is worse than no submenu. */}
+            {choice.action === "create" && choice.kind === "terminal" && sessions.length > 0 ? (
+              <MenuSubmenu icon={History} label="Previous sessions">
+                {sessions.map((entry) => (
+                  <MenuItem
+                    key={entry.key}
+                    icon={iconForSession(entry)}
+                    label={sessionLabel(entry)}
+                    onSelect={() => reopen(entry)}
+                  />
+                ))}
+              </MenuSubmenu>
+            ) : null}
+
+            {choice.action === "open" && files.length > 0 ? (
+              <MenuSubmenu icon={Clock} label="Recently opened">
+                {files.map((entry) => (
+                  <MenuItem
+                    key={entry.key}
+                    icon={paneKind(kindForPath(entry.path)).icon}
+                    label={entry.label}
+                    onSelect={() => reopen(entry)}
+                  />
+                ))}
+              </MenuSubmenu>
+            ) : null}
+          </Fragment>
         ))}
         {/* Kept out of `NEW_PANE_MENU` because it is not a pane kind. It makes
             a terminal like the first entry does — the difference is what that
@@ -523,4 +600,25 @@ function NewTabButton({
       </Menu>
     </div>
   );
+}
+
+/**
+ * What a previous session's row shows.
+ *
+ * The command if there was one, since that is what the session *was*, with the
+ * directory after it — two shells that ran `claude` in different repositories
+ * are different sessions and the menu has to say which is which.
+ */
+function sessionLabel(entry: RecentSession): string {
+  const where = entry.cwd ? entry.cwd.split(/[\\/]/).filter(Boolean).pop() : undefined;
+  if (entry.command && where) return `${entry.command} — ${where}`;
+  return entry.command || entry.label;
+}
+
+/** The same glyph the pane would wear if it were open. See `paneIcon`. */
+function iconForSession(entry: RecentSession) {
+  const pinned = programById(entry.profile);
+  if (pinned !== null) return pinned.icon;
+  const running = programForCommand(entry.command);
+  return running !== null ? running.icon : paneKind(entry.pane).icon;
 }

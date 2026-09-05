@@ -169,6 +169,19 @@ export const settings = {
   load: (): Promise<string | null> => call("settings_load", {}, null),
 };
 
+/**
+ * Files opened and panes closed, shared by every window.
+ *
+ * The merge happens in the backend rather than here — see `push_recent` — so
+ * two windows closing a tab at the same moment cannot lose each other's entry.
+ */
+export const recents = {
+  list: (): Promise<string> => call("recents_list", {}, "[]"),
+  /** One entry as JSON. It needs a `key`; the backend refuses one without. */
+  push: (entry: string) => call("recents_push", { entry }, undefined),
+  forget: (key: string) => call("recents_forget", { key }, undefined),
+};
+
 export const scrollback = {
   read: (id: string): Promise<string> => call("scrollback_read", { id }, ""),
   drop: (id: string) => call("scrollback_drop", { id }, undefined),
