@@ -53,11 +53,27 @@ export interface Probe {
   tmux: boolean;
 }
 
+/**
+ * A terminal's area in pixels, for the pty's `ws_xpixel`/`ws_ypixel`.
+ *
+ * How a program works out how many pixels a cell is, which is what it needs
+ * before it can draw a picture at the right size — see `pixelGeometry` in
+ * `panes/TerminalPane.tsx`. Optional everywhere, because zero is the field's
+ * "unknown" and a caller with nothing to measure should say that rather than
+ * guess.
+ */
+export interface PixelSize {
+  pixelWidth: number;
+  pixelHeight: number;
+}
+
 export const pty = {
   spawn: (args: {
     id: string;
     cols: number;
     rows: number;
+    pixelWidth?: number;
+    pixelHeight?: number;
     cwd?: string;
     shell?: string;
     /** Attach to (or create) this tmux session instead of running a shell. */
@@ -72,13 +88,17 @@ export const pty = {
    * renderer dies — and spawning there would kill a shell that never stopped
    * running. See `pty_attach` on the Rust side.
    */
-  attach: (id: string, cols: number, rows: number): Promise<SpawnInfo | null> =>
-    call("pty_attach", { id, cols, rows }, null),
+  attach: (
+    id: string,
+    cols: number,
+    rows: number,
+    pixels?: PixelSize,
+  ): Promise<SpawnInfo | null> => call("pty_attach", { id, cols, rows, ...pixels }, null),
 
   write: (id: string, data: string) => call("pty_write", { id, data }, undefined),
 
-  resize: (id: string, cols: number, rows: number) =>
-    call("pty_resize", { id, cols, rows }, undefined),
+  resize: (id: string, cols: number, rows: number, pixels?: PixelSize) =>
+    call("pty_resize", { id, cols, rows, ...pixels }, undefined),
 
   kill: (id: string) => call("pty_kill", { id }, undefined),
 

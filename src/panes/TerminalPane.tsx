@@ -130,6 +130,33 @@ function readTheme(host: HTMLElement | null): ITheme {
   };
 }
 
+/**
+ * The pane's drawing area in pixels, for the pty's `ws_xpixel`/`ws_ypixel`.
+ *
+ * The other half of telling programs how big a cell is. A terminal can be
+ * asked directly (`CSI 14 t`, `CSI 16 t`, which xterm answers now that the
+ * image addon is loaded), but a query needs a program willing to wait for a
+ * reply, and inside tmux it does not get one — tmux answers for itself. What
+ * every one of them falls back to is `TIOCGWINSZ`, which carries a pixel size
+ * beside the character size, and which tmux *does* pass down to its panes from
+ * the client that owns them. So a pane whose pty knows its pixel size can show
+ * an image through tmux, and one that reports zeros — the field's "unknown",
+ * and what jterm sent until now — cannot.
+ *
+ * Measured off `.xterm-screen`, which the renderer sizes to exactly the
+ * dimensions its own `CSI 14 t` reply quotes, so the two answers agree. CSS
+ * pixels, not device pixels, for the same reason: that is the unit xterm
+ * reports in, and an image scaled for the other one comes out at half or twice
+ * the size it should be.
+ */
+function pixelGeometry(host: HTMLElement | null): { pixelWidth: number; pixelHeight: number } {
+  const screen = host?.querySelector<HTMLElement>(".xterm-screen");
+  return {
+    pixelWidth: Math.round(screen?.clientWidth ?? 0),
+    pixelHeight: Math.round(screen?.clientHeight ?? 0),
+  };
+}
+
 export function TerminalPane({
   pane,
   theme,
@@ -234,6 +261,7 @@ export function TerminalPane({
       id: paneId,
       cols: term.cols,
       rows: term.rows,
+      ...pixelGeometry(hostRef.current),
       cwd,
       // Read at spawn rather than held, so changing it in Settings applies to
       // the next shell started — including the one Enter starts in a pane
@@ -495,7 +523,7 @@ export function TerminalPane({
       term.options.theme = readTheme(host);
       safeFit();
       repaint();
-      if (!exitedRef.current) void pty.resize(paneId, term.cols, term.rows);
+      if (!exitedRef.current) void pty.resize(paneId, term.cols, term.rows, pixelGeometry(host));
     };
     const stopSettings = subscribeSettings(applySettings);
 
@@ -656,7 +684,8 @@ export function TerminalPane({
       frame = requestAnimationFrame(() => {
         safeFit();
         repaint();
-        if (!exitedRef.current) void pty.resize(paneId, term.cols, term.rows);
+        if (!exitedRef.current)
+          void pty.resize(paneId, term.cols, term.rows, pixelGeometry(host));
       });
     });
     observer.observe(host);
@@ -712,7 +741,7 @@ export function TerminalPane({
       // the pane reconnects to a live shell and then draws none of it. `spawn`
       // awaits this too; adopting has to do it itself.
       await ptyBusReady();
-      const adopted = await pty.attach(paneId, term.cols, term.rows);
+      const adopted = await pty.attach(paneId, term.cols, term.rows, pixelGeometry(host));
       if (disposed) return;
 
       // Neither of these is right in front of a *live* tmux session. The log

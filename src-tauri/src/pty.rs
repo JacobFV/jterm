@@ -216,13 +216,29 @@ fn home_dir() -> std::path::PathBuf {
 
 /* ── Commands ────────────────────────────────────────────────────────────── */
 
+/// The pty's window size, including the pixel dimensions.
+///
+/// `ws_xpixel`/`ws_ypixel` are the second half of an image-capable terminal —
+/// see `pixelGeometry` in `panes/TerminalPane.tsx` for why a program needs them
+/// and why a query is not enough. They are optional over IPC and default to
+/// zero, which is what the fields mean by "unknown" and what every caller here
+/// sent before there was anything to report.
+fn pty_size(cols: u16, rows: u16, pixel_width: Option<u16>, pixel_height: Option<u16>) -> PtySize {
+    PtySize {
+        rows: rows.max(1),
+        cols: cols.max(1),
+        pixel_width: pixel_width.unwrap_or(0),
+        pixel_height: pixel_height.unwrap_or(0),
+    }
+}
+
 /// Start a shell for tab `id`.
 ///
 /// `cwd` is where the tab was when it was last saved; a directory that has
 /// since been deleted falls back to home rather than failing the spawn, since
 /// refusing to open a tab is a worse answer than opening it somewhere else.
 // A Tauri command's parameters are its IPC payload, one argument per field.
-// Bundling them into a struct to please the lint would only move the same eight
+// Bundling them into a struct to please the lint would only move the same ten
 // names one level down and add a type nothing else would use.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
@@ -233,6 +249,8 @@ pub fn pty_spawn(
     id: String,
     cols: u16,
     rows: u16,
+    pixel_width: Option<u16>,
+    pixel_height: Option<u16>,
     cwd: Option<String>,
     shell: Option<String>,
     tmux: Option<String>,
@@ -241,12 +259,7 @@ pub fn pty_spawn(
     // reach it, so the previous one is closed first.
     pty_kill_inner(&registry, &id);
 
-    let size = PtySize {
-        rows: rows.max(1),
-        cols: cols.max(1),
-        pixel_width: 0,
-        pixel_height: 0,
-    };
+    let size = pty_size(cols, rows, pixel_width, pixel_height);
     let pair = native_pty_system()
         .openpty(size)
         .map_err(|err| format!("could not open a pseudoterminal: {err}"))?;
@@ -489,6 +502,8 @@ pub fn pty_resize(
     id: String,
     cols: u16,
     rows: u16,
+    pixel_width: Option<u16>,
+    pixel_height: Option<u16>,
 ) -> Result<(), String> {
     // For a control-mode pane this sizes the *client* rather than the pane —
     // tmux lays its own panes out inside whatever jterm offers, and hands the
@@ -502,12 +517,7 @@ pub fn pty_resize(
     // Bound rather than chained: as a tail expression the guard would outlive
     // the `Arc` it borrows from.
     let master = session.master.lock();
-    let result = master.resize(PtySize {
-        rows: rows.max(1),
-        cols: cols.max(1),
-        pixel_width: 0,
-        pixel_height: 0,
-    });
+    let result = master.resize(pty_size(cols, rows, pixel_width, pixel_height));
     result.map_err(|err| format!("could not resize the terminal: {err}"))
 }
 
@@ -562,6 +572,8 @@ pub fn pty_attach(
     id: String,
     cols: u16,
     rows: u16,
+    pixel_width: Option<u16>,
+    pixel_height: Option<u16>,
 ) -> Option<SpawnInfo> {
     // A control-mode pane's shell belongs to tmux, not to this registry, and
     // the control client is re-established by its own path.
@@ -570,12 +582,10 @@ pub fn pty_attach(
     }
     let session = registry.get(&id)?;
 
-    let _ = session.master.lock().resize(PtySize {
-        rows: rows.max(1),
-        cols: cols.max(1),
-        pixel_width: 0,
-        pixel_height: 0,
-    });
+    let _ = session
+        .master
+        .lock()
+        .resize(pty_size(cols, rows, pixel_width, pixel_height));
 
     let pid = session.child.lock().process_id();
     Some(SpawnInfo {
