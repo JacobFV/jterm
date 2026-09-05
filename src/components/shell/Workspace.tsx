@@ -45,7 +45,7 @@ import { ChevronUp, Maximize2, Minimize2, Minus, X } from "lucide-react";
 import { resolveTheme, themeStyle } from "@/lib/appearance";
 import { useSettings, useSystemScheme } from "@/lib/useSettings";
 import { cn } from "@/lib/utils";
-import { paneKind } from "@/panes/registry";
+import { paneIcon, paneKind } from "@/panes/registry";
 import { type Action, type Popup, type Tab, paneLabel, themeOf } from "@/state/workspace";
 import { type DropEdge, type Layout, type Rect, countPanes, layout } from "@/state/tree";
 import { AmbientBackdrop } from "./AmbientBackdrop";
@@ -368,6 +368,9 @@ export function Workspace({
         if (!pane) return null;
 
         const definition = paneKind(pane.kind);
+        // What this pane is, rather than what kind of pane it is: the user's
+        // choice, else whatever it is running. See `paneIcon`.
+        const PaneIcon = paneIcon(pane);
         // A pop-up is on screen whatever tab is: that is what it is for.
         const onScreen = popup !== null || tab!.id === activeTabId;
         const isZoomed = tab !== null && tab.zoomedPaneId === paneId;
@@ -512,7 +515,7 @@ export function Workspace({
                       />
                     </span>
                   ) : (
-                    <definition.icon className="h-3 w-3 shrink-0 text-ink-4" />
+                    <PaneIcon className="h-3 w-3 shrink-0 text-ink-4" />
                   )}
                   <span
                     className={cn(

@@ -54,6 +54,14 @@ export type FileOpenTarget = "popup" | "tab" | "pane";
  * replayed transcript of it, and jterm stands down: no scrollback log, no draft
  * replay, because the shell that has the real command line is still running.
  *
+ * `tmux` is the default where the machine has it, and the reason is the one
+ * thing jterm's own snapshot cannot do: a recording brings the *picture* back,
+ * while a session brings the process back. A build, an ssh, an agent halfway
+ * through a long job — those are not restored by a transcript of what they had
+ * printed, and having them survive the app is worth more than the log jterm
+ * keeps of them. Machines without tmux, and Windows, quietly get a plain shell,
+ * so the default costs nothing where it cannot be honoured.
+ *
  * There is deliberately no third choice for "jsonl unless already inside tmux".
  * Nobody can answer that at settings time, and it is not a preference: a pane
  * that already has tmux in front of it is being recorded twice no matter which
@@ -145,7 +153,7 @@ export const DEFAULTS: Settings = {
   cursorBlink: true,
   scrollback: 10_000,
   shell: "",
-  shellBackend: "direct",
+  shellBackend: "tmux",
   tmuxKeys: true,
   sidebarWidth: 220,
   showHiddenFiles: false,

@@ -16,6 +16,7 @@
  */
 
 import {
+  type ComponentType,
   createContext,
   useCallback,
   useContext,
@@ -27,9 +28,18 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronRight, type LucideIcon } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+
+/**
+ * Any glyph a row can carry.
+ *
+ * Wider than `LucideIcon` because the menu also shows brand marks — see
+ * `lib/brandIcons` — and the two are drawn identically: a component that takes
+ * a class name and paints in the current colour.
+ */
+export type MenuIcon = ComponentType<{ className?: string }>;
 
 /** Where the menu is drawn, in viewport coordinates. */
 export interface MenuAnchor {
@@ -181,7 +191,7 @@ export function MenuItem({
   selected = false,
   onHover,
 }: {
-  icon?: LucideIcon | null;
+  icon?: MenuIcon | null;
   label: string;
   onSelect: () => void;
   adornment?: ReactNode;
@@ -228,7 +238,7 @@ export function MenuSubmenu({
   label,
   children,
 }: {
-  icon?: LucideIcon | null;
+  icon?: MenuIcon | null;
   label: string;
   children: ReactNode;
 }) {

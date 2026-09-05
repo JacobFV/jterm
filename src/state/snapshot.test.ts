@@ -169,3 +169,34 @@ describe("pop-ups in the snapshot", () => {
     expect(popup.x + popup.width).toBeLessThanOrEqual(1);
   });
 });
+
+describe("what a pane was running", () => {
+  it("comes back, so the icon and the offer to resume survive a restart", () => {
+    const start = emptyWorkspace();
+    const paneId = start.tabs[0].focusedPaneId;
+    const state = reduce(reduce(start, {
+      type: "pane/meta",
+      paneId,
+      patch: { command: "claude --dangerously-skip-permissions" },
+    }), { type: "pane/profile", paneId, profile: "claude" });
+
+    const restored = decode(encode(state, {}))!.workspace;
+    const pane = restored.tabs[0].panes[paneId];
+    expect(pane.kind === "terminal" && pane.command).toBe(
+      "claude --dangerously-skip-permissions",
+    );
+    expect(pane.profile).toBe("claude");
+  });
+
+  it("drops a profile id this build no longer has, and keeps the pane", () => {
+    // The same treatment a theme that went away gets: the icon falls back to
+    // being worked out, rather than the pane being thrown away.
+    const state = emptyWorkspace();
+    const parsed = JSON.parse(encode(state, {}));
+    const paneId = state.tabs[0].focusedPaneId;
+    parsed.workspace.tabs[0].panes[paneId].profile = 42;
+
+    const restored = decode(JSON.stringify(parsed))!.workspace;
+    expect(restored.tabs[0].panes[paneId].profile).toBeUndefined();
+  });
+});

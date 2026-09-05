@@ -273,6 +273,8 @@ function decodeTab(raw: unknown): Tab | null {
     id: raw.id,
     title: typeof raw.title === "string" && raw.title ? raw.title : undefined,
     theme: decodeTheme(raw.theme),
+    profile:
+      typeof raw.profile === "string" && raw.profile ? raw.profile.slice(0, 64) : undefined,
     root,
     panes,
     focusedPaneId,
@@ -311,6 +313,11 @@ function decodePane(id: string, raw: unknown): PaneState | null {
   if (typeof kind !== "string" || !KINDS.includes(kind as PaneKind)) return null;
   const title = typeof raw.title === "string" && raw.title ? raw.title.slice(0, 200) : undefined;
   const theme = decodeTheme(raw.theme);
+  // A program id, capped like every other string out of this file. An id this
+  // build no longer has resolves to no icon, which falls back to working it
+  // out — the same treatment a theme that went away gets.
+  const profile =
+    typeof raw.profile === "string" && raw.profile ? raw.profile.slice(0, 64) : undefined;
 
   switch (kind as PaneKind) {
     case "terminal":
@@ -319,6 +326,12 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         kind: "terminal",
         title,
         theme,
+        profile,
+        // What the pane was last running, for its icon and for the offer to
+        // pick the session back up. Capped: it is a line of text from a file
+        // that survived a crash.
+        command:
+          typeof raw.command === "string" && raw.command ? raw.command.slice(0, 2000) : undefined,
         cwd: typeof raw.cwd === "string" ? raw.cwd : undefined,
         // Length-capped like every other string out of this file: a session
         // name reaches tmux as an argument, and a hand-edited snapshot is not
@@ -331,6 +344,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         kind: "notepad",
         title,
         theme,
+        profile,
         path: typeof raw.path === "string" && raw.path ? raw.path : undefined,
         dirty: raw.dirty === true,
       };
@@ -341,7 +355,14 @@ function decodePane(id: string, raw: unknown): PaneState | null {
     case "media":
     case "model": {
       if (typeof raw.path !== "string" || !raw.path) return null;
-      return { id, kind: kind as "image" | "media" | "model", title, theme, path: raw.path };
+      return {
+        id,
+        kind: kind as "image" | "media" | "model",
+        title,
+        theme,
+        profile,
+        path: raw.path,
+      };
     }
     case "browser":
       return {
@@ -349,6 +370,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         kind: "browser",
         title,
         theme,
+        profile,
         // Only http(s) is restored. A `file:` or `javascript:` URL in this file
         // would otherwise be a way to make the app open something it should
         // not, using a file the app itself is expected to trust.

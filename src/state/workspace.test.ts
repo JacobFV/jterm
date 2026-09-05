@@ -755,3 +755,29 @@ describe("pane/moveTo", () => {
     expect(received.popups[0].pane.id).toBe(first);
   });
 });
+
+describe("icons", () => {
+  it("keeps a chosen icon at the level it was chosen", () => {
+    const start = emptyWorkspace();
+    const tabId = start.tabs[0].id;
+    const paneId = start.tabs[0].focusedPaneId;
+
+    let state = reduce(start, { type: "tab/profile", tabId, profile: "devops" });
+    state = reduce(state, { type: "pane/profile", paneId, profile: "claude" });
+
+    expect(state.tabs[0].profile).toBe("devops");
+    expect(state.tabs[0].panes[paneId].profile).toBe("claude");
+
+    // `undefined` is not "no icon" — it is back to working it out from what
+    // the pane is running.
+    state = reduce(state, { type: "pane/profile", paneId, profile: undefined });
+    expect(state.tabs[0].panes[paneId].profile).toBeUndefined();
+  });
+
+  it("marks a floating pane's icon too", () => {
+    let state = reduce(emptyWorkspace(), { type: "popup/open", kind: "terminal" });
+    const paneId = state.popups[0].pane.id;
+    state = reduce(state, { type: "pane/profile", paneId, profile: "sql" });
+    expect(state.popups[0].pane.profile).toBe("sql");
+  });
+});

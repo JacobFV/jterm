@@ -42,6 +42,7 @@ import {
 import { isLinkActivation, linkTarget } from "@/lib/links";
 import { scanOsc } from "@/lib/osc";
 import { ready as ptyBusReady, subscribePty } from "@/lib/ptyBus";
+import { resumeLine } from "@/lib/programs";
 import { restoreBanner } from "@/lib/scrollback";
 import { registerTerminal } from "@/lib/terminals";
 import { sessionNameFor, tmuxAvailable } from "@/lib/tmux";
@@ -201,6 +202,10 @@ export function TerminalPane({
   const initialRef = useRef({
     cwd: pane.cwd,
     draft: getContent(paneId).draft ?? "",
+    // Worked out once, at mount, from what the pane was last running. Read
+    // here rather than in the effect so it is the pane as it was restored
+    // rather than as it has become since.
+    resume: resumeLine(pane.command) ?? "",
     tmux: pane.tmux,
     /** Set when tmux owns this pane outright — see `lib/tmuxControl.ts`. */
     control: pane.tmuxPane !== undefined,
@@ -501,6 +506,10 @@ export function TerminalPane({
       if (!underTmux()) updateContent(paneId, { draft: draftRef.current.text });
 
       if (submitting && submitted.trim()) {
+        // What the pane is now for, as far as anything can tell: its icon
+        // follows this, and so does the offer to pick the session back up if
+        // the machine goes down while it is running. See `lib/programs`.
+        metaRef.current({ command: submitted.trim() } as Partial<TerminalPaneState>);
         void history.append(paneId, {
           kind: "command",
           at: new Date().toISOString(),
@@ -716,7 +725,15 @@ export function TerminalPane({
       // that is still running still has it sitting in its line editor —
       // echoed, so it is in the scrollback written out above too. Replaying it
       // would type the half-finished command a second time.
-      if (!adopted && sessionRef.current === undefined) armReplay(initialRef.current.draft);
+      if (!adopted && sessionRef.current === undefined) {
+        // The half-typed line if there was one; otherwise the session this pane
+        // was in the middle of. Only reached when the shell did *not* survive
+        // — the machine went down, or the app was quit — which is exactly when
+        // "what was I doing" is worth answering. It is typed and not run, the
+        // same promise the draft line makes: `claude --continue` sitting at the
+        // prompt is an offer, not an action.
+        armReplay(initialRef.current.draft || initialRef.current.resume || "");
+      }
       // The prompt lands shortly after this; a repaint once the pane has
       // settled is what makes a restored session look restored rather than
       // empty.

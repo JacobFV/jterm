@@ -35,12 +35,23 @@
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
-import { AppWindow, Columns2, Layers, Move, PictureInPicture2, Palette, Plus } from "lucide-react";
+import {
+  AppWindow,
+  Columns2,
+  Layers,
+  Move,
+  PictureInPicture2,
+  Palette,
+  Plus,
+  Shapes,
+  Wand2,
+} from "lucide-react";
 
 import { useSettings } from "@/lib/useSettings";
 import { otherWindows, type WindowRef } from "@/lib/windows";
 import { cn } from "@/lib/utils";
-import { NEW_PANE_MENU, paneKind } from "@/panes/registry";
+import { PROGRAMS, type Program } from "@/lib/programs";
+import { NEW_PANE_MENU, paneIcon, paneKind, tabIcon } from "@/panes/registry";
 import { countPanes, paneIds } from "@/state/tree";
 import type { ThemeChoice } from "@/state/settings";
 import {
@@ -71,6 +82,9 @@ export interface PaneMenuActions {
   onMovePane: (paneId: string, to: MoveTarget) => void;
   /** Send it to another window, or to a new one when the label is `null`. */
   onMoveToWindow: (paneId: string, label: string | null) => void;
+  /** Pin an icon to a tab or a pane. `undefined` goes back to working it out. */
+  onTabProfile: (tabId: string, profile: string | undefined) => void;
+  onPaneProfile: (paneId: string, profile: string | undefined) => void;
 }
 
 interface PaneMenuProps {
@@ -102,13 +116,18 @@ export interface PaneMenuHandle {
   openAt: (x: number, y: number) => void;
 }
 
+/** The families the icon picker is grouped by, in the order it shows them. */
+const GROUPS: Program["group"][] = ["AI", "Development", "Operations", "Data", "Shell"];
+
 export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneMenu(
   { tabs, tab, activeTabId, pane, scope, actions, muted = false },
   ref,
 ) {
   const settings = useSettings();
   const menu = useMenu();
-  const Icon = paneKind(pane.kind).icon;
+  // What the icon shows is what the thing *is*, which for a tab is the tab's
+  // own answer and for a pane is the pane's. See `paneIcon`.
+  const Icon = scope === "tab" && tab !== null ? tabIcon(tab) : paneIcon(pane);
   const others = tabs.filter((other) => other.id !== tab?.id);
 
   useImperativeHandle(ref, () => ({ openAt: menu.revealAt }), [menu.revealAt]);
@@ -143,6 +162,12 @@ export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneM
     : { label: tab === null ? "Follow the app" : "Follow the tab", resolves: themeOf(settings.theme, tab) };
   const setTheme = (choice: ThemeChoice | undefined) =>
     asTab ? actions.onTabTheme(tab.id, choice) : actions.onPaneTheme(pane.id, choice);
+
+  // The icon is chosen at whichever level this menu is standing for, the same
+  // way the theme is: from the strip it names the tab, from a header the pane.
+  const chosenProfile = asTab ? tab.profile : pane.profile;
+  const setProfile = (profile: string | undefined) =>
+    asTab ? actions.onTabProfile(tab.id, profile) : actions.onPaneProfile(pane.id, profile);
 
   /**
    * Panes this one could be put beside.
@@ -205,6 +230,35 @@ export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneM
       <Menu menu={menu}>
         <MenuSubmenu icon={Palette} label={asTab ? "Tab theme" : "Pane theme"}>
           <ThemeMenu value={themed} defer={defer} onChange={setTheme} onPick={menu.close} />
+        </MenuSubmenu>
+
+        <MenuSubmenu icon={Shapes} label="Icon">
+          <MenuItem
+            icon={Wand2}
+            label="Work it out"
+            selected={chosenProfile === undefined}
+            onSelect={() => {
+              menu.close();
+              setProfile(undefined);
+            }}
+          />
+          {GROUPS.map((group) => (
+            <div key={group}>
+              <MenuHeading divided>{group}</MenuHeading>
+              {PROGRAMS.filter((program) => program.group === group).map((program) => (
+                <MenuItem
+                  key={program.id}
+                  icon={program.icon}
+                  label={program.label}
+                  selected={chosenProfile === program.id}
+                  onSelect={() => {
+                    menu.close();
+                    setProfile(program.id);
+                  }}
+                />
+              ))}
+            </div>
+          ))}
         </MenuSubmenu>
 
         {movable ? (

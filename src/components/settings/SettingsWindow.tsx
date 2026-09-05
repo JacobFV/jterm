@@ -375,15 +375,15 @@ export function SettingsWindow() {
           <Section title="tmux">
             <Row
               label="New terminals run on"
-              hint="A shell is jterm's own: it dies with the app, and what survives a crash is the snapshot jterm keeps of it. A tmux session outlives the app, so a restored tab reattaches to the shell itself rather than to a picture of it — and jterm stops keeping its own copy, since tmux already has one."
+              hint="A tmux session outlives the app, so a restored tab reattaches to the shell itself — a build or an agent that was running is still running. That is the default where tmux is installed. A plain shell dies with the app, and what comes back is the snapshot jterm keeps of it: the picture rather than the process."
             >
               <Segmented
                 label="New terminals run on"
                 value={settings.shellBackend}
                 onChange={(shellBackend) => updateSettings({ shellBackend })}
                 options={[
-                  { value: "direct", label: "A shell" },
                   { value: "tmux", label: "A tmux session" },
+                  { value: "direct", label: "A shell" },
                 ]}
               />
             </Row>

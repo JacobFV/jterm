@@ -742,6 +742,9 @@ export function App() {
       // app's, which is a preference and lives in the Settings window.
       onTabTheme: (tabId, theme) => dispatch({ type: "tab/theme", tabId, theme }),
       onPaneTheme: (paneId, theme) => dispatch({ type: "pane/theme", paneId, theme }),
+      // The same two levels again, for the icon rather than the colours.
+      onTabProfile: (tabId, profile) => dispatch({ type: "tab/profile", tabId, profile }),
+      onPaneProfile: (paneId, profile) => dispatch({ type: "pane/profile", paneId, profile }),
     }),
     [replacePane, moveToWindow],
   );

@@ -64,6 +64,15 @@ interface PaneCommon {
    * not that.
    */
   theme?: ThemeChoice;
+  /**
+   * An icon chosen by hand for this pane, by program id — see `lib/programs`.
+   *
+   * Absent means "work it out", which is the state every pane starts in: the
+   * icon then follows whatever the pane is actually running and changes when
+   * that changes. A value here stops the guessing, because the user has said
+   * what this pane is and that outranks anything inferred from a command line.
+   */
+  profile?: string;
 }
 
 export interface TerminalPaneState extends PaneCommon {
@@ -72,6 +81,20 @@ export interface TerminalPaneState extends PaneCommon {
   cwd?: string;
   /** True once the shell has exited and the pane is only showing its remains. */
   exited?: boolean;
+  /**
+   * The last command line submitted in this pane.
+   *
+   * Kept in the pane rather than only in the history log because two live
+   * features read it constantly: the icon, which is how a tab full of shells
+   * becomes a tab running Claude and a tab watching a build, and the offer to
+   * resume after a machine crash. Both want "what is this pane for" at a
+   * glance, and neither is worth a file read.
+   *
+   * It is the last command *started*, not the one running: without shell
+   * integration nothing says when a command ended. That suits both readers —
+   * the pane is still "the Claude one" after Claude exits.
+   */
+  command?: string;
   /**
    * The tmux session this pane is attached to, when it is in one.
    *
@@ -151,6 +174,9 @@ export interface Tab {
    * panes. See `setTabTheme` in `lib/appearance.ts`.
    */
   theme?: ThemeChoice;
+  /** An icon chosen by hand for the whole tab. Absent means the focused pane
+   *  speaks for it, the same way it does for the tab's name. */
+  profile?: string;
   root: Node;
   panes: Record<string, PaneState>;
   focusedPaneId: string;
@@ -484,6 +510,9 @@ export type Action =
   | { type: "pane/meta"; paneId: string; patch: Partial<PaneState> }
   /** `undefined` puts the pane back to following its tab. */
   | { type: "pane/theme"; paneId: string; theme: ThemeChoice | undefined }
+  /** An icon chosen by hand, or `undefined` to go back to working it out. */
+  | { type: "pane/profile"; paneId: string; profile: string | undefined }
+  | { type: "tab/profile"; tabId: string; profile: string | undefined }
   /** tmux has described a control session; make the tabs agree with it. */
   | { type: "tmux/sync"; session: string; windows: TmuxWindow[] }
   /** A control session ended or was detached from; its tabs go with it. */
@@ -935,6 +964,16 @@ function apply(state: Workspace, action: Action): Workspace {
     case "pane/theme":
       return mapPane(state, action.paneId, (pane) =>
         pane.theme === action.theme ? pane : { ...pane, theme: action.theme },
+      );
+
+    case "pane/profile":
+      return mapPane(state, action.paneId, (pane) =>
+        pane.profile === action.profile ? pane : { ...pane, profile: action.profile },
+      );
+
+    case "tab/profile":
+      return mapTab(state, action.tabId, (tab) =>
+        tab.profile === action.profile ? tab : { ...tab, profile: action.profile },
       );
 
     /**

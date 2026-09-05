@@ -28,7 +28,9 @@ import {
 import { history, pty, scrollback } from "@/lib/ipc";
 import { disposeSession } from "@/lib/tmux";
 import { dropContent } from "@/state/content";
-import type { PaneKind, PaneState, TerminalPaneState } from "@/state/workspace";
+import { programById, programForCommand, type ProgramIcon } from "@/lib/programs";
+import type { PaneKind, PaneState, Tab, TerminalPaneState } from "@/state/workspace";
+import { focusedPane } from "@/state/workspace";
 import { BrowserPane } from "./BrowserPane";
 import { ImagePane } from "./ImagePane";
 import { MediaPane } from "./MediaPane";
@@ -98,6 +100,34 @@ export const PANE_KINDS: PaneKindDef[] = [
 ];
 
 const BY_KIND = new Map(PANE_KINDS.map((definition) => [definition.kind, definition]));
+
+/**
+ * The glyph that stands for a pane.
+ *
+ * Three answers in order of how much they know: what the user said this pane
+ * is, what it is actually running, and — failing both — what kind of pane it
+ * is. Only the first is stored; the second is worked out afresh every render,
+ * so a shell that starts Claude becomes the Claude icon and a tab full of
+ * identical terminal glyphs stops being a row of identical terminal glyphs.
+ */
+export function paneIcon(pane: PaneState): ProgramIcon {
+  const chosen = programById(pane.profile);
+  if (chosen !== null) return chosen.icon;
+
+  if (pane.kind === "terminal") {
+    const running = programForCommand((pane as TerminalPaneState).command);
+    if (running !== null) return running.icon;
+  }
+  return paneKind(pane.kind).icon;
+}
+
+/** The same for a tab: its own choice, else whichever pane speaks for it. */
+export function tabIcon(tab: Tab): ProgramIcon {
+  const chosen = programById(tab.profile);
+  if (chosen !== null) return chosen.icon;
+  const front = focusedPane(tab);
+  return front === null ? paneKind("terminal").icon : paneIcon(front);
+}
 
 export function paneKind(kind: PaneKind): PaneKindDef {
   const definition = BY_KIND.get(kind);
