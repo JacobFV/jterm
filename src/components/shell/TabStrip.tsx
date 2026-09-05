@@ -214,6 +214,7 @@ export function TabStrip({
             key={tab.id}
             tab={tab}
             tabs={tabs}
+            activeTabId={activeTabId}
             active={tab.id === activeTabId}
             dragging={dragging === tab.id}
             register={(node) => {
@@ -276,6 +277,7 @@ export function TabStrip({
 function TabItem({
   tab,
   tabs,
+  activeTabId,
   active,
   dragging,
   register,
@@ -286,6 +288,7 @@ function TabItem({
 }: {
   tab: Tab;
   tabs: Tab[];
+  activeTabId: string | null;
   active: boolean;
   dragging: boolean;
   register: (node: HTMLDivElement | null) => void;
@@ -298,9 +301,34 @@ function TabItem({
   const pane = focusedPane(tab);
 
   return (
+    // The whole rectangle selects, not just the text in it. A tab is one
+    // target as far as anyone using it is concerned, and the padding, the
+    // gaps and the strip of empty width a wide tab has past its label are the
+    // easiest parts of it to hit. `role="button"` and the key handler are what
+    // the label used to carry as a real `<button>`: it cannot stay one, since
+    // this element now holds the two controls below and a button may not
+    // contain buttons.
     <div
       ref={register}
+      role="button"
+      tabIndex={0}
+      aria-current={active}
+      title={tabLabel(tab)}
       onPointerDown={onPointerDown}
+      // A press on a tab must not take keyboard focus off the pane. Selecting
+      // a *different* tab focuses that tab's pane on the way in, so the loss
+      // only shows on a press on the tab already showing — which is the one
+      // press most likely to be followed by typing. Prevented at `mousedown`,
+      // since that is the default action focus comes from; the click itself,
+      // and the drag started above, are untouched. Keyboard users still reach
+      // the tab with Tab, which is not a press.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        onSelect();
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         menuRef.current?.openAt(event.clientX, event.clientY);
@@ -317,35 +345,36 @@ function TabItem({
         dragging && "opacity-60",
       )}
     >
-      {/* Outside the select button rather than in it: it is a control of its
-          own, and a button inside a button is neither valid nor clickable. */}
+      {/* Held apart from the tab's own click. The icon opens a menu, which is
+          a different request from "show me this tab" — and the menu's items
+          are rendered inside this element as far as React is concerned, even
+          though they are portalled elsewhere on screen, so without this a
+          choice made in the menu would select the tab on its way out. */}
       {pane ? (
-        <PaneMenu
-          ref={menuRef}
-          tabs={tabs}
-          tab={tab}
-          pane={pane}
-          // In the strip the icon stands for the tab, so its Theme entry
-          // dresses the whole tab — every pane in it, and the window's chrome
-          // while it is the tab on screen.
-          scope="tab"
-          actions={paneMenu}
-          muted={!active}
-        />
+        <div className="flex shrink-0 items-center" onClick={(event) => event.stopPropagation()}>
+          <PaneMenu
+            ref={menuRef}
+            tabs={tabs}
+            tab={tab}
+            activeTabId={activeTabId}
+            pane={pane}
+            // In the strip the icon stands for the tab, so its Theme entry
+            // dresses the whole tab — every pane in it, and the window's
+            // chrome while it is the tab on screen.
+            scope="tab"
+            actions={paneMenu}
+            muted={!active}
+          />
+        </div>
       ) : null}
-      <button
-        type="button"
-        className="flex min-w-0 flex-1 items-center text-left"
-        onClick={onSelect}
-        aria-current={active}
-        title={tabLabel(tab)}
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate text-left text-[length:var(--fs-11)]",
+          active ? "text-ink-1" : "text-ink-3",
+        )}
       >
-        <span
-          className={cn("truncate text-[length:var(--fs-11)]", active ? "text-ink-1" : "text-ink-3")}
-        >
-          {tabLabel(tab)}
-        </span>
-      </button>
+        {tabLabel(tab)}
+      </span>
       {/* The active tab's close control is always visible rather than waiting
           for a hover, since it is the one most likely wanted. */}
       <button
@@ -356,7 +385,11 @@ function TabItem({
           "shrink-0 rounded-sm p-0.5 text-ink-4 hover:text-ink-1 group-hover:opacity-100",
           active ? "opacity-100" : "opacity-0",
         )}
-        onClick={onClose}
+        onClick={(event) => {
+          // Closing a background tab must not select it on the way past.
+          event.stopPropagation();
+          onClose();
+        }}
       >
         <X className="h-3 w-3" />
       </button>

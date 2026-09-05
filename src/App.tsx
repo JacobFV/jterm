@@ -68,14 +68,18 @@ import {
   type Tab,
   type Workspace,
   activeTab,
+  allPanes,
   emptyWorkspace,
+  locatePane,
   paneLabel,
   reduce,
   themeOf,
 } from "@/state/workspace";
 
 function livePaneIds(workspace: Workspace): string[] {
-  return workspace.tabs.flatMap((tab) => Object.keys(tab.panes));
+  // Pop-ups included, or the scrollback and history of a pane that happens to
+  // be floating would be pruned out from under a pane that is still open.
+  return allPanes(workspace).map((pane) => pane.id);
 }
 
 /** A tab drawn from tmux control mode, whose processes belong to tmux. */
@@ -200,8 +204,10 @@ export function createCloseRequestHandler(
     closing = true;
 
     try {
-      const unsaved = getWorkspace().tabs.flatMap((tab) =>
-        Object.values(tab.panes).filter((pane) => pane.kind === "notepad" && pane.dirty),
+      // Every pane in the window, floating ones included: an unsaved note on
+      // the rail is exactly as unsaved as one in a tab.
+      const unsaved = allPanes(getWorkspace()).filter(
+        (pane) => pane.kind === "notepad" && pane.dirty,
       );
       if (unsaved.length > 0) {
         const names = unsaved.map((pane) => paneLabel(pane)).join(", ");
@@ -518,14 +524,24 @@ export function App() {
     [confirmDiscard],
   );
 
+  /**
+   * Close one pane, wherever it is.
+   *
+   * Told only the pane, because a pane can now be in a tab or floating on the
+   * rail and the caller — a header button, a keystroke — has no reason to know
+   * which. `locatePane` answers that once, here, rather than at every call.
+   */
   const closePane = useCallback(
-    async (tabId: string, paneId: string) => {
-      const tab = workspaceRef.current.tabs.find((candidate) => candidate.id === tabId);
-      const pane = tab?.panes[paneId];
-      if (!pane) return;
-      if (!(await confirmDiscard([pane]))) return;
-      await disposePane(pane);
-      dispatch({ type: "pane/close", tabId, paneId });
+    async (paneId: string) => {
+      const found = locatePane(workspaceRef.current, paneId);
+      if (found === null) return;
+      if (!(await confirmDiscard([found.pane]))) return;
+      await disposePane(found.pane);
+      dispatch(
+        found.tabId === null
+          ? { type: "popup/close", paneId }
+          : { type: "pane/close", tabId: found.tabId, paneId },
+      );
     },
     [confirmDiscard],
   );
@@ -542,9 +558,8 @@ export function App() {
    * safe to do first.
    */
   const replacePane = useCallback(
-    async (tabId: string, paneId: string, kind: PaneKind, seed?: Partial<PaneState>) => {
-      const tab = workspaceRef.current.tabs.find((candidate) => candidate.id === tabId);
-      const pane = tab?.panes[paneId];
+    async (paneId: string, kind: PaneKind, seed?: Partial<PaneState>) => {
+      const pane = locatePane(workspaceRef.current, paneId)?.pane;
       if (!pane) return;
       // Picking the kind a pane already is means "leave it alone", not "start
       // it again". The menu lists every kind including the current one, and a
@@ -554,20 +569,23 @@ export function App() {
       if (pane.kind === kind && seed === undefined) return;
       if (!(await confirmDiscard([pane]))) return;
       await disposePane(pane);
-      dispatch({ type: "pane/replace", tabId, paneId, kind, seed });
+      dispatch({ type: "pane/replace", paneId, kind, seed });
     },
     [confirmDiscard],
   );
 
   const paneMenu = useMemo<PaneMenuActions>(
     () => ({
-      onReplace: (tabId, paneId, kind) => void replacePane(tabId, paneId, kind),
-      onReplaceWithFile: (tabId, paneId) =>
+      onReplace: (paneId, kind) => void replacePane(paneId, kind),
+      onReplaceWithFile: (paneId) =>
         void dialog.open().then((path) => {
           if (path) {
-            void replacePane(tabId, paneId, kindForPath(path), { path } as Partial<PaneState>);
+            void replacePane(paneId, kindForPath(path), { path } as Partial<PaneState>);
           }
         }),
+      // A move is not a close: the pane keeps its id and the shell behind it
+      // never notices, so there is nothing to confirm and nothing to dispose.
+      onMovePane: (paneId, to) => dispatch({ type: "pane/moveTo", paneId, to }),
       // Nothing is destroyed by this one, so it needs no confirmation and no
       // disposal — see `tab/absorb`.
       onAbsorbTab: (tabId, paneId, sourceTabId) =>
@@ -700,7 +718,13 @@ export function App() {
           return;
 
         case "pane.close":
-          if (tabId && paneId) void closePaneRef.current(tabId, paneId);
+          // Whatever has the keyboard: the pane floating over the tab if one
+          // does, else the focused pane of the tab underneath.
+          if (current.focusedPopupId !== null) {
+            void closePaneRef.current(current.focusedPopupId);
+          } else if (paneId) {
+            void closePaneRef.current(paneId);
+          }
           return;
 
         case "pane.zoom":
@@ -938,8 +962,10 @@ export function App() {
               key={workspaceGeneration}
               tabs={tabs}
               activeTabId={workspace.activeTabId}
+              popups={workspace.popups}
+              focusedPopupId={workspace.focusedPopupId}
               dispatch={dispatch}
-              onClosePane={(tabId, paneId) => void closePane(tabId, paneId)}
+              onClosePane={(paneId) => void closePane(paneId)}
               paneMenu={paneMenu}
               tabDrag={tabDrag}
               onTabDropTarget={noteTabDropTarget}

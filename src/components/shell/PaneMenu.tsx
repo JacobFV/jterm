@@ -14,6 +14,13 @@
  *   - **Move a tab here** brings another tab's panes into this slot and sends
  *     this pane out as a tab of its own. Nothing is destroyed; see `tab/absorb`.
  *
+ * And **Move to**, which changes where the pane *is* rather than what it is: onto
+ * the rail as a pop-up, beside another pane as a split, into another tab, or
+ * into another window. Every one of those keeps the pane's id, so the shell
+ * behind it does not restart — see `pane/moveTo`. It is offered from a pane's
+ * own header, from a pop-up's, and from a tab whose single pane leaves no doubt
+ * about which pane is meant.
+ *
  * And **Theme**, which is neither: it changes nothing about what this pane is.
  * It is here because this is the menu that is always one press away from
  * wherever you are looking, and a theme is the setting people change most often
@@ -28,13 +35,15 @@
  */
 
 import { forwardRef, useImperativeHandle } from "react";
-import { Layers, Palette } from "lucide-react";
+import { Columns2, Layers, Move, PictureInPicture2, Palette, Plus } from "lucide-react";
 
 import { useSettings } from "@/lib/useSettings";
 import { cn } from "@/lib/utils";
 import { NEW_PANE_MENU, paneKind } from "@/panes/registry";
+import { countPanes, paneIds } from "@/state/tree";
 import type { ThemeChoice } from "@/state/settings";
 import {
+  type MoveTarget,
   type PaneKind,
   type PaneState,
   type Tab,
@@ -48,22 +57,28 @@ import { ThemeMenu } from "./ThemeMenu";
 
 export interface PaneMenuActions {
   /** Put a fresh pane of this kind where the given pane is. */
-  onReplace: (tabId: string, paneId: string, kind: PaneKind) => void;
+  onReplace: (paneId: string, kind: PaneKind) => void;
   /** The same, with the file chosen from a dialog deciding the kind. */
-  onReplaceWithFile: (tabId: string, paneId: string) => void;
+  onReplaceWithFile: (paneId: string) => void;
   /** Move another tab's panes into this pane's slot. */
   onAbsorbTab: (tabId: string, paneId: string, sourceTabId: string) => void;
   /** Dress a whole tab. `undefined` puts it back to following the app. */
   onTabTheme: (tabId: string, theme: ThemeChoice | undefined) => void;
   /** Dress one pane. `undefined` puts it back to following its tab. */
-  onPaneTheme: (tabId: string, paneId: string, theme: ThemeChoice | undefined) => void;
+  onPaneTheme: (paneId: string, theme: ThemeChoice | undefined) => void;
+  /** Send this pane somewhere else in this window, keeping it running. */
+  onMovePane: (paneId: string, to: MoveTarget) => void;
 }
 
 interface PaneMenuProps {
   /** Every tab there is, so the menu can offer the others. */
   tabs: Tab[];
-  /** The tab this pane belongs to — never a candidate to move into itself. */
-  tab: Tab;
+  /** The tab this pane belongs to, or `null` for a pane floating on the rail.
+   *  A pane's own tab is never a candidate to move it into. */
+  tab: Tab | null;
+  /** Which tab is on screen, so a floating pane's "beside this pane" list has
+   *  somewhere to point at. */
+  activeTabId: string | null;
   pane: PaneState;
   /** Whether this icon is standing for its tab or for its pane. See above. */
   scope: "tab" | "pane";
@@ -85,28 +100,57 @@ export interface PaneMenuHandle {
 }
 
 export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneMenu(
-  { tabs, tab, pane, scope, actions, muted = false },
+  { tabs, tab, activeTabId, pane, scope, actions, muted = false },
   ref,
 ) {
   const settings = useSettings();
   const menu = useMenu();
-  const tabId = tab.id;
   const Icon = paneKind(pane.kind).icon;
-  const others = tabs.filter((other) => other.id !== tabId);
+  const others = tabs.filter((other) => other.id !== tab?.id);
 
   useImperativeHandle(ref, () => ({ openAt: menu.revealAt }), [menu.revealAt]);
 
   // The two levels this icon can be standing for, told apart in one place so
-  // the menu below reads the same whichever it is.
-  const themed = scope === "tab" ? tab.theme : pane.theme;
-  const defer =
-    scope === "tab"
-      ? { label: "Follow the app", resolves: settings.theme }
-      : { label: "Follow the tab", resolves: themeOf(settings.theme, tab) };
+  // the menu below reads the same whichever it is. A floating pane has no tab,
+  // so for it there is only ever the pane's own.
+  const asTab = scope === "tab" && tab !== null;
+  const themed = asTab ? tab.theme : pane.theme;
+  const defer = asTab
+    ? { label: "Follow the app", resolves: settings.theme }
+    : { label: tab === null ? "Follow the app" : "Follow the tab", resolves: themeOf(settings.theme, tab) };
   const setTheme = (choice: ThemeChoice | undefined) =>
-    scope === "tab"
-      ? actions.onTabTheme(tabId, choice)
-      : actions.onPaneTheme(tabId, pane.id, choice);
+    asTab ? actions.onTabTheme(tab.id, choice) : actions.onPaneTheme(pane.id, choice);
+
+  /**
+   * Panes this one could be put beside.
+   *
+   * Its own tab's, or — for a pane on the rail, which is in no tab — whichever
+   * tab is on screen, since that is the one the user is looking at while they
+   * ask. Itself is never in the list: a pane cannot be split against itself.
+   */
+  const host = tab ?? tabs.find((candidate) => candidate.id === activeTabId) ?? null;
+  const neighbours =
+    host === null
+      ? []
+      : paneIds(host.root)
+          .filter((paneId) => paneId !== pane.id)
+          .map((paneId) => host.panes[paneId])
+          .filter((candidate): candidate is PaneState => candidate !== undefined);
+
+  /**
+   * Whether this menu may move the pane at all.
+   *
+   * From a pane header or a pop-up header it always may. From the tab strip it
+   * may only when the tab holds one pane — with two, "move this" has no answer,
+   * because the icon in the strip stands for the tab rather than for either of
+   * the panes in it.
+   */
+  const movable = scope === "pane" || tab === null || countPanes(tab.root) === 1;
+  const floating = tab === null;
+  const move = (to: MoveTarget) => {
+    menu.close();
+    actions.onMovePane(pane.id, to);
+  };
 
   return (
     <div ref={menu.wrapRef} className="flex shrink-0 items-center">
@@ -115,11 +159,11 @@ export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneM
         aria-haspopup="menu"
         aria-expanded={menu.open}
         title={
-          scope === "tab"
+          asTab
             ? `${tabLabel(tab)} — theme this tab, or change what it shows`
-            : `${paneLabel(pane)} — theme this pane, or change what it shows`
+            : `${paneLabel(pane)} — theme this pane, move it, or change what it shows`
         }
-        aria-label={`Menu for ${scope === "tab" ? tabLabel(tab) : paneLabel(pane)}`}
+        aria-label={`Menu for ${asTab ? tabLabel(tab) : paneLabel(pane)}`}
         // The tab strip starts a drag on pointerdown and a pane header takes
         // focus on mousedown; neither is what pressing this means.
         onPointerDown={(event) => event.stopPropagation()}
@@ -136,9 +180,53 @@ export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneM
       </button>
 
       <Menu menu={menu}>
-        <MenuSubmenu icon={Palette} label={scope === "tab" ? "Tab theme" : "Pane theme"}>
+        <MenuSubmenu icon={Palette} label={asTab ? "Tab theme" : "Pane theme"}>
           <ThemeMenu value={themed} defer={defer} onChange={setTheme} onPick={menu.close} />
         </MenuSubmenu>
+
+        {movable ? (
+          <MenuSubmenu icon={Move} label="Move to">
+            {floating ? null : (
+              <MenuItem
+                icon={PictureInPicture2}
+                label="New pop up"
+                onSelect={() => move({ kind: "popup" })}
+              />
+            )}
+
+            {neighbours.length > 0 ? (
+              <MenuSubmenu icon={Columns2} label="Split pane">
+                {neighbours.map((neighbour) => (
+                  <MenuItem
+                    key={neighbour.id}
+                    icon={paneKind(neighbour.kind).icon}
+                    label={paneLabel(neighbour)}
+                    onSelect={() => move({ kind: "split", paneId: neighbour.id })}
+                  />
+                ))}
+              </MenuSubmenu>
+            ) : null}
+
+            <MenuSubmenu icon={Layers} label="Tabs">
+              {others.map((destination) => {
+                const front = focusedPane(destination);
+                return (
+                  <MenuItem
+                    key={destination.id}
+                    icon={front ? paneKind(front.kind).icon : Layers}
+                    label={tabLabel(destination)}
+                    onSelect={() => move({ kind: "tab", tabId: destination.id })}
+                  />
+                );
+              })}
+              <MenuItem
+                icon={Plus}
+                label="New tab"
+                onSelect={() => move({ kind: "newTab" })}
+              />
+            </MenuSubmenu>
+          </MenuSubmenu>
+        ) : null}
 
         <MenuHeading divided>Replace with</MenuHeading>
         {NEW_PANE_MENU.map((choice) => (
@@ -148,13 +236,13 @@ export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneM
             label={choice.label}
             onSelect={() => {
               menu.close();
-              if (choice.action === "open") actions.onReplaceWithFile(tabId, pane.id);
-              else actions.onReplace(tabId, pane.id, choice.kind);
+              if (choice.action === "open") actions.onReplaceWithFile(pane.id);
+              else actions.onReplace(pane.id, choice.kind);
             }}
           />
         ))}
 
-        {others.length > 0 ? (
+        {tab !== null && others.length > 0 ? (
           <>
             <MenuHeading divided>Move a tab here</MenuHeading>
             {others.map((source) => {
@@ -166,7 +254,7 @@ export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneM
                   label={tabLabel(source)}
                   onSelect={() => {
                     menu.close();
-                    actions.onAbsorbTab(tabId, pane.id, source.id);
+                    actions.onAbsorbTab(tab.id, pane.id, source.id);
                   }}
                 />
               );

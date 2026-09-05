@@ -115,6 +115,12 @@ Hold the **+** in the tab bar for Notepad, Open file…, or Browser. Click a
 pane's kind icon — the small terminal or page glyph in its header, or on its tab
 — to change what that pane holds.
 
+<kbd>Mod</kbd>+click a URL a program has printed to open it in your real
+browser — whether it is plain text in the output or a link the program marked
+up itself. A plain click does nothing to it, deliberately: clicking in a
+terminal is how you focus a pane and start a selection, and over a log full of
+URLs that would be a minefield.
+
 ### About zooming
 
 <kbd>Mod</kbd>+<kbd>=</kbd> and <kbd>Mod</kbd>+<kbd>-</kbd> change the type size

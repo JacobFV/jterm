@@ -32,9 +32,17 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 
 import { applyInput, draftFrom, emptyDraft, replayBytes, type Draft } from "@/lib/draft";
-import { history, pty, scrollback as scrollbackApi, tmuxControl as tmuxControlApi } from "@/lib/ipc";
+import {
+  history,
+  openExternal,
+  pty,
+  scrollback as scrollbackApi,
+  tmuxControl as tmuxControlApi,
+} from "@/lib/ipc";
+import { isLinkActivation, linkTarget } from "@/lib/links";
 import { scanOsc } from "@/lib/osc";
 import { ready as ptyBusReady, subscribePty } from "@/lib/ptyBus";
+import { restoreBanner } from "@/lib/scrollback";
 import { registerTerminal } from "@/lib/terminals";
 import { sessionNameFor, tmuxAvailable } from "@/lib/tmux";
 import { getContent, updateContent } from "@/state/content";
@@ -145,6 +153,18 @@ export function TerminalPane({
    */
   const runningSinceRef = useRef<number | null>(null);
   const exitedRef = useRef(false);
+  /**
+   * Set while a recorded log is being parsed back into the terminal.
+   *
+   * Everything xterm.js sends *up* the pty arrives through one callback,
+   * whether the user typed it or the emulator generated it in answer to a
+   * question. During a replay every one of those is an answer to a question
+   * asked by a program that no longer exists — see `lib/scrollback.ts` — so
+   * none of it is the user talking and none of it may reach the shell. Held as
+   * a depth rather than a flag because a replay is written in more than one
+   * piece and the guard has to span all of them.
+   */
+  const restoringRef = useRef(0);
   const replayRef = useRef<{ text: string; settle: number; deadline: number } | null>(null);
   /** Where the shell was when the last command was submitted, for the log. */
   const cwdRef = useRef<string | undefined>(pane.cwd);
@@ -326,6 +346,24 @@ export function TerminalPane({
     if (host === null) return;
 
     const settings = getSettings();
+
+    /**
+     * `Mod`+click on a URL, sent to the real browser.
+     *
+     * Used twice, for the two kinds of link a terminal has: the ones found by
+     * scanning the text (`WebLinksAddon`) and the ones a program declares with
+     * OSC 8 (`linkHandler`). Both have to be given a handler — xterm's own
+     * default for either is `window.open`, which inside the Tauri webview is
+     * at best nothing and, for OSC 8, a blocking `confirm()` first. See
+     * `lib/links` for why a modifier is required and why the scheme is
+     * checked.
+     */
+    const followLink = (event: MouseEvent, uri: string) => {
+      if (!isLinkActivation(event)) return;
+      const target = linkTarget(uri);
+      if (target !== null) void openExternal(target);
+    };
+
     const term = new Terminal({
       allowProposedApi: true,
       // Always, rather than only for the themes that need it. A theme whose
@@ -347,6 +385,9 @@ export function TerminalPane({
       // is what survives a restart, and is capped separately.
       scrollback: settings.scrollback,
       theme: readTheme(host),
+      // Left at its default `false`, so an OSC 8 link claiming any scheme but
+      // http(s) never even reaches the handler.
+      linkHandler: { activate: followLink },
       macOptionIsMeta: true,
       // ConPTY re-wraps lines itself and reports the cursor differently from a
       // Unix pty; telling xterm which backend is behind it is what keeps
@@ -358,7 +399,7 @@ export function TerminalPane({
 
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
+    term.loadAddon(new WebLinksAddon(followLink));
     const unicode = new Unicode11Addon();
     term.loadAddon(unicode);
     term.unicode.activeVersion = "11";
@@ -431,6 +472,10 @@ export function TerminalPane({
 
     // Keystrokes on their way to the shell, mirrored on the way past.
     const dataSub = term.onData((data) => {
+      // Not a keystroke: the emulator answering a question out of a replayed
+      // log. Dropped rather than forwarded — it would be typed at the shell,
+      // and it would cancel the draft replay below as if the user had.
+      if (restoringRef.current > 0) return;
       if (exitedRef.current) {
         // A dead pane is not a dead end: Enter starts a new shell in it.
         if (data.includes("\r") || data.includes("\n")) {
@@ -487,6 +532,7 @@ export function TerminalPane({
     });
 
     const binarySub = term.onBinary((data) => {
+      if (restoringRef.current > 0) return;
       if (!exitedRef.current) void pty.write(paneId, data);
     });
 
@@ -630,12 +676,17 @@ export function TerminalPane({
         const previous = await scrollbackApi.read(paneId);
         if (disposed) return;
         if (previous) {
+          // Guarded across both writes, and released by the second one's
+          // callback: xterm.js parses what it is given in the order it was
+          // given, so by the time that runs every answer the log provoked has
+          // already been raised and dropped. The reset in the banner is the
+          // other half of the same problem — the modes the log switched on,
+          // put back the way a terminal starts. See `lib/scrollback.ts`.
+          restoringRef.current += 1;
           term.write(previous);
-          term.write(
-            adopted
-              ? "\x1b[0m\r\n\x1b[2m── reconnected ──\x1b[0m\r\n"
-              : "\x1b[0m\r\n\x1b[2m── session restored ──\x1b[0m\r\n",
-          );
+          term.write(restoreBanner(Boolean(adopted)), () => {
+            restoringRef.current -= 1;
+          });
         }
       }
 

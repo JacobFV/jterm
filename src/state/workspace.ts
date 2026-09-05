@@ -441,7 +441,6 @@ export type Action =
   | {
       /** One pane traded for a different kind of pane, in place. */
       type: "pane/replace";
-      tabId: string;
       paneId: string;
       kind: PaneKind;
       seed?: Partial<PaneState>;
@@ -513,10 +512,12 @@ const FOCUSES_A_TAB = new Set<Action["type"]>([
   "pane/focus",
   "pane/focusDirection",
   "pane/split",
-  "pane/replace",
   "pane/move",
   "pane/zoom",
 ]);
+// Deliberately not `pane/replace`: it can be aimed at a pane on the rail as
+// easily as one in a tab, and changing what a pane *is* is not a statement
+// about where the keyboard should be.
 
 export function reduce(state: Workspace, action: Action): Workspace {
   const next = apply(state, action);
@@ -735,22 +736,34 @@ function apply(state: Workspace, action: Action): Workspace {
      * notepad the previous terminal's log. Releasing those belongings is the
      * caller's job, for the same reason it is in `pane/close`.
      */
-    case "pane/replace":
-      return mapTab(state, action.tabId, (tab) => {
-        if (!hasPane(tab.root, action.paneId)) return tab;
-        const pane = newPane(action.kind, action.seed);
+    case "pane/replace": {
+      const replacement = newPane(action.kind, action.seed);
+
+      // A pop-up is a slot like any other, and what someone means by "make this
+      // a notepad" does not change because the pane is floating.
+      if (popupOf(state, action.paneId) !== null) {
         return {
-          ...tab,
-          root: repointPane(tab.root, action.paneId, pane.id),
-          panes: { ...omit(tab.panes, action.paneId), [pane.id]: pane },
-          focusedPaneId:
-            tab.focusedPaneId === action.paneId ? pane.id : tab.focusedPaneId,
-          // A zoomed pane that is replaced stays zoomed: the new pane is filling
-          // the same slot, and dropping the zoom would be an unasked-for change
-          // of layout on top of the one that was asked for.
-          zoomedPaneId: tab.zoomedPaneId === action.paneId ? pane.id : tab.zoomedPaneId,
+          ...mapPopup(state, action.paneId, (popup) => ({ ...popup, pane: replacement })),
+          focusedPopupId:
+            state.focusedPopupId === action.paneId ? replacement.id : state.focusedPopupId,
         };
-      });
+      }
+
+      const tab = state.tabs.find((candidate) => candidate.panes[action.paneId] !== undefined);
+      if (tab === undefined) return state;
+      return mapTab(state, tab.id, (current) => ({
+        ...current,
+        root: repointPane(current.root, action.paneId, replacement.id),
+        panes: { ...omit(current.panes, action.paneId), [replacement.id]: replacement },
+        focusedPaneId:
+          current.focusedPaneId === action.paneId ? replacement.id : current.focusedPaneId,
+        // A zoomed pane that is replaced stays zoomed: the new pane is filling
+        // the same slot, and dropping the zoom would be an unasked-for change
+        // of layout on top of the one that was asked for.
+        zoomedPaneId:
+          current.zoomedPaneId === action.paneId ? replacement.id : current.zoomedPaneId,
+      }));
+    }
 
     case "pane/close": {
       const tab = state.tabs.find((candidate) => candidate.id === action.tabId);

@@ -211,7 +211,6 @@ describe("pane/replace", () => {
     const setup = twoTabs();
     const next = reduce(setup.state, {
       type: "pane/replace",
-      tabId: setup.sourceTabId,
       paneId: setup.sourcePaneIds[0],
       kind: "browser",
     });
@@ -238,7 +237,6 @@ describe("pane/replace", () => {
 
     const next = reduce(zoomed, {
       type: "pane/replace",
-      tabId: setup.sourceTabId,
       paneId: focused,
       kind: "notepad",
     });
@@ -248,15 +246,26 @@ describe("pane/replace", () => {
     expect(tab.zoomedPaneId).toBe(replacement);
   });
 
-  it("ignores a pane that is not in the tab", () => {
+  it("ignores a pane that is not open anywhere", () => {
     const setup = twoTabs();
     const next = reduce(setup.state, {
       type: "pane/replace",
-      tabId: setup.targetTabId,
-      paneId: setup.sourcePaneIds[0],
+      paneId: "a-pane-that-closed",
       kind: "browser",
     });
     expect(next).toBe(setup.state);
+  });
+
+  it("replaces a pane on the rail in place, keeping it floating", () => {
+    let state = reduce(emptyWorkspace(), { type: "popup/open", kind: "terminal" });
+    const paneId = state.popups[0].pane.id;
+    state = reduce(state, { type: "pane/replace", paneId, kind: "notepad" });
+
+    expect(state.popups).toHaveLength(1);
+    expect(state.popups[0].pane.kind).toBe("notepad");
+    // A new pane means a new id — ids are how a pane's belongings are found —
+    // so the keyboard has to follow it or it is left pointing at nothing.
+    expect(state.focusedPopupId).toBe(state.popups[0].pane.id);
   });
 });
 
