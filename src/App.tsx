@@ -458,9 +458,10 @@ export function App() {
    * Two decisions, kept apart. *What* opens it is the extension's business, in
    * `kindForPath`, so "what opens a `.stl`" is answered in one place for every
    * route a file can arrive by. *Where* it opens is the user's, in settings: a
-   * tab of its own, or a split beside whatever is focused, on the side they
-   * chose. `target` overrides that for the one caller that means something
-   * specific — the tab strip's `Open file…`, which says "tab" on the label.
+   * a pop-up over the workspace, a tab of its own, or a split beside whatever
+   * is focused, on the side they chose. `target` overrides that for the one
+   * caller that means something specific — the tab strip's `Open file…`, which
+   * says "tab" on the label.
    *
    * Settings are read at the moment of the click rather than closed over, so
    * this callback survives a preference change without being rebuilt.
@@ -470,8 +471,17 @@ export function App() {
     const kind = kindForPath(path);
     const seed = { path } as Partial<PaneState>;
     const tab = activeTab(workspaceRef.current);
+    const where = target ?? settings.openFilesIn;
 
-    if ((target ?? settings.openFilesIn) === "pane" && tab) {
+    // The default, and the reason it is: a file picked out of the tree is
+    // usually something to look at *while* carrying on, not something to
+    // rearrange the window for.
+    if (where === "popup") {
+      dispatch({ type: "popup/open", kind, seed });
+      return;
+    }
+
+    if (where === "pane" && tab) {
       const { axis, before } = splitPlacement(settings.openPaneDirection);
       dispatch({
         type: "pane/split",

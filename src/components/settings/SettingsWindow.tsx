@@ -408,13 +408,14 @@ export function SettingsWindow() {
         <Section title="Files">
           <Row
             label="Open files in"
-            hint="Where a file goes when you pick one in the file tree or the open dialog. The + button's own “Open file…” always makes a tab."
+            hint="Where a file goes when you pick one in the file tree or the open dialog. A pop-up floats over the workspace and stays there while you switch tabs. The + button's own “Open file…” always makes a tab."
           >
             <Segmented
               label="Open files in"
               value={settings.openFilesIn}
               onChange={(openFilesIn) => updateSettings({ openFilesIn })}
               options={[
+                { value: "popup", label: "Pop-up" },
                 { value: "tab", label: "New tab" },
                 { value: "pane", label: "New pane" },
               ]}

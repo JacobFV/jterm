@@ -34,8 +34,16 @@ import type { Direction } from "./tree";
  */
 export type ThemeChoice = string;
 export type CursorStyle = "bar" | "block" | "underline";
-/** Where a file goes when you open one: a tab of its own, or a split. */
-export type FileOpenTarget = "tab" | "pane";
+/**
+ * Where a file goes when you open one: floating over the workspace, a tab of
+ * its own, or a split beside what is focused.
+ *
+ * `popup` is the default because of what opening a file from the tree usually
+ * is — a look at something while you carry on with what you were doing. A tab
+ * hides the work you opened it from, and a split rearranges it; a pop-up sits
+ * over the top and goes away again.
+ */
+export type FileOpenTarget = "popup" | "tab" | "pane";
 
 /**
  * What is behind a new terminal, and therefore what keeps its history.
@@ -141,7 +149,7 @@ export const DEFAULTS: Settings = {
   tmuxKeys: true,
   sidebarWidth: 220,
   showHiddenFiles: false,
-  openFilesIn: "tab",
+  openFilesIn: "popup",
   openPaneDirection: "right",
   ambientMotion: 1,
   ambientPresence: 1,
@@ -150,7 +158,7 @@ export const DEFAULTS: Settings = {
 };
 
 const CURSORS: CursorStyle[] = ["bar", "block", "underline"];
-const FILE_OPEN_TARGETS: FileOpenTarget[] = ["tab", "pane"];
+const FILE_OPEN_TARGETS: FileOpenTarget[] = ["popup", "tab", "pane"];
 const SHELL_BACKENDS: ShellBackend[] = ["direct", "tmux"];
 const SPLIT_DIRECTIONS: Direction[] = ["right", "left", "down", "up"];
 
