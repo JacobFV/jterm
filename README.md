@@ -50,6 +50,16 @@ runs on your behalf.
 - **Folds a tab into a split.** Drag a tab out of the strip and drop it on a
   pane: the tab's panes arrive as a split there, keeping the arrangement they
   already had. Nothing restarts — the shells behind them never notice.
+- **Draws pictures, and says that it can.** Sixel and iTerm's inline image
+  protocol, so `chafa`, `timg`, `img2sixel`, matplotlib's sixel backend and
+  Codex's terminal pets all put an actual image in the pane. Half of that is the
+  drawing; the other half is answering the question programs ask first — primary
+  device attributes, and the pixel size of a cell — which is what jterm used to
+  fail, and why anything that checked concluded it could not show a picture. It
+  works inside tmux too, where the query gets no answer and the pixel size comes
+  down through the pty instead. (Codex switches its pets off inside tmux for its
+  own reasons; **Settings → tmux → New terminals run on → A shell** is the way
+  round that one.)
 - **Opens more than shells.** A notepad with syntax highlighting and save, a web
   pane, and viewers for images, video, audio and STL meshes. What opens is
   chosen from the file you picked; *where* it opens — a pop-up, a new tab, or a
