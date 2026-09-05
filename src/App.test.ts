@@ -52,7 +52,13 @@ function tab(id: string, pane: PaneState): Tab {
 }
 
 function workspace(...tabs: Tab[]): Workspace {
-  return { tabs, activeTabId: tabs[0]?.id ?? null, sidebarOpen: false };
+  return {
+    tabs,
+    activeTabId: tabs[0]?.id ?? null,
+    sidebarOpen: false,
+    popups: [],
+    focusedPopupId: null,
+  };
 }
 
 describe("session import lifecycle", () => {

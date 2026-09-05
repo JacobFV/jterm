@@ -17,7 +17,7 @@ import type { PaneContent } from "./content";
 import type { ThemeChoice } from "./settings";
 import type { Node } from "./tree";
 import { clampRatio, hasPane, paneIds } from "./tree";
-import type { PaneKind, PaneState, Tab, Workspace } from "./workspace";
+import type { PaneKind, PaneState, Popup, Tab, Workspace } from "./workspace";
 
 /** Bumped when the shape changes in a way older files cannot satisfy. */
 export const SNAPSHOT_VERSION = 1;
@@ -32,6 +32,10 @@ const MAX_DRAFT = 8 * 1024;
 /** Notepads are for notes, not for logs; past this the file stops being cheap. */
 const MAX_TEXT = 4 * 1024 * 1024;
 const MAX_TABS = 64;
+/** Enough for a rail's worth; past this they are stacked on top of each other. */
+const MAX_POPUPS = 12;
+/** A pop-up smaller than this is one nobody could aim at. */
+const MIN_POPUP_SIZE = 0.08;
 
 export interface Snapshot {
   workspace: Workspace;
@@ -62,13 +66,30 @@ export function encode(workspace: Workspace, content: Record<string, PaneContent
     return false;
   });
 
+  // A control pane on the rail is dropped for the same reason a control tab is:
+  // tmux owns it, and reattaching is what brings it back correctly.
+  const popups = workspace.popups.filter((popup) => {
+    const session = controlPaneSession(popup.pane);
+    if (session === null) return true;
+    controlSessions.add(session);
+    return false;
+  });
+
   const activeTabId = tabs.some((tab) => tab.id === workspace.activeTabId)
     ? workspace.activeTabId
     : (tabs[0]?.id ?? null);
 
   return JSON.stringify({
     version: SNAPSHOT_VERSION,
-    workspace: { ...workspace, tabs, activeTabId },
+    workspace: {
+      ...workspace,
+      tabs,
+      activeTabId,
+      popups,
+      focusedPopupId: popups.some((popup) => popup.pane.id === workspace.focusedPopupId)
+        ? workspace.focusedPopupId
+        : null,
+    },
     content,
     controlSessions: [...controlSessions],
   });
@@ -77,11 +98,15 @@ export function encode(workspace: Workspace, content: Record<string, PaneContent
 /** The control session a tab belongs to, or `null` if it is an ordinary tab. */
 function controlSessionOf(tab: Tab): string | null {
   for (const pane of Object.values(tab.panes)) {
-    if (pane.kind === "terminal" && pane.tmuxPane !== undefined && pane.tmux) {
-      return pane.tmux;
-    }
+    const session = controlPaneSession(pane);
+    if (session !== null) return session;
   }
   return null;
+}
+
+/** The control session behind one pane, or `null` for a pane jterm itself runs. */
+function controlPaneSession(pane: PaneState): string | null {
+  return pane.kind === "terminal" && pane.tmuxPane !== undefined && pane.tmux ? pane.tmux : null;
 }
 
 export function decode(json: string | null | undefined): Snapshot | null {
@@ -112,9 +137,14 @@ export function decode(json: string | null | undefined): Snapshot | null {
       ? rawWorkspace.activeTabId
       : tabs[0].id;
 
+  const popups = decodePopups(rawWorkspace.popups);
+
   // Contents are kept only for panes that survived validation, so a discarded
   // tab does not leave its drafts behind to grow the file forever.
-  const live = new Set(tabs.flatMap((tab) => Object.keys(tab.panes)));
+  const live = new Set([
+    ...tabs.flatMap((tab) => Object.keys(tab.panes)),
+    ...popups.map((popup) => popup.pane.id),
+  ]);
   const content: Record<string, PaneContent> = {};
   if (isRecord(parsed.content)) {
     for (const [paneId, value] of Object.entries(parsed.content)) {
@@ -129,11 +159,66 @@ export function decode(json: string | null | undefined): Snapshot | null {
     }
   }
 
+  const focusedPopupId =
+    typeof rawWorkspace.focusedPopupId === "string" &&
+    popups.some((popup) => popup.pane.id === rawWorkspace.focusedPopupId)
+      ? rawWorkspace.focusedPopupId
+      : null;
+
   return {
-    workspace: { tabs, activeTabId, sidebarOpen: rawWorkspace.sidebarOpen === true },
+    workspace: {
+      tabs,
+      activeTabId,
+      sidebarOpen: rawWorkspace.sidebarOpen === true,
+      popups,
+      focusedPopupId,
+    },
     content,
     controlSessions: decodeSessions(parsed.controlSessions),
   };
+}
+
+/**
+ * The pop-ups over the workspace, each one validated on its own.
+ *
+ * A pop-up that fails is dropped rather than taking the file with it — the same
+ * rule the tabs get, for the same reason. Geometry is clamped rather than
+ * rejected: a width of zero or an `x` off the end of the rail is a pane that
+ * exists and cannot be reached, which is worse than a pane in the wrong place.
+ */
+function decodePopups(raw: unknown): Popup[] {
+  if (!Array.isArray(raw)) return [];
+  const popups: Popup[] = [];
+  for (const value of raw.slice(0, MAX_POPUPS)) {
+    if (!isRecord(value)) continue;
+    if (typeof value.paneId !== "string" && !isRecord(value.pane)) continue;
+    const rawPane = isRecord(value.pane) ? value.pane : null;
+    if (rawPane === null || typeof rawPane.id !== "string" || !rawPane.id) continue;
+    const pane = decodePane(rawPane.id, rawPane);
+    if (pane === null) continue;
+    // Two pop-ups holding one pane id would be one pane rendered twice, with
+    // two headers offering to close the same shell.
+    if (popups.some((popup) => popup.pane.id === pane.id)) continue;
+
+    const width = clamp(value.width, MIN_POPUP_SIZE, 1, 0.36);
+    const height = clamp(value.height, MIN_POPUP_SIZE, 1, 0.44);
+    popups.push({
+      pane,
+      width,
+      height,
+      x: clamp(value.x, 0, Math.max(0, 1 - width), 0),
+      state:
+        value.state === "minimized" || value.state === "full" || value.state === "open"
+          ? value.state
+          : "open",
+    });
+  }
+  return popups;
+}
+
+function clamp(raw: unknown, low: number, high: number, fallback: number): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return fallback;
+  return Math.min(high, Math.max(low, raw));
 }
 
 /**

@@ -580,8 +580,7 @@ export function App() {
       // Two of the three levels a theme can be chosen at. The third is the
       // app's, which is a preference and lives in the Settings window.
       onTabTheme: (tabId, theme) => dispatch({ type: "tab/theme", tabId, theme }),
-      onPaneTheme: (tabId, paneId, theme) =>
-        dispatch({ type: "pane/theme", tabId, paneId, theme }),
+      onPaneTheme: (paneId, theme) => dispatch({ type: "pane/theme", paneId, theme }),
     }),
     [replacePane],
   );

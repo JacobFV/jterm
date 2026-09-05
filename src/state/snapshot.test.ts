@@ -89,7 +89,6 @@ describe("themes in the snapshot", () => {
     const paneId = start.tabs[0].focusedPaneId;
     return reduce(reduce(start, { type: "tab/theme", tabId, theme: "nord" }), {
       type: "pane/theme",
-      tabId,
       paneId,
       theme: "gruvbox",
     });
@@ -120,5 +119,53 @@ describe("themes in the snapshot", () => {
     const tab = decode(encode(emptyWorkspace(), {}))!.workspace.tabs[0];
     expect(tab.theme).toBeUndefined();
     expect(tab.panes[tab.focusedPaneId].theme).toBeUndefined();
+  });
+});
+
+describe("pop-ups in the snapshot", () => {
+  it("brings the rail back as it was", () => {
+    let state = reduce(emptyWorkspace(), { type: "popup/open", kind: "notepad" });
+    const paneId = state.popups[0].pane.id;
+    state = reduce(state, { type: "popup/move", paneId, x: 0.2 });
+    state = reduce(state, { type: "popup/state", paneId, state: "minimized" });
+
+    const restored = decode(encode(state, {}))!.workspace;
+    expect(restored.popups).toHaveLength(1);
+    expect(restored.popups[0].pane.id).toBe(paneId);
+    expect(restored.popups[0].x).toBeCloseTo(0.2);
+    expect(restored.popups[0].state).toBe("minimized");
+  });
+
+  it("keeps a pop-up's notepad text, which lives nowhere else", () => {
+    const state = reduce(emptyWorkspace(), { type: "popup/open", kind: "notepad" });
+    const paneId = state.popups[0].pane.id;
+
+    const restored = decode(encode(state, { [paneId]: { text: "half a thought" } }))!;
+    expect(restored.content[paneId]?.text).toBe("half a thought");
+  });
+
+  it("drops a pop-up that decodes to nothing usable, and keeps the rest", () => {
+    const state = reduce(emptyWorkspace(), { type: "popup/open", kind: "terminal" });
+    const parsed = JSON.parse(encode(state, {}));
+    parsed.workspace.popups = [
+      { x: 0.1, width: 0.3, height: 0.3, state: "open" },
+      { pane: { id: "no-such-kind", kind: "wormhole" }, x: 0.1 },
+      ...parsed.workspace.popups,
+    ];
+
+    const restored = decode(JSON.stringify(parsed))!.workspace;
+    expect(restored.popups).toHaveLength(1);
+    expect(restored.popups[0].pane.kind).toBe("terminal");
+  });
+
+  it("clamps geometry a hand-edited file could put out of reach", () => {
+    const state = reduce(emptyWorkspace(), { type: "popup/open", kind: "terminal" });
+    const parsed = JSON.parse(encode(state, {}));
+    parsed.workspace.popups[0] = { ...parsed.workspace.popups[0], x: 9, width: 0, height: 40 };
+
+    const popup = decode(JSON.stringify(parsed))!.workspace.popups[0];
+    expect(popup.width).toBeGreaterThan(0);
+    expect(popup.height).toBeLessThanOrEqual(1);
+    expect(popup.x + popup.width).toBeLessThanOrEqual(1);
   });
 });

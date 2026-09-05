@@ -310,7 +310,6 @@ describe("themes at three levels", () => {
     const [first, second] = paneIds(tab.root);
     const next = reduce(setup.state, {
       type: "pane/theme",
-      tabId: setup.sourceTabId,
       paneId: first,
       theme: "gruvbox",
     });
@@ -364,7 +363,6 @@ describe("themes at three levels", () => {
     const setup = twoTabs();
     const dressed = reduce(setup.state, {
       type: "pane/theme",
-      tabId: setup.targetTabId,
       paneId: setup.targetPaneId,
       theme: "gruvbox",
     });
@@ -575,5 +573,176 @@ describe("tmux/closed", () => {
   it("does nothing for a session that has no tabs here", () => {
     const state = synced([window("@0", tmuxPane(0))]);
     expect(reduce(state, { type: "tmux/closed", session: "elsewhere" })).toBe(state);
+  });
+});
+
+/* ── Pop-ups and moving panes ────────────────────────────────────────────── */
+
+describe("pop-ups", () => {
+  it("floats a new pane over every tab, focused, without touching the tabs", () => {
+    const start = emptyWorkspace();
+    const next = reduce(start, { type: "popup/open", kind: "terminal" });
+
+    expect(next.popups).toHaveLength(1);
+    expect(next.focusedPopupId).toBe(next.popups[0].pane.id);
+    expect(next.tabs).toEqual(start.tabs);
+    // Lower right, which is where a thing that must not be in the way goes.
+    expect(next.popups[0].x + next.popups[0].width).toBeLessThanOrEqual(1);
+    expect(next.popups[0].x).toBeGreaterThan(0.5);
+  });
+
+  it("deals a second pop-up clear of the first", () => {
+    let state = reduce(emptyWorkspace(), { type: "popup/open", kind: "terminal" });
+    state = reduce(state, { type: "popup/open", kind: "notepad" });
+    expect(state.popups[1].x).toBeLessThan(state.popups[0].x);
+  });
+
+  it("keeps a pop-up on the rail however far it is dragged", () => {
+    let state = reduce(emptyWorkspace(), { type: "popup/open", kind: "terminal" });
+    const paneId = state.popups[0].pane.id;
+
+    state = reduce(state, { type: "popup/move", paneId, x: 4 });
+    expect(state.popups[0].x).toBeCloseTo(1 - state.popups[0].width);
+
+    state = reduce(state, { type: "popup/move", paneId, x: -3 });
+    expect(state.popups[0].x).toBe(0);
+  });
+
+  it("hands the keyboard back to the tab when a pop-up is minimised", () => {
+    let state = reduce(emptyWorkspace(), { type: "popup/open", kind: "terminal" });
+    const paneId = state.popups[0].pane.id;
+    expect(state.focusedPopupId).toBe(paneId);
+
+    state = reduce(state, { type: "popup/state", paneId, state: "minimized" });
+    expect(state.focusedPopupId).toBeNull();
+
+    // Opening it again is picking it back up.
+    state = reduce(state, { type: "popup/state", paneId, state: "open" });
+    expect(state.focusedPopupId).toBe(paneId);
+  });
+
+  it("raises a focused pop-up to the front of the stack", () => {
+    let state = reduce(emptyWorkspace(), { type: "popup/open", kind: "terminal" });
+    const first = state.popups[0].pane.id;
+    state = reduce(state, { type: "popup/open", kind: "notepad" });
+
+    state = reduce(state, { type: "popup/focus", paneId: first });
+    expect(state.popups[state.popups.length - 1].pane.id).toBe(first);
+    expect(state.focusedPopupId).toBe(first);
+  });
+
+  it("gives the keyboard back to a tab as soon as one is chosen", () => {
+    let state = reduce(emptyWorkspace(), { type: "popup/open", kind: "terminal" });
+    expect(state.focusedPopupId).not.toBeNull();
+
+    state = reduce(state, { type: "tab/select", tabId: state.tabs[0].id });
+    expect(state.focusedPopupId).toBeNull();
+  });
+});
+
+describe("pane/moveTo", () => {
+  it("moves a pane out of a split and onto the rail, keeping its id", () => {
+    const setup = twoTabs();
+    const [first, second] = setup.sourcePaneIds;
+
+    const next = reduce(setup.state, { type: "pane/moveTo", paneId: first, to: { kind: "popup" } });
+
+    expect(next.popups.map((popup) => popup.pane.id)).toEqual([first]);
+    expect(Object.keys(next.tabs[1].panes)).toEqual([second]);
+    expect(countPanes(next.tabs[1].root)).toBe(1);
+    // The id is the whole point: everything the pane owns outside React — its
+    // pty, its scrollback, its draft — is found by it.
+    expect(next.popups[0].pane).toBe(setup.state.tabs[1].panes[first]);
+  });
+
+  it("takes the tab with it when the pane was the only one in it", () => {
+    const setup = twoTabs();
+    const next = reduce(setup.state, {
+      type: "pane/moveTo",
+      paneId: setup.targetPaneId,
+      to: { kind: "popup" },
+    });
+
+    expect(next.tabs.map((tab) => tab.id)).toEqual([setup.sourceTabId]);
+    expect(next.popups[0].pane.id).toBe(setup.targetPaneId);
+  });
+
+  it("moves a pop-up back into a tab, beside the pane that was named", () => {
+    const setup = twoTabs();
+    const [first] = setup.sourcePaneIds;
+    let state = reduce(setup.state, { type: "pane/moveTo", paneId: first, to: { kind: "popup" } });
+
+    state = reduce(state, {
+      type: "pane/moveTo",
+      paneId: first,
+      to: { kind: "split", paneId: setup.targetPaneId },
+    });
+
+    expect(state.popups).toHaveLength(0);
+    const target = state.tabs.find((tab) => tab.id === setup.targetTabId)!;
+    expect(paneIds(target.root)).toContain(first);
+    expect(target.focusedPaneId).toBe(first);
+    expect(state.activeTabId).toBe(setup.targetTabId);
+    expect(state.focusedPopupId).toBeNull();
+  });
+
+  it("moves a pane into another tab", () => {
+    const setup = twoTabs();
+    const [first] = setup.sourcePaneIds;
+
+    const next = reduce(setup.state, {
+      type: "pane/moveTo",
+      paneId: first,
+      to: { kind: "tab", tabId: setup.targetTabId },
+    });
+
+    const target = next.tabs.find((tab) => tab.id === setup.targetTabId)!;
+    expect(paneIds(target.root).sort()).toEqual([setup.targetPaneId, first].sort());
+    expect(next.tabs.find((tab) => tab.id === setup.sourceTabId)!.panes[first]).toBeUndefined();
+  });
+
+  it("gives a pane a tab of its own", () => {
+    const setup = twoTabs();
+    const [first] = setup.sourcePaneIds;
+
+    const next = reduce(setup.state, { type: "pane/moveTo", paneId: first, to: { kind: "newTab" } });
+
+    expect(next.tabs).toHaveLength(3);
+    const made = next.tabs[next.tabs.length - 1];
+    expect(paneIds(made.root)).toEqual([first]);
+    expect(next.activeTabId).toBe(made.id);
+  });
+
+  it("changes nothing when the destination cannot take the pane", () => {
+    const setup = twoTabs();
+    const [first] = setup.sourcePaneIds;
+
+    // A pane cannot be split against itself, and the refusal must not cost the
+    // pane: it was taken out of its tab before the destination was asked.
+    const next = reduce(setup.state, {
+      type: "pane/moveTo",
+      paneId: first,
+      to: { kind: "split", paneId: first },
+    });
+    expect(next).toBe(setup.state);
+
+    const gone = reduce(setup.state, {
+      type: "pane/moveTo",
+      paneId: first,
+      to: { kind: "tab", tabId: "a-tab-that-closed" },
+    });
+    expect(gone).toBe(setup.state);
+  });
+
+  it("ejects a pane without disposing of it, for a window that is adopting it", () => {
+    const setup = twoTabs();
+    const [first] = setup.sourcePaneIds;
+    const pane = setup.state.tabs[1].panes[first];
+
+    const sent = reduce(setup.state, { type: "pane/eject", paneId: first });
+    expect(sent.tabs[1].panes[first]).toBeUndefined();
+
+    const received = reduce(emptyWorkspace(), { type: "pane/adopt", pane, as: "popup" });
+    expect(received.popups[0].pane.id).toBe(first);
   });
 });

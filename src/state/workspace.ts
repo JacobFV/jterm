@@ -158,13 +158,82 @@ export interface Tab {
   zoomedPaneId: string | null;
 }
 
+/**
+ * How much of the window a pop-up is showing.
+ *
+ * `minimized` keeps the pane alive and on the rail with only its header drawn,
+ * which is the point of it: a shell you have stopped watching but have not
+ * finished with. `full` fills the pane area, for the moment where the pop-up
+ * has stopped being a glance and become the thing you are working in.
+ */
+export type PopupState = "open" | "minimized" | "full";
+
+/**
+ * A pane floating over the workspace rather than living in a tab.
+ *
+ * It belongs to the *window*, not to any tab, which is the whole feature:
+ * switching tabs does not disturb it, so a file opened for reference stays in
+ * front of you while you move around behind it.
+ *
+ * Geometry is stored as fractions of the pane area, never pixels, for the same
+ * reason the split tree is: the window is resizable, and a pop-up parked at the
+ * right edge of a wide window should still be at the right edge of a narrow
+ * one. Only `x` moves — every pop-up sits on the rail along the bottom.
+ */
+export interface Popup {
+  pane: PaneState;
+  /** Left edge, as a fraction of the pane area's width. */
+  x: number;
+  /** Size, as fractions of the pane area. Ignored while `full`. */
+  width: number;
+  height: number;
+  state: PopupState;
+}
+
 export interface Workspace {
   tabs: Tab[];
   activeTabId: string | null;
   /** Whether the file tree is showing. Persisted: a sidebar that closes itself
    *  on every launch is one the user has to reopen on every launch. */
   sidebarOpen: boolean;
+  /**
+   * The pop-ups over every tab, back to front. Raising one moves it to the end
+   * rather than sorting on a z-index — the array *is* the order, so there is
+   * only one thing to be wrong.
+   */
+  popups: Popup[];
+  /**
+   * The pop-up holding the keyboard, by pane id, or `null` when a tab's pane
+   * has it.
+   *
+   * Focus cannot live in `Tab.focusedPaneId` alone once panes float over the
+   * tabs: a tab always has a focused pane, and if that were the only answer
+   * then clicking into a pop-up could not take the keyboard away from it.
+   */
+  focusedPopupId: string | null;
 }
+
+/**
+ * Somewhere a pane can be sent.
+ *
+ * `tab` puts it in that tab beside whatever is focused there; `split` names the
+ * pane to land next to, which is the same operation aimed precisely. Both exist
+ * because the menu offers both, and the difference is only how much the user
+ * cared to say.
+ */
+export type MoveTarget =
+  | { kind: "popup" }
+  | { kind: "tab"; tabId: string }
+  | { kind: "newTab" }
+  | { kind: "split"; paneId: string; axis?: Axis; before?: boolean };
+
+/** Where a pop-up lands when it is made, and how big it starts. */
+const POPUP_WIDTH = 0.36;
+const POPUP_HEIGHT = 0.44;
+/** Gap left at the right edge, so it reads as floating rather than docked. */
+const POPUP_INSET = 0.015;
+/** How far each further pop-up is dealt to the left of the last. */
+const POPUP_STAGGER = 0.06;
 
 export const HOME_PAGE = "https://duckduckgo.com";
 
@@ -202,7 +271,26 @@ export function newTab(kind: PaneKind = "terminal", seed?: Partial<PaneState>): 
 
 export function emptyWorkspace(): Workspace {
   const tab = newTab("terminal");
-  return { tabs: [tab], activeTabId: tab.id, sidebarOpen: false };
+  return {
+    tabs: [tab],
+    activeTabId: tab.id,
+    sidebarOpen: false,
+    popups: [],
+    focusedPopupId: null,
+  };
+}
+
+/**
+ * A pop-up around a pane, placed where the last one is not.
+ *
+ * The first lands in the lower right, which is where a thing that must not be
+ * in the way goes. Each further one is dealt to the left of it so a second
+ * pop-up is not hidden underneath the first — clamped at the left edge, after
+ * which they do stack, because a rail is only so long.
+ */
+export function newPopup(pane: PaneState, existing: number): Popup {
+  const x = Math.max(0, 1 - POPUP_WIDTH - POPUP_INSET - existing * POPUP_STAGGER);
+  return { pane, x, width: POPUP_WIDTH, height: POPUP_HEIGHT, state: "open" };
 }
 
 /* ── Reading ─────────────────────────────────────────────────────────────── */
@@ -213,6 +301,37 @@ export function activeTab(workspace: Workspace): Tab | null {
 
 export function focusedPane(tab: Tab): PaneState | null {
   return tab.panes[tab.focusedPaneId] ?? null;
+}
+
+/** Every pane in the window, tabs and pop-ups alike. */
+export function allPanes(workspace: Workspace): PaneState[] {
+  return [
+    ...workspace.tabs.flatMap((tab) => Object.values(tab.panes)),
+    ...workspace.popups.map((popup) => popup.pane),
+  ];
+}
+
+/**
+ * Where a pane lives.
+ *
+ * One question with two answers — a tab, or the rail — asked in one place so
+ * that closing, disposing and moving do not each grow their own version of it.
+ * `tabId` is `null` for a pop-up, which is what tells the two apart.
+ */
+export function locatePane(
+  workspace: Workspace,
+  paneId: string,
+): { pane: PaneState; tabId: string | null } | null {
+  for (const tab of workspace.tabs) {
+    const pane = tab.panes[paneId];
+    if (pane) return { pane, tabId: tab.id };
+  }
+  const popup = workspace.popups.find((candidate) => candidate.pane.id === paneId);
+  return popup ? { pane: popup.pane, tabId: null } : null;
+}
+
+export function popupOf(workspace: Workspace, paneId: string): Popup | null {
+  return workspace.popups.find((popup) => popup.pane.id === paneId) ?? null;
 }
 
 /**
@@ -328,15 +447,44 @@ export type Action =
       seed?: Partial<PaneState>;
     }
   | { type: "pane/close"; tabId: string; paneId: string }
+  /**
+   * A pane picked up from wherever it is and put somewhere else.
+   *
+   * One action for every direction — tab to pop-up, pop-up to tab, tab to tab,
+   * beside another pane — because they are one gesture with four destinations,
+   * and because the hard part is the same in all four: the pane must keep its
+   * id. Everything a pane owns outside React is found by that id, so a "move"
+   * that minted a new one would be a close and an open wearing a disguise, and
+   * the shell would be gone.
+   */
+  | { type: "pane/moveTo"; paneId: string; to: MoveTarget }
+  /** A pane arriving from another window. See `pane/eject` for the other half. */
+  | { type: "pane/adopt"; pane: PaneState; as: "tab" | "popup" }
+  /**
+   * A pane leaving for another window: removed, but *not* disposed.
+   *
+   * The distinction is the whole reason this is not `pane/close`. The shell
+   * behind it keeps running and the window that adopted it is about to attach
+   * to it; killing the pty here would move a corpse.
+   */
+  | { type: "pane/eject"; paneId: string }
+  | { type: "popup/open"; kind: PaneKind; seed?: Partial<PaneState> }
+  /** Slide a pop-up along the rail. `x` is a fraction of the pane area. */
+  | { type: "popup/move"; paneId: string; x: number }
+  | { type: "popup/state"; paneId: string; state: PopupState }
+  | { type: "popup/focus"; paneId: string }
+  | { type: "popup/close"; paneId: string }
   | { type: "pane/focus"; tabId: string; paneId: string }
   | { type: "pane/focusDirection"; tabId: string; direction: Direction }
   | { type: "pane/move"; tabId: string; paneId: string; targetPaneId: string; edge: DropEdge }
   | { type: "pane/ratio"; tabId: string; nodeId: string; ratio: number }
   | { type: "pane/nudge"; tabId: string; direction: Direction }
   | { type: "pane/zoom"; tabId: string; paneId?: string }
-  | { type: "pane/meta"; tabId: string; paneId: string; patch: Partial<PaneState> }
+  /** Panes are unique by id across every tab and every pop-up, so neither of
+   *  these needs to be told where the pane lives. */
+  | { type: "pane/meta"; paneId: string; patch: Partial<PaneState> }
   /** `undefined` puts the pane back to following its tab. */
-  | { type: "pane/theme"; tabId: string; paneId: string; theme: ThemeChoice | undefined }
+  | { type: "pane/theme"; paneId: string; theme: ThemeChoice | undefined }
   /** tmux has described a control session; make the tabs agree with it. */
   | { type: "tmux/sync"; session: string; windows: TmuxWindow[] }
   /** A control session ended or was detached from; its tabs go with it. */
@@ -345,7 +493,38 @@ export type Action =
 /** How far one keyboard resize step moves a divider. */
 const NUDGE = 0.03;
 
+/**
+ * Actions that mean "the keyboard is in a tab now".
+ *
+ * A pop-up floats over every tab, so nothing about switching tabs or focusing a
+ * pane inside one would otherwise take the keyboard away from it — you would
+ * click a tab, watch it come forward, and find your typing still going into the
+ * pop-up. Listed here rather than handled in each case because the rule is one
+ * rule, and a case that forgot it would be a bug nobody would think to look for.
+ */
+const FOCUSES_A_TAB = new Set<Action["type"]>([
+  "tab/new",
+  "tab/open",
+  "tab/select",
+  "tab/step",
+  "tab/selectIndex",
+  "tab/graft",
+  "tab/absorb",
+  "pane/focus",
+  "pane/focusDirection",
+  "pane/split",
+  "pane/replace",
+  "pane/move",
+  "pane/zoom",
+]);
+
 export function reduce(state: Workspace, action: Action): Workspace {
+  const next = apply(state, action);
+  if (!FOCUSES_A_TAB.has(action.type) || next.focusedPopupId === null) return next;
+  return { ...next, focusedPopupId: null };
+}
+
+function apply(state: Workspace, action: Action): Workspace {
   switch (action.type) {
     case "restore":
       return action.workspace;
@@ -579,7 +758,7 @@ export function reduce(state: Workspace, action: Action): Workspace {
       // The last pane going means the tab is over; routing through tab/close
       // keeps the "never leave an empty window" rule in one place.
       if (countPanes(tab.root) <= 1) {
-        return reduce(state, { type: "tab/close", tabId: action.tabId });
+        return apply(state, { type: "tab/close", tabId: action.tabId });
       }
       return mapTab(state, action.tabId, (current) => {
         const before = layout(current.root).panes;
@@ -606,6 +785,74 @@ export function reduce(state: Workspace, action: Action): Workspace {
         };
       });
     }
+
+    /**
+     * A pane picked up and put down somewhere else, keeping its id.
+     *
+     * Ordered so that a pane can never be lost: the destination is asked to
+     * accept it *after* it has been taken out, and if it will not — a tab that
+     * has since gone, a target pane that is the one being moved — the whole
+     * action is dropped and the state before it stands. There is no partial
+     * outcome where a shell has left one place and arrived nowhere.
+     */
+    case "pane/moveTo": {
+      const taken = detachPane(state, action.paneId);
+      if (taken === null) return state;
+      return insertPane(taken.state, taken.pane, action.to) ?? state;
+    }
+
+    case "pane/adopt":
+      return (
+        insertPane(state, action.pane, action.as === "popup" ? { kind: "popup" } : { kind: "newTab" }) ??
+        state
+      );
+
+    case "pane/eject":
+      return detachPane(state, action.paneId)?.state ?? state;
+
+    case "popup/open": {
+      const pane = newPane(action.kind, action.seed);
+      return {
+        ...state,
+        popups: [...state.popups, newPopup(pane, state.popups.length)],
+        focusedPopupId: pane.id,
+      };
+    }
+
+    case "popup/move":
+      return mapPopup(state, action.paneId, (popup) => ({
+        ...popup,
+        // Clamped against the popup's own width so it cannot be pushed off the
+        // end of the rail and out of reach.
+        x: Math.max(0, Math.min(1 - popup.width, action.x)),
+      }));
+
+    case "popup/state": {
+      const next = mapPopup(state, action.paneId, (popup) =>
+        popup.state === action.state ? popup : { ...popup, state: action.state },
+      );
+      // Minimising is a way of putting something down, so the keyboard goes
+      // back to the tab underneath; the other two are a way of picking it up.
+      return action.state === "minimized"
+        ? {
+            ...next,
+            focusedPopupId: next.focusedPopupId === action.paneId ? null : next.focusedPopupId,
+          }
+        : raisePopup({ ...next, focusedPopupId: action.paneId }, action.paneId);
+    }
+
+    case "popup/focus":
+      return state.focusedPopupId === action.paneId &&
+        state.popups[state.popups.length - 1]?.pane.id === action.paneId
+        ? state
+        : raisePopup({ ...state, focusedPopupId: action.paneId }, action.paneId);
+
+    case "popup/close":
+      return {
+        ...state,
+        popups: state.popups.filter((popup) => popup.pane.id !== action.paneId),
+        focusedPopupId: state.focusedPopupId === action.paneId ? null : state.focusedPopupId,
+      };
 
     case "pane/focus":
       return mapTab(state, action.tabId, (tab) =>
@@ -667,23 +914,15 @@ export function reduce(state: Workspace, action: Action): Workspace {
       });
 
     case "pane/meta":
-      return mapTab(state, action.tabId, (tab) => {
-        const pane = tab.panes[action.paneId];
-        if (!pane) return tab;
+      return mapPane(state, action.paneId, (pane) => {
         const next = { ...pane, ...action.patch } as PaneState;
-        if (shallowEqual(pane, next)) return tab;
-        return { ...tab, panes: { ...tab.panes, [action.paneId]: next } };
+        return shallowEqual(pane, next) ? pane : next;
       });
 
     case "pane/theme":
-      return mapTab(state, action.tabId, (tab) => {
-        const pane = tab.panes[action.paneId];
-        if (!pane || pane.theme === action.theme) return tab;
-        return {
-          ...tab,
-          panes: { ...tab.panes, [action.paneId]: { ...pane, theme: action.theme } },
-        };
-      });
+      return mapPane(state, action.paneId, (pane) =>
+        pane.theme === action.theme ? pane : { ...pane, theme: action.theme },
+      );
 
     /**
      * Make the tabs of one control session say what tmux says.
@@ -736,21 +975,35 @@ export function reduce(state: Workspace, action: Action): Workspace {
      */
     case "tmux/closed": {
       const tabs = state.tabs.filter((tab) => !belongsTo(tab, action.session));
-      if (tabs.length === state.tabs.length) return state;
+      // A control pane someone moved onto the rail belongs to the session just
+      // as much as one still in a tab, and goes with it.
+      const popups = state.popups.filter((popup) => !isControlPane(popup.pane, action.session));
+      if (tabs.length === state.tabs.length && popups.length === state.popups.length) return state;
       const activeTabId =
         state.activeTabId !== null && tabs.some((tab) => tab.id === state.activeTabId)
           ? state.activeTabId
           : (tabs[0]?.id ?? null);
-      return { ...state, tabs, activeTabId };
+      return {
+        ...state,
+        tabs,
+        activeTabId,
+        popups,
+        focusedPopupId: popups.some((popup) => popup.pane.id === state.focusedPopupId)
+          ? state.focusedPopupId
+          : null,
+      };
     }
   }
 }
 
 /** Whether a tab is one of `session`'s control-mode windows. */
 function belongsTo(tab: Tab, session: string): boolean {
-  return Object.values(tab.panes).some(
-    (pane) => pane.kind === "terminal" && pane.tmuxPane !== undefined && pane.tmux === session,
-  );
+  return Object.values(tab.panes).some((pane) => isControlPane(pane, session));
+}
+
+/** A pane tmux is running and jterm is only drawing. */
+function isControlPane(pane: PaneState, session: string): boolean {
+  return pane.kind === "terminal" && pane.tmuxPane !== undefined && pane.tmux === session;
 }
 
 function blankTab(id: string): Tab {
@@ -817,6 +1070,178 @@ function omit(panes: Record<string, PaneState>, paneId: string): Record<string, 
   const next = { ...panes };
   delete next[paneId];
   return next;
+}
+
+/**
+ * Take a pane out of wherever it is, and hand it back.
+ *
+ * The counterpart of `insertPane`, and deliberately not "close": nothing is
+ * disposed here, because every caller is moving the pane rather than ending
+ * it. A tab left with no panes goes too, through `tab/close` so that the rule
+ * about never leaving an empty window stays in one place.
+ */
+function detachPane(
+  state: Workspace,
+  paneId: string,
+): { state: Workspace; pane: PaneState } | null {
+  const popup = popupOf(state, paneId);
+  if (popup !== null) {
+    return {
+      pane: popup.pane,
+      state: {
+        ...state,
+        popups: state.popups.filter((candidate) => candidate.pane.id !== paneId),
+        focusedPopupId: state.focusedPopupId === paneId ? null : state.focusedPopupId,
+      },
+    };
+  }
+
+  const tab = state.tabs.find((candidate) => candidate.panes[paneId] !== undefined);
+  if (tab === undefined) return null;
+  const pane = tab.panes[paneId];
+
+  if (countPanes(tab.root) <= 1) {
+    return { pane, state: apply(state, { type: "tab/close", tabId: tab.id }) };
+  }
+
+  const before = layout(tab.root).panes;
+  const root = removePane(tab.root, paneId);
+  if (root === null) return null;
+  // Focus lands next door, exactly as it does when a pane is closed: the pane
+  // has left the tab either way, and the eye should not have to go looking.
+  const fallback =
+    neighbor(before, paneId, "right") ??
+    neighbor(before, paneId, "left") ??
+    neighbor(before, paneId, "down") ??
+    neighbor(before, paneId, "up") ??
+    paneIds(root)[0];
+
+  return {
+    pane,
+    state: mapTab(state, tab.id, (current) => ({
+      ...current,
+      root,
+      panes: omit(current.panes, paneId),
+      focusedPaneId: current.focusedPaneId === paneId ? fallback : current.focusedPaneId,
+      zoomedPaneId: current.zoomedPaneId === paneId ? null : current.zoomedPaneId,
+    })),
+  };
+}
+
+/**
+ * Put a pane somewhere, or refuse.
+ *
+ * `null` means the destination could not take it — a tab that no longer
+ * exists, or a pane asked to be split against itself. Refusing rather than
+ * improvising is what lets `pane/moveTo` treat a failed insert as "nothing
+ * happened at all": the caller still holds the state from before the pane was
+ * taken out, and simply keeps it.
+ */
+function insertPane(state: Workspace, pane: PaneState, to: MoveTarget): Workspace | null {
+  switch (to.kind) {
+    case "popup":
+      return {
+        ...state,
+        popups: [...state.popups, newPopup(pane, state.popups.length)],
+        focusedPopupId: pane.id,
+      };
+
+    case "newTab": {
+      const tab: Tab = {
+        id: newId(),
+        root: leaf(newId(), pane.id),
+        panes: { [pane.id]: pane },
+        focusedPaneId: pane.id,
+        zoomedPaneId: null,
+      };
+      return { ...state, tabs: [...state.tabs, tab], activeTabId: tab.id, focusedPopupId: null };
+    }
+
+    case "tab": {
+      const target = state.tabs.find((candidate) => candidate.id === to.tabId);
+      if (target === undefined) return null;
+      return besidePane(state, pane, target.id, target.focusedPaneId, "x", false);
+    }
+
+    case "split": {
+      if (to.paneId === pane.id) return null;
+      const target = state.tabs.find((candidate) => candidate.panes[to.paneId] !== undefined);
+      if (target === undefined) return null;
+      return besidePane(state, pane, target.id, to.paneId, to.axis ?? "x", to.before ?? false);
+    }
+  }
+}
+
+/** One pane grafted in beside another, and focused where it landed. */
+function besidePane(
+  state: Workspace,
+  pane: PaneState,
+  tabId: string,
+  targetPaneId: string,
+  axis: Axis,
+  before: boolean,
+): Workspace | null {
+  const target = state.tabs.find((candidate) => candidate.id === tabId);
+  if (target === undefined || !hasPane(target.root, targetPaneId)) return null;
+
+  return {
+    ...mapTab(state, tabId, (tab) => ({
+      ...tab,
+      root: splitInTree(tab.root, targetPaneId, axis, pane.id, {
+        split: newId(),
+        leaf: newId(),
+      }, before),
+      panes: { ...tab.panes, [pane.id]: pane },
+      focusedPaneId: pane.id,
+      // Arriving is a request to see the pane, and a zoomed sibling is the
+      // one thing that would hide it.
+      zoomedPaneId: null,
+    })),
+    activeTabId: tabId,
+    focusedPopupId: null,
+  };
+}
+
+function mapPopup(state: Workspace, paneId: string, change: (popup: Popup) => Popup): Workspace {
+  let touched = false;
+  const popups = state.popups.map((popup) => {
+    if (popup.pane.id !== paneId) return popup;
+    const next = change(popup);
+    if (next !== popup) touched = true;
+    return next;
+  });
+  return touched ? { ...state, popups } : state;
+}
+
+/** Bring one pop-up to the front, which here means to the end of the array. */
+function raisePopup(state: Workspace, paneId: string): Workspace {
+  const popup = popupOf(state, paneId);
+  if (popup === null) return state;
+  return {
+    ...state,
+    popups: [...state.popups.filter((candidate) => candidate !== popup), popup],
+  };
+}
+
+/** One pane changed wherever it lives — in a tab, or on the rail. */
+function mapPane(
+  state: Workspace,
+  paneId: string,
+  change: (pane: PaneState) => PaneState,
+): Workspace {
+  const popup = popupOf(state, paneId);
+  if (popup !== null) {
+    const next = change(popup.pane);
+    return next === popup.pane ? state : mapPopup(state, paneId, (p) => ({ ...p, pane: next }));
+  }
+
+  const tab = state.tabs.find((candidate) => candidate.panes[paneId] !== undefined);
+  if (tab === undefined) return state;
+  return mapTab(state, tab.id, (current) => {
+    const pane = current.panes[paneId];
+    const next = change(pane);
+    return next === pane ? current : { ...current, panes: { ...current.panes, [paneId]: next } };
+  });
 }
 
 function mapTab(state: Workspace, tabId: string, change: (tab: Tab) => Tab): Workspace {

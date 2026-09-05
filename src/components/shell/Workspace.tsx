@@ -446,9 +446,7 @@ export function Workspace({
                     focused={onScreen && focused}
                     visible={showing}
                     onFocus={() => dispatch({ type: "pane/focus", tabId: tab.id, paneId })}
-                    onMeta={(patch) =>
-                      dispatch({ type: "pane/meta", tabId: tab.id, paneId, patch })
-                    }
+                    onMeta={(patch) => dispatch({ type: "pane/meta", paneId, patch })}
                   />
                 </ErrorBoundary>
               </div>
