@@ -71,6 +71,20 @@ runs on your behalf.
   pane, and viewers for images, video, audio and STL meshes. What opens is
   chosen from the file you picked; *where* it opens — a pop-up, a new tab, or a
   split on the side you like — is up to you, in Settings → Files.
+- **Keeps four tools about where you are in the sidebar.** The chevron at its
+  top left switches between them, and all four follow the directory the focused
+  terminal is in. **Files** is the tree. **Search** finds text and file names
+  under it as you type, honouring `.gitignore` inside a repository. **Git**
+  shows that repository — stage, unstage, commit, read a file's diff, pull,
+  push, and the recent history — and leaves anything with a decision in it to
+  the terminal beside it. **Agent** runs Claude Code, Codex or Gemini CLI there,
+  whichever **Settings → Agent** names, and keeps it running while you switch
+  tabs or close the sidebar.
+- **Hands the agent the app, not just the files.** The sidebar's agent is always
+  started connected to jterm's own MCP server, so it can list your tabs and
+  panes, read what the build in the next pane just printed, type into a
+  terminal, and open a terminal, a file or a page where you will see it. See
+  *The agent and jterm's MCP server* below.
 - **Reads markdown as a document.** A `.md` file opens rendered — tables, code,
   images beside it on disk, and **mermaid** diagrams drawn in the pane's own
   palette — with **Raw** one click away and the editor still holding your undo
@@ -224,14 +238,15 @@ Settings → Keyboard and <kbd>Ctrl</kbd>+<kbd>D</kbd> goes back to the shell.
 ## Settings
 
 A window, not a modal, because nearly everything in it is a thing you adjust
-while looking at the result — and five tabs rather than one long page, so the
+while looking at the result — and six tabs rather than one long page, so the
 shortcut table is somewhere you arrive at rather than somewhere you scroll past.
 Between them: the app's theme (including following the system), which is what a
 tab or a pane falls back to when it has not been given one of its own; the
 interface's type size and the one the terminals and text panes share, font,
 line height, cursor shape and blink, scrollback, which shell to start, whether
 an opened file becomes a tab or a split and which side that split goes, the
-file tree's width and whether it shows dotfiles, and the shortcut table.
+file tree's width and whether it shows dotfiles, which agent the sidebar runs
+with what command and arguments, and the shortcut table.
 Changes are written as you make them and reach the main window immediately —
 there is no OK button.
 
@@ -454,6 +469,42 @@ None of this exists on Windows, where tmux does not, or on any machine without
 it installed: the settings section and the menu entry are absent, and a settings
 file carried from a machine that had it quietly gets an ordinary shell.
 
+## The agent and jterm's MCP server
+
+jterm runs a [Model Context Protocol](https://modelcontextprotocol.io) server
+for as long as it is open, and the sidebar's agent is always started connected
+to it, under the name `jterm`. Its tools act on the window the agent is in:
+
+| Tool | Does |
+| --- | --- |
+| `list_panes` | every tab, pop-up and pane, with ids, directories, commands, and which one has focus |
+| `read_terminal` | the last lines a terminal holds, wrapped lines joined back up |
+| `send_to_terminal` | type into a terminal — pasted, or as raw keys for a Ctrl-C — and optionally press Enter |
+| `open_terminal` | a new terminal, with a command left at its prompt or run |
+| `open_file` | a file, in the pane that suits it |
+| `open_url` | an http(s) page in a browser pane |
+| `focus_pane` | bring a pane forward and give it the keyboard |
+
+Nothing in that list closes a pane or ends a process. Your agent still asks
+before it uses a tool, the way it asks about any other, unless you have told it
+not to.
+
+The server listens on `127.0.0.1` only, on a port the OS picks, behind a bearer
+token that is new every launch, and it refuses a request carrying a web page's
+`Origin`. It is added to the agent for that one run — nothing is written into
+`~/.claude.json`, `~/.codex/config.toml` or `~/.gemini`, where an address that
+changes every launch would leave a broken server behind. Claude Code gets it
+through `--mcp-config`, Codex through `-c mcp_servers.jterm.…` overrides, and
+Gemini CLI through `GEMINI_CLI_SYSTEM_SETTINGS_PATH`, pointed at a copy of the
+system settings file with the server merged in. The token itself is never on a
+command line: it reaches the agent through its environment, or a file under
+jterm's data directory that only you can read.
+
+The agent is found the way your shell would find it — it is started through
+your shell, so a `claude` that only your `.bashrc` puts on the `PATH` is still
+found. **Settings → Agent → Command** takes a path or something like `npx
+@google/gemini-cli` for anything that is not.
+
 ## Known limits
 
 - **Browser panes are iframes.** A real embedded webview was built first and
@@ -522,7 +573,7 @@ src/
               snapshot.ts (persistence format), content.ts (buffers, outside React),
               settings.ts (preferences, shared between windows)
   panes/      one file per pane kind, plus registry.tsx
-  components/ shell/ — tab strip, window controls, file tree, workspace
+  components/ shell/ — tab strip, window controls, sidebar tabs, workspace
               settings/ — the second window
   lib/        draft.ts (the mirrored prompt line), osc.ts, keymap.ts,
               tmux.ts (which panes are in tmux, and what the shortcuts
@@ -534,6 +585,10 @@ src-tauri/src/
   control.rs  the `tmux -CC` protocol, and tmux's layout as a tree
   store.rs    durable snapshots, scrollback and settings
   files.rs    reading and saving edited files
+  git.rs      the sidebar's Git tab, through your own git
+  search.rs   the sidebar's Search tab
+  mcp.rs      jterm's MCP server, handing tool calls to the window they are for
+  agent_cli.rs starting Claude Code, Codex or Gemini CLI connected to it
 ```
 
 One file is worth reading before changing any of the layout code:
