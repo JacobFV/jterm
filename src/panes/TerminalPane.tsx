@@ -150,6 +150,27 @@ function readTheme(host: HTMLElement | null): ITheme {
 }
 
 /**
+ * Everything a terminal is drawn with that comes from outside it, as xterm takes
+ * it.
+ *
+ * Read afresh rather than taken off the settings object, because two of these —
+ * the font stack and the palette — are resolved on the DOM, and a setting is not
+ * the only thing that moves them: a pane's or a tab's theme does too.
+ */
+function appearanceOptions(host: HTMLElement, fontSize: number | undefined) {
+  const settings = getSettings();
+  return {
+    fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim(),
+    fontSize: fontSize ?? settings.fontSize,
+    lineHeight: settings.lineHeight,
+    cursorStyle: settings.cursorStyle,
+    cursorBlink: settings.cursorBlink,
+    scrollback: settings.scrollback,
+    theme: readTheme(host),
+  };
+}
+
+/**
  * The pane's drawing area in pixels, for the pty's `ws_xpixel`/`ws_ypixel`.
  *
  * The other half of telling programs how big a cell is. A terminal can be
@@ -263,8 +284,9 @@ export function TerminalPane({
   /** This pane's own type size, if it has been zoomed; else the setting's. */
   const fontSizeRef = useRef(pane.fontSize);
   fontSizeRef.current = pane.fontSize;
-  /** `applySettings` from the effect below, for the one change that is not a
-   *  settings change but has to do everything a settings change does. */
+  /** `applySettings` from the effect below, for the changes that are not
+   *  settings changes but have to do everything one does: a zoom, and a theme
+   *  chosen for this pane or its tab. */
   const applySettingsRef = useRef<(() => void) | null>(null);
 
   /** Start (or restart) the shell and wire the terminal to it. */
@@ -564,18 +586,28 @@ export function TerminalPane({
      * a shell that is not told re-wraps its output against the old width. Hence
      * the refit and the resize — a font change is a window resize as far as
      * anything on the other end of the pty is concerned.
+     *
+     * Most settings have nothing to do with a terminal — the file tree's
+     * dotfiles switch is one — but every terminal hears about every change, and
+     * handing xterm the same values again is not free: a new theme object
+     * repaints every row, and the fit measures the page. Across a window of
+     * split panes that held a click in the sidebar up for half a second. So a
+     * change that moves nothing a terminal is drawn with stops here, after a
+     * handful of style reads that the panes share between them.
      */
+    let applied = JSON.stringify(appearanceOptions(host, fontSizeRef.current));
     const applySettings = () => {
-      const current = getSettings();
-      term.options.fontFamily = getComputedStyle(document.documentElement)
-        .getPropertyValue("--font-mono")
-        .trim();
-      term.options.fontSize = fontSizeRef.current ?? current.fontSize;
-      term.options.lineHeight = current.lineHeight;
-      term.options.cursorStyle = current.cursorStyle;
-      term.options.cursorBlink = current.cursorBlink;
-      term.options.scrollback = current.scrollback;
-      term.options.theme = readTheme(host);
+      const next = appearanceOptions(host, fontSizeRef.current);
+      const key = JSON.stringify(next);
+      if (key === applied) return;
+      applied = key;
+      term.options.fontFamily = next.fontFamily;
+      term.options.fontSize = next.fontSize;
+      term.options.lineHeight = next.lineHeight;
+      term.options.cursorStyle = next.cursorStyle;
+      term.options.cursorBlink = next.cursorBlink;
+      term.options.scrollback = next.scrollback;
+      term.options.theme = next.theme;
       safeFit();
       repaint();
       if (!exitedRef.current) void pty.resize(paneId, term.cols, term.rows, pixelGeometry(host));
@@ -914,12 +946,13 @@ export function TerminalPane({
    * settings store. What both paths have in common is that the tokens have
    * already moved on the DOM by the time this runs — `Workspace` writes them in
    * the same commit — so re-reading is all there is to do.
+   *
+   * Through `applySettings` rather than beside it, so that its record of what
+   * xterm was last given stays true. A palette set behind its back would leave
+   * that record stale, and a later change could be skipped as already applied.
    */
   useEffect(() => {
-    const term = termRef.current;
-    if (term === null) return;
-    term.options.theme = readTheme(hostRef.current);
-    if (term.rows > 0) term.refresh(0, term.rows - 1);
+    applySettingsRef.current?.();
   }, [theme]);
 
   /**
