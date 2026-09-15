@@ -23,6 +23,11 @@
  *     back on its own, which is better than a reconstruction of it. The draft
  *     mirror keeps running regardless, because it is also what the command log
  *     is built from and tmux keeps no such log.
+ *   - **Offering, not doing** (`usePaneSuggestions`). A pane that came back
+ *     without its shell used to have its last session typed at the prompt.
+ *     It now shows buttons — resume that agent's conversation, keep shells on
+ *     tmux — and this file supplies the few things those buttons may do to the
+ *     shell (`controlsRef`).
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -45,14 +50,15 @@ import {
 import { isLinkActivation, linkTarget } from "@/lib/links";
 import { scanOsc } from "@/lib/osc";
 import { ready as ptyBusReady, subscribePty } from "@/lib/ptyBus";
-import { resumeLine } from "@/lib/programs";
 import { restoreBanner } from "@/lib/scrollback";
 import { registerTerminal } from "@/lib/terminals";
 import { sessionNameFor, tmuxAvailable } from "@/lib/tmux";
 import { getContent, updateContent } from "@/state/content";
 import { getSettings, subscribeSettings } from "@/state/settings";
 import type { TerminalPaneState } from "@/state/workspace";
+import { SuggestionCards } from "@/components/shell/SuggestionCards";
 import type { PaneProps } from "./types";
+import { type ShellControls, usePaneSuggestions } from "./usePaneSuggestions";
 
 /**
  * Quiet time after the shell's last output before a draft is typed back.
@@ -105,6 +111,17 @@ const SCREEN_SAVE_MS = 3000;
  * per pane for history hardly anyone scrolls back to.
  */
 const SCREEN_ROWS = 2000;
+
+/**
+ * How long moving a shell into tmux waits for the old one to be gone.
+ *
+ * The new shell cannot start first: the old one's reader thread, on its way
+ * out, takes the pane's id out of the registry, and a new session registered
+ * under that id before then would be the one removed. Its exit event is the
+ * signal that it has finished. This is only the backstop for one that never
+ * arrives.
+ */
+const MOVE_EXIT_WAIT_MS = 3000;
 
 /**
  * The palette this pane is standing in, as xterm wants it.
@@ -235,7 +252,18 @@ export function TerminalPane({
    * piece and the guard has to span all of them.
    */
   const restoringRef = useRef(0);
-  const replayRef = useRef<{ text: string; settle: number; deadline: number } | null>(null);
+  const replayRef = useRef<{
+    text: string;
+    /** Press Enter after it: a command the user chose to run, never a draft. */
+    submit: boolean;
+    settle: number;
+    deadline: number;
+  } | null>(null);
+  /**
+   * Set while a shell is being ended on purpose, to be started again inside
+   * tmux. Its exit is not a death to announce — see `moveToTmux`.
+   */
+  const onExitRef = useRef<(() => void) | null>(null);
   /** Where the shell was when the last command was submitted, for the log. */
   const cwdRef = useRef<string | undefined>(pane.cwd);
   /** Coalesces draft records; every keystroke would be a line per character. */
@@ -271,10 +299,9 @@ export function TerminalPane({
   const initialRef = useRef({
     cwd: pane.cwd,
     draft: getContent(paneId).draft ?? "",
-    // Worked out once, at mount, from what the pane was last running. Read
-    // here rather than in the effect so it is the pane as it was restored
-    // rather than as it has become since.
-    resume: resumeLine(pane.command) ?? "",
+    // Whether the pane has a past worth offering back, read at mount so it is
+    // the pane as it was restored rather than as it has become since.
+    past: pane.agent !== undefined || pane.command !== undefined,
     tmux: pane.tmux,
     /** Set when tmux owns this pane outright — see `lib/tmuxControl.ts`. */
     control: pane.tmuxPane !== undefined,
@@ -345,10 +372,10 @@ export function TerminalPane({
 
     const bytes = replayBytes(pending.text);
     if (!bytes) return;
-    void pty.write(paneId, bytes);
+    void pty.write(paneId, pending.submit ? `${bytes}\r` : bytes);
     // The shell owns the line now, and its echo is the record of it; the mirror
     // is reset to match what was actually sent.
-    draftRef.current = draftFrom(pending.text);
+    draftRef.current = pending.submit ? emptyDraft() : draftFrom(pending.text);
   }, [paneId]);
 
   /**
@@ -363,10 +390,11 @@ export function TerminalPane({
    * and the ordinary path waits for output first.
    */
   const armReplay = useCallback(
-    (text: string) => {
+    (text: string, submit = false) => {
       if (!text || !replayBytes(text)) return;
       replayRef.current = {
         text,
+        submit,
         settle: 0,
         deadline: window.setTimeout(fireReplay, REPLAY_DEADLINE_MS),
       };
@@ -646,6 +674,8 @@ export function TerminalPane({
       if (!underTmux()) updateContent(paneId, { draft: draftRef.current.text });
 
       if (submitting && submitted.trim()) {
+        // Whatever the pane was offering to bring back, it has moved on.
+        suggestionsRef.current.noteCommand();
         // What the pane is now for, as far as anything can tell: its icon
         // follows this, and so does the offer to pick the session back up if
         // the machine goes down while it is running. See `lib/programs`.
@@ -742,6 +772,14 @@ export function TerminalPane({
         }
       },
       (code) => {
+        // Ended on purpose, to be started again in tmux: nothing to announce,
+        // and the pane is not dead — its next shell is already on the way.
+        const moving = onExitRef.current;
+        if (moving !== null) {
+          onExitRef.current = null;
+          moving();
+          return;
+        }
         exitedRef.current = true;
         cancelReplay();
         metaRef.current({ exited: true });
@@ -895,13 +933,16 @@ export function TerminalPane({
       // echoed, so it is in the scrollback written out above too. Replaying it
       // would type the half-finished command a second time.
       if (!adopted && !sessionAlive) {
-        // The half-typed line if there was one; otherwise the session this pane
-        // was in the middle of. Only reached when the shell did *not* survive
-        // — no pty to adopt and no tmux session still standing — which is
-        // exactly when "what was I doing" is worth answering. It is typed and
-        // not run, the same promise the draft line makes: `claude --continue`
-        // sitting at the prompt is an offer, not an action.
-        armReplay(initialRef.current.draft || initialRef.current.resume || "");
+        // The half-typed line, if there was one. Only reached when the shell
+        // did *not* survive — no pty to adopt and no tmux session still
+        // standing.
+        armReplay(initialRef.current.draft);
+        // Which is also exactly when "what was I doing" is worth answering.
+        // That used to be answered by typing the last session's command at the
+        // prompt; it is offered as buttons now, which can say which
+        // conversation they mean and what they will run. See
+        // `usePaneSuggestions`.
+        if (initialRef.current.past) suggestionsRef.current.markRestored();
       }
       // The prompt lands shortly after this; a repaint once the pane has
       // settled is what makes a restored session look restored rather than
@@ -970,11 +1011,79 @@ export function TerminalPane({
     applySettingsRef.current?.();
   }, [pane.fontSize]);
 
+  /**
+   * Start this pane's shell again, inside a tmux session of its own.
+   *
+   * Only ever offered for a shell sitting at its prompt, because it ends that
+   * shell: a process cannot be moved into tmux, only started there. The old one
+   * is ended and its exit waited for before the new one starts — see
+   * `MOVE_EXIT_WAIT_MS` for why the order matters. If the wait runs out, the
+   * exit is still expected, and still swallowed when it comes.
+   */
+  const moveToTmux = useCallback(async (): Promise<boolean> => {
+    const term = termRef.current;
+    if (term === null || initialRef.current.control || sessionRef.current !== undefined) {
+      return false;
+    }
+    if (!(await tmuxAvailable())) return false;
+    cancelReplay();
+    if (!exitedRef.current) {
+      const exited = new Promise<void>((resolve) => {
+        onExitRef.current = resolve;
+      });
+      void pty.kill(paneId);
+      await Promise.race([
+        exited,
+        new Promise<void>((resolve) => window.setTimeout(resolve, MOVE_EXIT_WAIT_MS)),
+      ]);
+    }
+    sessionRef.current = sessionNameFor(paneId);
+    term.write("\r\n\x1b[2m── moved to tmux ──\x1b[0m\r\n");
+    await spawn(cwdRef.current);
+    // `spawn` takes the backend's word for whether tmux was actually used.
+    return sessionRef.current !== undefined;
+  }, [paneId, spawn, cancelReplay]);
+
+  /** What a suggestion's buttons are allowed to do to the shell. */
+  const controlsRef = useRef<ShellControls | null>(null);
+  controlsRef.current = {
+    send: (command, submit) => {
+      const line = replayBytes(command);
+      if (exitedRef.current || !line) return;
+      cancelReplay();
+      // ^U first, so whatever is on the line — a restored draft, most likely —
+      // is replaced rather than joined. Readline keeps it for ^Y.
+      void pty.write(paneId, `\x15${line}${submit ? "\r" : ""}`);
+      draftRef.current = submit ? emptyDraft() : draftFrom(command);
+      if (!underTmux()) updateContent(paneId, { draft: draftRef.current.text });
+      if (submit) metaRef.current({ command } as Partial<TerminalPaneState>);
+    },
+    sendWhenReady: (command) => armReplay(command, true),
+    moveToTmux,
+    onTmux: () => sessionRef.current !== undefined,
+    focus: () => termRef.current?.focus(),
+  };
+
+  const offers = usePaneSuggestions(pane, controlsRef, onMeta);
+  // Read from the mount effect and the key handler, neither of which should
+  // re-run because what is on offer changed.
+  const suggestionsRef = useRef(offers);
+  suggestionsRef.current = offers;
+
   return (
-    <div
-      className="pane-ground h-full w-full overflow-hidden px-1.5 pt-1"
-      onMouseDown={onFocus}
-      ref={hostRef}
-    />
+    // The cards sit beside the terminal's host, not inside it: xterm owns every
+    // child of the element it is opened in.
+    <div className="relative h-full w-full">
+      <div
+        className="pane-ground h-full w-full overflow-hidden px-1.5 pt-1"
+        onMouseDown={onFocus}
+        ref={hostRef}
+      />
+      <SuggestionCards
+        suggestions={offers.suggestions}
+        onAction={offers.act}
+        onDismiss={offers.dismiss}
+      />
+    </div>
   );
 }
