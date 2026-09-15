@@ -36,6 +36,7 @@ import { NEW_PANE_MENU, paneKind } from "@/panes/registry";
 import { type PaneKind, type Tab, focusedPane, tabLabel } from "@/state/workspace";
 import { Menu, MenuItem, MenuSubmenu, useMenu } from "./Menu";
 import { PaneMenu, type PaneMenuActions, type PaneMenuHandle } from "./PaneMenu";
+import { UpdateBadge } from "./UpdateBadge";
 import type { TabDrag } from "./Workspace";
 import { WindowControls } from "./WindowControls";
 
@@ -272,6 +273,7 @@ export function TabStrip({
         >
           <PanelLeft className="h-3.5 w-3.5" />
         </ChromeButton>
+        <UpdateBadge />
         <ChromeButton label="Settings" onClick={onOpenSettings}>
           <SettingsIcon className="h-3.5 w-3.5" />
         </ChromeButton>

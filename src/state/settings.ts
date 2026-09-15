@@ -139,6 +139,13 @@ export interface Settings {
   agentCommand: string;
   /** Extra arguments for the agent, split the same way. */
   agentArgs: string;
+  /**
+   * Install updates as soon as they are found, where that needs nothing from
+   * the user — see `src-tauri/src/updater.rs`. An install that needs a password
+   * or has to close the app is only ever offered, and a restart always waits for
+   * the button whatever this says.
+   */
+  autoUpdate: boolean;
 }
 
 /**
@@ -186,6 +193,7 @@ export const DEFAULTS: Settings = {
   agentTool: "claude",
   agentCommand: "",
   agentArgs: "",
+  autoUpdate: true,
 };
 
 const CURSORS: CursorStyle[] = ["bar", "block", "underline"];
@@ -241,6 +249,7 @@ export function decodeSettings(json: string | null | undefined): Settings | null
     agentTool: pick(parsed.agentTool, AGENT_TOOLS, DEFAULTS.agentTool),
     agentCommand: text(parsed.agentCommand, DEFAULTS.agentCommand),
     agentArgs: text(parsed.agentArgs, DEFAULTS.agentArgs),
+    autoUpdate: parsed.autoUpdate === undefined ? DEFAULTS.autoUpdate : parsed.autoUpdate === true,
   };
 }
 

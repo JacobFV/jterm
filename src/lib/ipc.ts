@@ -573,3 +573,36 @@ export const mcp = {
   respond: (id: number, result: unknown, error?: string) =>
     call("mcp_respond", { id, result: result ?? null, error: error ?? null }, undefined),
 };
+
+/**
+ * jterm updating itself. See `src-tauri/src/updater.rs` for the policy and
+ * `lib/updates.ts` for the store every window reads it through.
+ */
+export interface UpdateState {
+  current: string;
+  /** Why this copy cannot update itself; `null` when it can. */
+  unsupported: string | null;
+  /** `quiet` installs without asking anything; `password` goes through the
+   *  desktop's password prompt; `quits` closes jterm while the installer runs. */
+  install: "quiet" | "password" | "quits";
+  available: { version: string; notes: string | null; date: string | null } | null;
+  installing: boolean;
+  /** A version installed and waiting on a restart. */
+  installed: string | null;
+  error: string | null;
+}
+
+export interface UpdateProgress {
+  downloaded: number;
+  total: number | null;
+}
+
+export const updates = {
+  state: (): Promise<UpdateState | null> => call("update_state", {}, null),
+  check: (): Promise<UpdateState | null> => call("update_check", {}, null),
+  install: (): Promise<UpdateState | null> => call("update_install", {}, null),
+  restart: () => call("update_restart", {}, undefined),
+};
+
+export const UPDATE_STATE_EVENT = "update://state";
+export const UPDATE_PROGRESS_EVENT = "update://progress";

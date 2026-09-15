@@ -61,6 +61,7 @@ import {
 } from "@/lib/persist";
 import { openSettingsWindow } from "@/lib/settingsWindow";
 import { isTauri } from "@/lib/tauri";
+import { startUpdateChecks } from "@/lib/updates";
 import { terminalHandle } from "@/lib/terminals";
 import { cn, newId } from "@/lib/utils";
 import { isTmuxAction, runControlAction, runTmuxAction, tmuxAvailable } from "@/lib/tmux";
@@ -401,6 +402,10 @@ export function App() {
    * the settings window announces the restored snapshot rather than trying to
    * apply it, and this is the window that acts on it.
    */
+  // Checking for a new version is one loop for the whole app, not one per
+  // window: every window hears what it finds through the backend's event.
+  useEffect(() => (isMainWindow() ? startUpdateChecks() : undefined), []);
+
   useEffect(() => {
     let stop: (() => void) | null = null;
     let disposed = false;
