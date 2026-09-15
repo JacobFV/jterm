@@ -70,6 +70,8 @@ const EDGE_ZONE = 0.28;
 const RAIL_PX = 10;
 /** Where the pop-ups start, above the zoom layer and below the drop preview. */
 const POPUP_Z = 25;
+/** How far a pressed header has to travel before the press becomes a drag. */
+const DRAG_SLOP_PX = 4;
 
 interface PaneDrag {
   paneId: string;
@@ -226,13 +228,27 @@ export function Workspace({
     event.preventDefault();
     const grip = event.currentTarget as HTMLElement;
     grip.setPointerCapture(event.pointerId);
-    setPaneDrag({ paneId, target: null });
 
     // A pane only ever moves within its own tab, so the panes it can be dropped
     // on are that tab's — not whatever happens to be on screen.
     const within = layouts.get(tabId)?.panes ?? [];
 
+    // The drag does not exist until the pointer has actually gone somewhere.
+    // A press on the header is also the first half of a click and of a
+    // double-click, and dimming the pane on every one of those reads as a
+    // flicker rather than as the start of a gesture nobody made.
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let started = false;
+
     const move = (moveEvent: PointerEvent) => {
+      if (!started) {
+        if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < DRAG_SLOP_PX) {
+          return;
+        }
+        started = true;
+        setPaneDrag({ paneId, target: null });
+      }
       const point = toFraction(moveEvent.clientX, moveEvent.clientY);
       if (point === null) return;
       setPaneDrag((current) =>
@@ -478,7 +494,10 @@ export function Workspace({
                       return;
                     }
                     dispatch({ type: "pane/focus", tabId: tab!.id, paneId });
-                    beginPaneDrag(tab!.id, paneId)(event);
+                    // A zoomed pane covers every pane it could be dropped on,
+                    // so there is no drag to start — the header is only there
+                    // to be double-clicked back down.
+                    if (!isZoomed) beginPaneDrag(tab!.id, paneId)(event);
                   }}
                   onDoubleClick={() =>
                     popup !== null
