@@ -1991,6 +1991,7 @@ name = "jterm"
 version = "0.8.4"
 dependencies = [
  "dirs-next",
+ "getrandom 0.2.17",
  "parking_lot",
  "portable-pty",
  "serde",

@@ -36,6 +36,9 @@ serde_json = "1"
 portable-pty = "0.9"
 parking_lot = "0.12"
 dirs-next = "2"
+# The bearer token jterm's MCP server hands its agents, from the OS's own
+# randomness. Already in the tree through Tauri; named here so it is ours.
+getrandom = "0.2"
 
 # The webview's own crash signal, for `src/recover.rs`. Pinned to exactly what
 # wry depends on: `PlatformWebview::inner()` hands back a `webkit2gtk::WebView`

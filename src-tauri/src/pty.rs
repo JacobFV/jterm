@@ -31,9 +31,11 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+use crate::agent_cli;
 use crate::agents;
 use crate::control::{self, ControlRegistry};
 use crate::isolation;
+use crate::mcp::McpServer;
 use crate::store::Store;
 use crate::tmux;
 
@@ -261,9 +263,6 @@ pub fn pty_spawn(
     pty_kill_inner(&registry, &id);
 
     let size = pty_size(cols, rows, pixel_width, pixel_height);
-    let pair = native_pty_system()
-        .openpty(size)
-        .map_err(|err| format!("could not open a pseudoterminal: {err}"))?;
 
     // Asked for is not the same as available. A settings file carried to a
     // machine without tmux — or to Windows — falls back to a bare shell rather
@@ -318,6 +317,75 @@ pub fn pty_spawn(
             }
         };
 
+    // A pane that has just become tmux-backed may be carrying a log from when it
+    // was not. Nothing will ever be added to it again, and leaving it would make
+    // the next launch paint a stale screen above a tmux that is about to redraw
+    // the whole thing anyway.
+    if tmux_session.is_some() {
+        store.drop_scrollback(&id);
+    }
+
+    let pid = start(
+        app,
+        registry.inner(),
+        &store,
+        Launch {
+            id,
+            size,
+            working_dir: working_dir.clone(),
+            head,
+            tail,
+            env: Vec::new(),
+            shell: program.clone(),
+            tmux: tmux_session.clone(),
+            record: tmux_session.is_none(),
+            failure: match &tmux_session {
+                Some(name) => format!("could not attach to the tmux session {name}"),
+                None => format!("could not start {program}"),
+            },
+        },
+    )?;
+
+    Ok(SpawnInfo {
+        pid,
+        shell: program,
+        cwd: working_dir.to_string_lossy().into_owned(),
+        tmux: tmux_session,
+    })
+}
+
+/// Everything a new pty needs once it has been decided what runs in it.
+struct Launch {
+    id: String,
+    size: PtySize,
+    working_dir: std::path::PathBuf,
+    head: std::ffi::OsString,
+    tail: Vec<std::ffi::OsString>,
+    /// On top of the `TERM` family every pane gets.
+    env: Vec<(String, String)>,
+    /// What `pty_attach` will say this pane runs.
+    shell: String,
+    tmux: Option<String>,
+    /// Whether output is written to the scrollback log from the start.
+    record: bool,
+    /// The front half of the message if the program will not start.
+    failure: String,
+}
+
+/// Open a pty, start `launch` in it, and wire it to the frontend.
+///
+/// The half of starting a pane that is the same whatever is being started: a
+/// terminal's shell, or the sidebar's agent (`pty_spawn_agent`).
+fn start(
+    app: AppHandle,
+    registry: &Arc<PtyRegistry>,
+    store: &Arc<Store>,
+    launch: Launch,
+) -> Result<Option<u32>, String> {
+    let pair = native_pty_system()
+        .openpty(launch.size)
+        .map_err(|err| format!("could not open a pseudoterminal: {err}"))?;
+
     // Put the shell in a cgroup of its own where that is possible, so that a
     // job it starts and cannot pay for is killed without the kill reaching
     // jterm or any other tab. See `crate::isolation` — including why this
@@ -330,32 +398,32 @@ pub fn pty_spawn(
     let mut cmd = match isolation::runner() {
         Some(runner) => {
             let mut cmd = CommandBuilder::new(runner);
-            for arg in isolation::scope_args(&id) {
+            for arg in isolation::scope_args(&launch.id) {
                 cmd.arg(arg);
             }
-            cmd.arg(&head);
+            cmd.arg(&launch.head);
             cmd
         }
-        None => CommandBuilder::new(&head),
+        None => CommandBuilder::new(&launch.head),
     };
-    for arg in &tail {
+    for arg in &launch.tail {
         cmd.arg(arg);
     }
 
-    cmd.cwd(&working_dir);
+    cmd.cwd(&launch.working_dir);
 
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "jterm");
     cmd.env("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+    for (name, value) in &launch.env {
+        cmd.env(name, value);
+    }
 
     let child = pair
         .slave
         .spawn_command(cmd)
-        .map_err(|err| match &tmux_session {
-            Some(name) => format!("could not attach to the tmux session {name}: {err}"),
-            None => format!("could not start {program}: {err}"),
-        })?;
+        .map_err(|err| format!("{}: {err}", launch.failure))?;
     let pid = child.process_id();
 
     let reader = pair
@@ -372,39 +440,116 @@ pub fn pty_spawn(
     // after the shell exits.
     drop(pair.slave);
 
-    // A pane that has just become tmux-backed may be carrying a log from when it
-    // was not. Nothing will ever be added to it again, and leaving it would make
-    // the next launch paint a stale screen above a tmux that is about to redraw
-    // the whole thing anyway.
-    if tmux_session.is_some() {
-        store.drop_scrollback(&id);
-    }
-    let recording = Arc::new(AtomicBool::new(tmux_session.is_none()));
+    let recording = Arc::new(AtomicBool::new(launch.record));
 
     let session = Arc::new(Session {
         master: Mutex::new(pair.master),
         writer: Mutex::new(writer),
         child: Mutex::new(child),
-        shell: program.clone(),
-        tmux: tmux_session.clone(),
+        shell: launch.shell,
+        tmux: launch.tmux,
         recording: recording.clone(),
     });
-    registry.sessions.lock().insert(id.clone(), session.clone());
+    registry
+        .sessions
+        .lock()
+        .insert(launch.id.clone(), session.clone());
 
     spawn_reader(
         app,
-        registry.inner().clone(),
-        (*store).clone(),
-        id,
+        registry.clone(),
+        store.clone(),
+        launch.id,
         reader,
         recording,
     );
+
+    Ok(pid)
+}
+
+/// Start the sidebar's agent: Claude Code, Codex or Gemini CLI, connected to
+/// jterm's MCP server.
+///
+/// A pane of its own kind rather than a terminal with a command typed into it,
+/// for two reasons. The server's token must not pass through a shell's line
+/// editor, where it would land in the history file. And the agent is the whole
+/// of the pane — when it exits there is no shell prompt to fall back to, which
+/// is what the sidebar expects: it offers to start the agent again.
+///
+/// Nothing is recorded: the sidebar does not restore an agent's screen, and a
+/// log of a full-screen program's redraws is not something anyone would read.
+/// The endpoint is named after the window that called, taken from the webview
+/// rather than an argument, so an agent can only ever drive its own window.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub fn pty_spawn_agent(
+    app: AppHandle,
+    window: tauri::Window,
+    registry: tauri::State<'_, Arc<PtyRegistry>>,
+    store: tauri::State<'_, Arc<Store>>,
+    mcp: tauri::State<'_, Arc<McpServer>>,
+    id: String,
+    cols: u16,
+    rows: u16,
+    pixel_width: Option<u16>,
+    pixel_height: Option<u16>,
+    cwd: Option<String>,
+    shell: Option<String>,
+    tool: String,
+    command: Vec<String>,
+    args: Vec<String>,
+) -> Result<SpawnInfo, String> {
+    if !crate::store::valid_pane_id(&id) {
+        return Err(format!("not a pane id: {id}"));
+    }
+    let endpoint = mcp
+        .endpoint(window.label())
+        .ok_or("jterm's MCP server is not running, and the agent is not started without it")?;
+
+    pty_kill_inner(&registry, &id);
+
+    let working_dir = cwd
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(home_dir);
+    let plan = agent_cli::plan(
+        &tool,
+        &command,
+        &args,
+        &endpoint,
+        mcp.token(),
+        &crate::data_dir().join("mcp"),
+        window.label(),
+    )?;
+    let program = plan.argv.first().cloned().unwrap_or_else(|| tool.clone());
+    let login_shell = shell
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(default_shell);
+    let (head, tail) = agent_cli::through_shell(&login_shell, plan.argv);
+
+    let pid = start(
+        app,
+        registry.inner(),
+        &store,
+        Launch {
+            id,
+            size: pty_size(cols, rows, pixel_width, pixel_height),
+            working_dir: working_dir.clone(),
+            head: head.into(),
+            tail: tail.into_iter().map(Into::into).collect(),
+            env: plan.env,
+            shell: program.clone(),
+            tmux: None,
+            record: false,
+            failure: format!("could not start {program}"),
+        },
+    )?;
 
     Ok(SpawnInfo {
         pid,
         shell: program,
         cwd: working_dir.to_string_lossy().into_owned(),
-        tmux: tmux_session,
+        tmux: None,
     })
 }
 

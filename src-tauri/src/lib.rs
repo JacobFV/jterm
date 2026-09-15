@@ -1,10 +1,12 @@
 //! jterm — Tauri backend.
 //!
 //! One file per concern:
+//!   - `agent_cli`     — starting the sidebar's agent with jterm's MCP server
 //!   - `files`         — reading and saving what editor panes have open
 //!   - `git`           — the sidebar's Git tab
 //!   - `history`       — the JSONL every terminal leaves behind, and export/import
 //!   - `isolation`     — keeping one tab's collapse away from the rest of the app
+//!   - `mcp`           — the app's windows, offered to agents as MCP tools
 //!   - `pty`           — a pseudoterminal per terminal pane
 //!   - `recover`       — putting the window back when WebKit's renderer dies
 //!   - `search`        — the sidebar's Search tab
@@ -15,12 +17,14 @@
 //! `src/panes/BrowserPane.tsx`. Opening a URL in the user's real browser is the
 //! opener plugin's job.
 
+pub mod agent_cli;
 pub mod agents;
 pub mod control;
 pub mod files;
 pub mod git;
 pub mod history;
 pub mod isolation;
+pub mod mcp;
 pub mod pty;
 pub mod recover;
 pub mod search;
@@ -124,6 +128,9 @@ pub fn run() {
     let registry = Arc::new(PtyRegistry::new());
     let control = Arc::new(control::ControlRegistry::new());
     let maximize_bounds = Arc::new(MaximizeButtonBounds::new());
+    // Bound now, served once there are windows to hand tool calls to.
+    let mcp_server = mcp::McpServer::bind();
+    let mcp_serving = mcp_server.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -133,7 +140,10 @@ pub fn run() {
         .manage(registry)
         .manage(control)
         .manage(maximize_bounds)
+        .manage(mcp_server)
         .invoke_handler(tauri::generate_handler![
+            pty::pty_spawn_agent,
+            mcp::mcp_respond,
             git::git_status,
             git::git_stage,
             git::git_unstage,
@@ -190,8 +200,9 @@ pub fn run() {
             history::history_path,
             window_chrome::set_maximize_button_rect,
         ])
-        .setup(|app| {
+        .setup(move |app| {
             use tauri::Manager;
+            mcp_serving.serve(app.handle().clone());
             if let Some(window) = app.get_webview_window("main") {
                 window_chrome::snap::install(&window);
                 // Nothing is kept from this: the handler owns what it needs
