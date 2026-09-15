@@ -21,6 +21,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Clock, History, Layers, PanelLeft, Plus, Settings as SettingsIcon, X } from "lucide-react";
 
+import { themeStyle } from "@/lib/appearance";
 import { kindForPath } from "@/lib/filetypes";
 import { MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
 import { programById, programForCommand } from "@/lib/programs";
@@ -31,9 +32,10 @@ import {
   type RecentSession,
 } from "@/lib/recents";
 import { useIsFullscreen } from "@/lib/useFullscreen";
+import { useSettings, useSystemScheme } from "@/lib/useSettings";
 import { cn } from "@/lib/utils";
 import { NEW_PANE_MENU, paneKind } from "@/panes/registry";
-import { type PaneKind, type Tab, focusedPane, tabLabel } from "@/state/workspace";
+import { type PaneKind, type Tab, focusedPane, tabLabel, themeOf } from "@/state/workspace";
 import { Menu, MenuItem, MenuSubmenu, useMenu } from "./Menu";
 import { PaneMenu, type PaneMenuActions, type PaneMenuHandle } from "./PaneMenu";
 import { UpdateBadge } from "./UpdateBadge";
@@ -319,6 +321,21 @@ function TabItem({
   const menuRef = useRef<PaneMenuHandle | null>(null);
   const pane = focusedPane(tab);
 
+  // Each tab wears its own theme, not the window's. The root's tokens are the
+  // active tab's, so without this every tab in the strip would be painted in
+  // whichever theme happened to be in front, and a tab's colours would tell you
+  // nothing about what is behind it. Custom properties inherit, so writing the
+  // tab's own set on its box — the same way `Workspace` dresses a pane — is all
+  // it takes for the fill, the ink, the hairline and the accent under it.
+  //
+  // The tab's theme rather than its focused pane's: this is the tab's label, and
+  // a pane themed apart from its tab is the exception inside it, not the tab.
+  // The system scheme is read so that a `system` tab repaints when the desktop
+  // flips; the style itself is a cached lookup of the answer.
+  const settings = useSettings();
+  useSystemScheme();
+  const look = themeStyle(themeOf(settings.theme, tab), settings.ambientPresence);
+
   return (
     // The whole rectangle selects, not just the text in it. A tab is one
     // target as far as anyone using it is concerned, and the padding, the
@@ -352,6 +369,7 @@ function TabItem({
         event.preventDefault();
         menuRef.current?.openAt(event.clientX, event.clientY);
       }}
+      style={look}
       className={cn(
         // Chrome's sizing rule, and the one people expect: tabs share the strip
         // evenly, widening to a comfortable maximum when there are few and
@@ -360,7 +378,12 @@ function TabItem({
         // leave every tab at its text width and start scrolling with the bar
         // half empty.
         "group flex min-w-[112px] max-w-[240px] flex-1 basis-0 items-center gap-1.5 border-r border-border px-2.5",
-        active ? "bg-surface-0 shadow-[inset_0_-2px_0_hsl(var(--brand))]" : "hover:bg-surface-2",
+        // An inactive tab fills itself too, rather than showing the strip
+        // through: the strip is in the front tab's colours, and a tab left
+        // transparent would be wearing those instead of its own.
+        active
+          ? "bg-surface-0 shadow-[inset_0_-2px_0_hsl(var(--brand))]"
+          : "bg-surface-1 hover:bg-surface-2",
         dragging && "opacity-60",
       )}
     >
