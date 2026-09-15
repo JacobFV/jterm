@@ -485,9 +485,16 @@ to it, under the name `jterm`. Its tools act on the window the agent is in:
 | `open_url` | an http(s) page in a browser pane |
 | `focus_pane` | bring a pane forward and give it the keyboard |
 
-Nothing in that list closes a pane or ends a process. Your agent still asks
-before it uses a tool, the way it asks about any other, unless you have told it
-not to.
+Nothing in that list closes a pane or ends a process.
+
+The agent runs with its approvals off: Claude Code with
+`--dangerously-skip-permissions`, Codex with
+`--dangerously-bypass-approvals-and-sandbox`, and Gemini CLI with `--yolo`. It
+does not stop to ask before running a command, editing a file or typing into
+one of your terminals — which includes Codex running outside its sandbox. Put
+your own approval flag in **Settings → Agent → Extra arguments** (say
+`--permission-mode default`, `--full-auto` or `--approval-mode auto_edit`) and
+that is used instead.
 
 The server listens on `127.0.0.1` only, on a port the OS picks, behind a bearer
 token that is new every launch, and it refuses a request carrying a web page's

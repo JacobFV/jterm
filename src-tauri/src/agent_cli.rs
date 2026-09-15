@@ -20,6 +20,11 @@
 //! The token never goes on a command line, where every local user can read it
 //! out of the process table. It travels in the environment (readable only by
 //! the same user) or in a file under jterm's data directory created `0600`.
+//!
+//! Each agent is also started with its approvals off — `--dangerously-skip-
+//! permissions`, `--dangerously-bypass-approvals-and-sandbox`, `--yolo` — unless
+//! the user's own arguments already say how approvals should work. See
+//! `bypass_flag`.
 
 use std::path::{Path, PathBuf};
 
@@ -67,10 +72,13 @@ pub fn plan(
         (TOKEN_ENV.to_string(), token.to_string()),
     ];
 
+    let bypass = bypass_flag(tool, command.iter().chain(args));
+
     match tool {
         "claude" => {
             let file = config_dir.join(format!("claude-{window}.json"));
             write_private(&file, &claude_config(endpoint, token))?;
+            argv.extend(bypass.map(String::from));
             // After the user's arguments, not before: `--mcp-config` takes a
             // list, and put first it would swallow a prompt given after it.
             argv.extend(args.iter().cloned());
@@ -79,6 +87,7 @@ pub fn plan(
         }
         "codex" => {
             argv.extend(codex_overrides(endpoint));
+            argv.extend(bypass.map(String::from));
             argv.extend(args.iter().cloned());
         }
         _ => {
@@ -87,6 +96,7 @@ pub fn plan(
                 .and_then(|path| std::fs::read_to_string(path).ok())
                 .and_then(|text| serde_json::from_str::<Value>(&text).ok());
             write_private(&file, &gemini_settings(existing, endpoint, token))?;
+            argv.extend(bypass.map(String::from));
             argv.extend(args.iter().cloned());
             env.push((
                 "GEMINI_CLI_SYSTEM_SETTINGS_PATH".into(),
@@ -95,6 +105,46 @@ pub fn plan(
         }
     }
     Ok(Plan { argv, env })
+}
+
+/// The flag that stops the agent asking before it acts, unless the user has
+/// already said something about that themselves.
+///
+/// The sidebar's agent runs with its approvals off: it is an agent the user
+/// started on purpose, in a window they are watching, and one that stops to ask
+/// before every `ls` — or before every jterm tool — is not what it is for.
+///
+/// Left out when the command line already carries the flag, or one that says
+/// how approvals should work instead. The CLIs refuse the combination rather
+/// than picking one — Codex's bypass conflicts with `--full-auto`, `--sandbox`
+/// and `--ask-for-approval`, and Gemini will not take `--yolo` beside
+/// `--approval-mode` — and a choice the user typed into Settings outranks this
+/// default.
+pub fn bypass_flag<'a>(
+    tool: &str,
+    words: impl IntoIterator<Item = &'a String>,
+) -> Option<&'static str> {
+    let (flag, conflicts): (&'static str, &[&str]) = match tool {
+        "claude" => ("--dangerously-skip-permissions", &["--permission-mode"]),
+        "codex" => (
+            "--dangerously-bypass-approvals-and-sandbox",
+            &[
+                "--full-auto",
+                "--sandbox",
+                "-s",
+                "--ask-for-approval",
+                "-a",
+                "--yolo",
+            ],
+        ),
+        "gemini" => ("--yolo", &["-y", "--approval-mode"]),
+        _ => return None,
+    };
+    let said = words.into_iter().any(|word| {
+        let name = word.split('=').next().unwrap_or(word);
+        name == flag || conflicts.contains(&name)
+    });
+    (!said).then_some(flag)
 }
 
 pub fn claude_config(endpoint: &str, token: &str) -> Value {
@@ -261,6 +311,7 @@ mod tests {
             plan.argv,
             words(&[
                 "claude",
+                "--dangerously-skip-permissions",
                 "--model",
                 "opus",
                 "--mcp-config",
@@ -307,6 +358,10 @@ mod tests {
             ])
         );
         assert_eq!(plan.argv.last().unwrap(), "--full-auto");
+        // The user's own approval mode stands; Codex refuses both at once.
+        assert!(!plan
+            .argv
+            .contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
         assert!(plan.argv.iter().all(|word| !word.contains("secret")));
     }
 
@@ -325,6 +380,46 @@ mod tests {
         assert_eq!(replaced["mcpServers"]["jterm"]["httpUrl"], URL);
         let broken = gemini_settings(Some(json!({ "mcpServers": 5 })), URL, "t");
         assert_eq!(broken["mcpServers"]["jterm"]["httpUrl"], URL);
+    }
+
+    #[test]
+    fn turns_approvals_off_unless_the_user_already_chose() {
+        let none: Vec<String> = Vec::new();
+        assert_eq!(
+            bypass_flag("claude", &none),
+            Some("--dangerously-skip-permissions")
+        );
+        assert_eq!(
+            bypass_flag("codex", &none),
+            Some("--dangerously-bypass-approvals-and-sandbox")
+        );
+        assert_eq!(bypass_flag("gemini", &none), Some("--yolo"));
+
+        // Already there: not added a second time.
+        assert_eq!(
+            bypass_flag("claude", &words(&["--dangerously-skip-permissions"])),
+            None
+        );
+        // A different choice about approvals, in either spelling.
+        assert_eq!(
+            bypass_flag("claude", &words(&["--permission-mode", "plan"])),
+            None
+        );
+        assert_eq!(bypass_flag("codex", &words(&["-a", "on-request"])), None);
+        assert_eq!(bypass_flag("codex", &words(&["--sandbox=read-only"])), None);
+        assert_eq!(
+            bypass_flag("gemini", &words(&["--approval-mode=auto_edit"])),
+            None
+        );
+        // Unrelated arguments change nothing.
+        assert_eq!(
+            bypass_flag("gemini", &words(&["--model", "gemini-2.5-pro"])),
+            Some("--yolo")
+        );
+
+        let gemini = plan("gemini", &[], &[], URL, "t", &scratch(), "main").unwrap();
+        assert_eq!(gemini.argv, words(&["gemini", "--yolo"]));
+        std::fs::remove_dir_all(scratch()).ok();
     }
 
     #[test]

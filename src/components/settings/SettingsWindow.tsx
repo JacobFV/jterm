@@ -497,7 +497,19 @@ export function SettingsWindow() {
             <Row
               label="Extra arguments"
               stacked
-              hint="Added every time the agent starts — a model, a sandbox or approval mode."
+              hint={
+                <>
+                  Added every time the agent starts — a model, say. The agent runs with its
+                  approvals off (<span className="font-mono">--dangerously-skip-permissions</span>,{" "}
+                  <span className="font-mono">--dangerously-bypass-approvals-and-sandbox</span>,{" "}
+                  <span className="font-mono">--yolo</span>), so it acts without asking first —
+                  including typing into your terminals. Give it an approval flag of your own here
+                  (<span className="font-mono">--permission-mode default</span>,{" "}
+                  <span className="font-mono">--full-auto</span>,{" "}
+                  <span className="font-mono">--approval-mode auto_edit</span>) and that is used
+                  instead.
+                </>
+              }
             >
               <TextInput
                 label="Agent arguments"
@@ -506,7 +518,7 @@ export function SettingsWindow() {
                   settings.agentTool === "claude"
                     ? "--model opus"
                     : settings.agentTool === "codex"
-                      ? "--full-auto"
+                      ? "--model gpt-5"
                       : "--model gemini-2.5-pro"
                 }
                 onChange={(agentArgs) => updateSettings({ agentArgs })}
@@ -522,8 +534,7 @@ export function SettingsWindow() {
                   <strong className="font-normal text-ink-2">jterm</strong>, so it can work with
                   this window as well as with files. It is added for that run only — nothing is
                   written into your agent's own configuration — and its address and key change
-                  every time jterm starts. The agent still asks before using a tool, unless you
-                  have told it not to.
+                  every time jterm starts.
                 </>
               }
             >
