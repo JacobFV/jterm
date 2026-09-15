@@ -512,6 +512,35 @@ your shell, so a `claude` that only your `.bashrc` puts on the `PATH` is still
 found. **Settings → Agent → Command** takes a path or something like `npx
 @google/gemini-cli` for anything that is not.
 
+## Updating
+
+jterm checks for a new release twenty seconds after it starts and every six
+hours after that. A new version shows as **Update to x** beside the Settings
+button; **Settings → Updates** has the version you are on, the release notes and
+**Check now**.
+
+How an update installs depends on how jterm was installed, because it replaces
+whatever is there:
+
+- **AppImage, macOS** — downloaded and installed quietly. With **Install updates
+  automatically** on (the default), that happens without asking.
+- **`.deb`, `.rpm`** — handed to the package manager, which asks for your
+  password. So it is only ever offered, never started on its own.
+- **Windows** — the installer closes jterm while it runs, so it is offered too.
+
+Every download is checked against a signature before anything is written; a
+package that does not match the key built into the app is refused. And nothing
+restarts jterm but the **Restart to update** button, because a restart ends every
+plain shell — terminals on tmux keep running, and the rest come back with their
+screens and an offer to resume what they were running.
+
+A development build, a binary run straight out of a tarball, and an extracted
+AppImage have nothing an update could replace, and say so under Settings →
+Updates.
+
+The first version with this in it has to be installed by hand; everything after
+that can arrive through it.
+
 ## Known limits
 
 - **Browser panes are iframes.** A real embedded webview was built first and
@@ -571,6 +600,14 @@ Two things that fail quietly if they are wrong, both learned the hard way:
   *after* all five platforms have built. Settings → Actions → General →
   Workflow permissions must be "Read and write"; `permissions: contents: write`
   in the workflow is not sufficient on its own.
+- **The updater needs its signing key as a secret.** `TAURI_SIGNING_PRIVATE_KEY`
+  holds the private half of the key whose public half is in
+  `tauri.conf.json` (`plugins.updater.pubkey`); with an unencrypted key,
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` can stay unset. Without the secret a
+  release still builds, but carries no `latest.json`, so installed copies hear of
+  nothing. Keep the private key somewhere other than the repository: losing it
+  means every installed copy refuses every future update, and users have to
+  reinstall by hand once a new key ships.
 
 ## Layout
 
