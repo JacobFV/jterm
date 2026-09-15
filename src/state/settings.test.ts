@@ -77,6 +77,16 @@ describe("decodeSettings", () => {
     expect(decoded.keys).toEqual({ "tab.new": "Mod+Shift+N" });
   });
 
+  it("keeps the suggestions asked to stay quiet, once each, and nothing else", () => {
+    const decoded = decodeSettings(
+      JSON.stringify({ quietSuggestions: ["use-tmux", "use-tmux", 7, "", "x".repeat(65)] }),
+    )!;
+    expect(decoded.quietSuggestions).toEqual(["use-tmux"]);
+    expect(decodeSettings(JSON.stringify({ quietSuggestions: "use-tmux" }))!.quietSuggestions).toEqual(
+      [],
+    );
+  });
+
   it("carries a deliberate unbinding through", () => {
     // An empty string is not junk here: it is how "this action has no shortcut"
     // is written down, and it has to survive a round trip through the file.

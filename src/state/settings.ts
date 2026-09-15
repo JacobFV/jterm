@@ -120,6 +120,12 @@ export interface Settings {
   /** Only what the user changed. Absent means "the default", so a default that
    *  moves in a later version moves for everyone who never touched it. */
   keys: Partial<Record<ActionId, string>>;
+  /**
+   * Suggestions the user has asked never to be offered again, by id — see
+   * `lib/suggestions.ts`. A preference rather than session state: "don't
+   * suggest tmux" is something you would want on the next machine too.
+   */
+  quietSuggestions: string[];
 }
 
 /**
@@ -163,6 +169,7 @@ export const DEFAULTS: Settings = {
   ambientPresence: 1,
   ambientActivity: 1,
   keys: {},
+  quietSuggestions: [],
 };
 
 const CURSORS: CursorStyle[] = ["bar", "block", "underline"];
@@ -214,7 +221,15 @@ export function decodeSettings(json: string | null | undefined): Settings | null
       DEFAULTS.openPaneDirection,
     ),
     keys: decodeKeys(parsed.keys),
+    quietSuggestions: decodeIds(parsed.quietSuggestions),
   };
+}
+
+/** A short list of short ids, once each. Anything else in the list is dropped. */
+function decodeIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const ids = raw.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 64);
+  return [...new Set(ids)].slice(0, 32);
 }
 
 /* ── Writing the file ────────────────────────────────────────────────────── */

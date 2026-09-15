@@ -106,6 +106,7 @@ export const PROGRAMS: Program[] = [
     group: "AI",
     icon: SiGemini,
     commands: ["gemini"],
+    resume: "gemini --resume latest",
   },
   {
     id: "aider",
