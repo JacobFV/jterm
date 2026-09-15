@@ -18,14 +18,21 @@ runs on your behalf.
 
 - **Remembers unsubmitted input.** Every prompt's current line is mirrored from
   your keystrokes, saved on a short timer, and restored on launch.
-- **Restores scrollback.** Each pane's output is recorded as it arrives, so a
-  recovered session shows what was on screen rather than a bare shell.
+- **Restores what was on screen.** Each pane keeps the screen as its emulator
+  last drew it, so a recovered session shows what you were looking at — an
+  agent's last frame included — rather than a bare shell, or the pile of
+  fragments a replayed byte log makes of anything that redraws in place.
 - **Keeps the process, not just the picture.** New terminals run on a tmux
   session of their own where the machine has tmux, so a build, an `ssh` or an
-  agent halfway through a long job is still running after jterm is not. Where
-  the shell *did* die with the machine, the pane comes back with the session it
-  was in the middle of typed at the prompt — `claude --continue`, or the command
-  itself where re-running it is the resume. Typed, never run.
+  agent halfway through a long job is still running after jterm is not.
+- **Offers to pick up where it left off.** Where the shell *did* die with the
+  machine, the pane says what it was running and offers a button: **Resume**
+  Claude Code, Codex or Gemini back into *that* conversation, with the flags it
+  was started with — not whichever conversation in the folder is newest — or
+  run the last command again where that is the resume. The card shows exactly
+  what it will run, and **Type it** puts that at the prompt instead. A plain
+  shell that was lost is also offered tmux, so it is not lost the same way
+  twice.
 - **Splits like tmux.** Split, zoom, move focus by direction, resize from the
   keyboard, and drag a pane by its grip to rearrange the layout.
 - **Floats a pane over everything.** A pop-up sits on a rail along the bottom,
@@ -240,6 +247,15 @@ Two files, with deliberately different durability:
 - `scrollback/<pane>.log` — raw shell output, appended and flushed periodically.
   Losing the last half-second of this costs nothing, and paying an `fsync` per
   chunk of `cargo build` output would make the terminal slow.
+- `screens/<pane>.txt` — what the pane was *showing*, serialised from the
+  terminal emulator at most every three seconds while output arrives, and
+  written the same careful way as the session. The log is a program's drawing
+  instructions — "up three rows, clear this line" — worked out for the width
+  the pane had at the time; played back at any other width, an agent's status
+  line lands in pieces. The screen is the result of those instructions, and
+  re-wraps like ordinary text. A restore draws the screen, unless the log kept
+  going well past it (the renderer died and the backend went on recording), in
+  which case the log is the only record of the end.
 
 `settings.json` sits beside them and is deliberately not part of either. The
 session snapshot is this machine at this moment and is rewritten several times a
@@ -320,6 +336,40 @@ a reason recorded, and with every shell still running underneath it.
 
 Off Linux there is nothing here to do. The macOS and Windows webviews do not
 hand their rendering to a child process that can fail this way.
+
+### Resuming an agent, rather than a directory
+
+A terminal cannot bring a process back after the machine went down — nothing
+short of checkpointing the process at the OS level can, and that does not
+survive the network connections an agent lives on. What *can* come back is the
+agent's own conversation, because every agent CLI writes one to disk and can be
+started into it again. The hard part is knowing which one.
+
+`claude --continue` resumes the most recent conversation in a directory. Four
+Claude tabs in one repository are four conversations, and "most recent" is
+right for one of them. So every few seconds each pane is asked what is in its
+foreground — the terminal's foreground process group, read from `/proc` — and
+when that is an agent, the pane records the agent's own id for the
+conversation, where it was running and the flags it was started with. Claude
+Code writes `sessions/<pid>.json` into its config directory while it runs, and
+the record is believed only when its pid *and* process start time match the live
+process. Codex holds its transcript open, and the transcript's name ends in the
+id. Gemini ties nothing to a process, and resumes its latest conversation in the
+directory.
+
+The flags carried are an allowlist per tool, from each one's `--help` — the
+permission mode, model, sandbox and extra directories — because telling a flag
+from a prompt by looking is guesswork, and guessing wrong would re-send a prompt
+the agent already acted on. Every field of the record ends up on a command line,
+so the snapshot decodes it as hostile, and anything that would need quoting is
+dropped.
+
+After a crash, a pane with an agent on record shows a card over the terminal
+with the exact command it would run. **Resume** runs it — moving the pane onto
+tmux first, where that is the setting, so the pane just lost is not exposed to
+the next crash. Nothing is run until it is pressed. Linux only for the exact
+conversation; elsewhere, and for panes from before this, the card falls back to
+the last command the pane started.
 
 ## tmux
 
