@@ -448,3 +448,128 @@ export interface PtyExit {
 
 export const PTY_DATA_EVENT = "pty://data";
 export const PTY_EXIT_EVENT = "pty://exit";
+
+/* ── The sidebar ─────────────────────────────────────────────────────────── */
+
+/**
+ * The sidebar's agent. A pty like a terminal's, but started by the backend's
+ * `pty_spawn_agent`, which decides the program from the agent's id and plugs
+ * jterm's MCP server into it — the token for that never passes through here.
+ * Once started it is written to, resized and killed through `pty`.
+ */
+export const agentPty = {
+  spawn: (args: {
+    id: string;
+    cols: number;
+    rows: number;
+    pixelWidth?: number;
+    pixelHeight?: number;
+    cwd?: string;
+    shell?: string;
+    tool: string;
+    /** Replaces the agent's own name when non-empty. Already split into words. */
+    command: string[];
+    args: string[];
+  }): Promise<SpawnInfo | null> => call("pty_spawn_agent", args, null),
+};
+
+/** One changed file, in git's own terms. See `src-tauri/src/git.rs`. */
+export interface GitFile {
+  /** Relative to the repository root, with forward slashes. */
+  path: string;
+  orig: string | null;
+  /** The index column of `git status --short`; `.` for unchanged. */
+  staged: string;
+  /** The worktree column; `?` for untracked. */
+  unstaged: string;
+  untracked: boolean;
+  conflicted: boolean;
+}
+
+export interface GitStatus {
+  root: string;
+  branch: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  files: GitFile[];
+  truncated: boolean;
+}
+
+export interface GitCommit {
+  hash: string;
+  short: string;
+  subject: string;
+  author: string;
+  when: string;
+}
+
+export type GitAction = "push" | "pull" | "fetch" | "init";
+
+export const git = {
+  /** `null` for a directory that is in no repository. */
+  status: (cwd: string): Promise<GitStatus | null> => call("git_status", { cwd }, null),
+  stage: (root: string, paths: string[]) => call("git_stage", { root, paths }, undefined),
+  unstage: (root: string, paths: string[]) => call("git_unstage", { root, paths }, undefined),
+  commit: (root: string, message: string): Promise<string> =>
+    call("git_commit", { root, message }, ""),
+  diff: (root: string, path: string, staged: boolean, untracked: boolean): Promise<string> =>
+    call("git_diff", { root, path, staged, untracked }, ""),
+  log: (root: string, limit?: number): Promise<GitCommit[]> => call("git_log", { root, limit }, []),
+  /** Resolves to what git said; rejects with what git said when it failed. */
+  action: (cwd: string, action: GitAction): Promise<string> =>
+    call("git_action", { cwd, action }, ""),
+};
+
+/** A matching line, already cut around the match. See `src-tauri/src/search.rs`. */
+export interface SearchHit {
+  line: number;
+  before: string;
+  matched: string;
+  after: string;
+}
+
+export interface SearchFile {
+  path: string;
+  rel: string;
+  hits: SearchHit[];
+}
+
+export interface SearchResult {
+  files: SearchFile[];
+  /** Paths, relative to the searched directory, whose names match. */
+  names: string[];
+  scanned: number;
+  truncated: boolean;
+  /** A newer search started first; this one's answer is partial. */
+  superseded: boolean;
+}
+
+export const search = {
+  files: (root: string, query: string, caseSensitive: boolean): Promise<SearchResult> =>
+    call("search_files", { root, query, caseSensitive }, {
+      files: [],
+      names: [],
+      scanned: 0,
+      truncated: false,
+      superseded: false,
+    }),
+};
+
+/**
+ * A tool call from an agent, handed to the window it belongs to. See
+ * `src-tauri/src/mcp.rs` for the server and `lib/mcp.ts` for the tools.
+ */
+export interface McpRequest {
+  id: number;
+  window: string;
+  method: string;
+  params: unknown;
+}
+
+export const MCP_REQUEST_EVENT = "mcp://request";
+
+export const mcp = {
+  respond: (id: number, result: unknown, error?: string) =>
+    call("mcp_respond", { id, result: result ?? null, error: error ?? null }, undefined),
+};

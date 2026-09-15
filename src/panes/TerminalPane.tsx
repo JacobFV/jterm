@@ -51,7 +51,7 @@ import { isLinkActivation, linkTarget } from "@/lib/links";
 import { scanOsc } from "@/lib/osc";
 import { ready as ptyBusReady, subscribePty } from "@/lib/ptyBus";
 import { restoreBanner } from "@/lib/scrollback";
-import { registerTerminal } from "@/lib/terminals";
+import { registerTerminal, tailText } from "@/lib/terminals";
 import { sessionNameFor, tmuxAvailable } from "@/lib/tmux";
 import { getContent, updateContent } from "@/state/content";
 import { getSettings, subscribeSettings } from "@/state/settings";
@@ -135,7 +135,7 @@ const MOVE_EXIT_WAIT_MS = 3000;
  * xterm copies these values into its own styles at the moment it is given them,
  * so unlike everything else on screen it has to be told again when they move.
  */
-function readTheme(host: HTMLElement | null): ITheme {
+export function readTheme(host: HTMLElement | null): ITheme {
   const styles = getComputedStyle(host ?? document.documentElement);
   const token = (name: string) => styles.getPropertyValue(name).trim();
   return {
@@ -206,7 +206,7 @@ function appearanceOptions(host: HTMLElement, fontSize: number | undefined) {
  * reports in, and an image scaled for the other one comes out at half or twice
  * the size it should be.
  */
-function pixelGeometry(host: HTMLElement | null): { pixelWidth: number; pixelHeight: number } {
+export function pixelGeometry(host: HTMLElement | null): { pixelWidth: number; pixelHeight: number } {
   const screen = host?.querySelector<HTMLElement>(".xterm-screen");
   return {
     pixelWidth: Math.round(screen?.clientWidth ?? 0),
@@ -802,6 +802,7 @@ export function TerminalPane({
         if (!exitedRef.current) void pty.write(paneId, data);
       },
       focus: () => term.focus(),
+      readText: (lines) => tailText(term.buffer.active, lines),
     });
 
     // Sizing follows the pane, and the shell follows the sizing.
