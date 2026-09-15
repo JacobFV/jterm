@@ -12,6 +12,7 @@
  * takes that path too.
  */
 
+import { decodeAgent } from "@/lib/agents";
 import { isThemeChoice } from "@/lib/customAmbients";
 import type { PaneContent } from "./content";
 import { decodeFontSize, type ThemeChoice } from "./settings";
@@ -342,6 +343,10 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         // name reaches tmux as an argument, and a hand-edited snapshot is not
         // a thing to hand unbounded input to.
         tmux: typeof raw.tmux === "string" && raw.tmux ? raw.tmux.slice(0, 128) : undefined,
+        // The agent it was running, for the offer to resume that conversation.
+        // Every field of it ends up on a command line, so `decodeAgent` checks
+        // each one — and an agent that fails costs the offer, not the pane.
+        agent: decodeAgent(raw.agent),
       };
     case "notepad":
       return {

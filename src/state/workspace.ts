@@ -12,6 +12,7 @@
  * `content.ts` instead, and are joined back up only when a snapshot is written.
  */
 
+import type { AgentRecord } from "@/lib/agents";
 import { newId } from "@/lib/utils";
 import type { ThemeChoice } from "@/state/settings";
 import {
@@ -126,6 +127,16 @@ export interface TerminalPaneState extends PaneCommon {
    * apart.
    */
   tmuxPane?: string;
+  /**
+   * The agent running in this pane when it was last looked at — see
+   * `lib/agents.ts`.
+   *
+   * Kept for the day the pane's shell does not survive. It is what lets the
+   * pane offer to resume *that* conversation, with the flags it was started
+   * with, rather than whichever conversation in the directory happens to be the
+   * most recent. Absent when nothing of the kind was running.
+   */
+  agent?: AgentRecord;
 }
 
 export interface NotepadPaneState extends PaneCommon {

