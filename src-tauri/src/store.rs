@@ -12,6 +12,9 @@
 //!     have. Buffered and flushed periodically, because paying an `fsync` per
 //!     chunk of `cargo build` output would make the terminal slow for the sake
 //!     of output nobody would miss.
+//!   - **The screen** — what the terminal was actually showing, as the
+//!     frontend's emulator last rendered it. See `save_screen` for why the log
+//!     above is not enough to put a pane back on its own.
 //!
 //! The asymmetry is the point. Durability is bought where it matters.
 
@@ -33,6 +36,21 @@ const SCROLLBACK_KEEP: u64 = 768 * 1024;
 
 const FLUSH_AFTER: Duration = Duration::from_millis(500);
 const FLUSH_BYTES: usize = 64 * 1024;
+
+/// A screen larger than this is refused rather than written. The frontend
+/// serialises a bounded number of rows, so reaching it means something upstream
+/// is wrong — and a restore that has to parse it would be slow for everyone.
+const SCREEN_MAX: usize = 4 * 1024 * 1024;
+
+/// How much older than the log a saved screen may be and still be the one a
+/// restore uses.
+///
+/// The frontend saves the screen every few seconds while output is arriving, so
+/// in the ordinary crash the two stop within moments of each other and the
+/// screen wins. A log that is newer than that has kept going without a webview
+/// to render it — the renderer died and the reader thread went on recording
+/// until the machine did too — and then the log is the only record of the end.
+const SCREEN_SLACK: Duration = Duration::from_secs(15);
 
 /// Pane ids become filenames in both persistence stores. Keep this rule in
 /// one place so scrollback cannot accidentally accept a path that history
@@ -71,6 +89,7 @@ impl Store {
     /// Open (creating if needed) the app's state directory.
     pub fn open(root: PathBuf) -> Arc<Self> {
         let _ = fs::create_dir_all(root.join("scrollback"));
+        let _ = fs::create_dir_all(root.join("screens"));
         Arc::new(Self {
             root,
             recorders: Mutex::new(HashMap::new()),
@@ -108,6 +127,10 @@ impl Store {
         // being built from one — so anything that could climb out of the
         // directory is refused rather than sanitised into something else.
         valid_pane_id(id).then(|| self.root.join("scrollback").join(format!("{id}.log")))
+    }
+
+    fn screen_path(&self, id: &str) -> Option<PathBuf> {
+        valid_pane_id(id).then(|| self.root.join("screens").join(format!("{id}.txt")))
     }
 
     /* ── Session snapshot ────────────────────────────────────────────── */
@@ -264,10 +287,11 @@ impl Store {
         rename_replacing(&tmp, target)?;
 
         // The rename itself is a directory modification, and is not durable
-        // until the directory is synced. Windows has no equivalent and needs
+        // until the directory is synced — the directory the file is in, which
+        // for a screen is not the root. Windows has no equivalent and needs
         // none here.
         #[cfg(unix)]
-        if let Ok(dir) = File::open(&self.root) {
+        if let Ok(dir) = File::open(target.parent().unwrap_or(&self.root)) {
             let _ = dir.sync_all();
         }
 
@@ -407,6 +431,67 @@ impl Store {
         };
         self.recorders.lock().remove(id);
         let _ = fs::remove_file(path);
+        // A screen is the same pane's history in another form, and outliving
+        // the log would put a picture back over a pane whose record was dropped
+        // on purpose — a tmux-backed one, or one that was closed.
+        if let Some(screen) = self.screen_path(id) {
+            let _ = fs::remove_file(screen);
+        }
+    }
+
+    /* ── The screen ──────────────────────────────────────────────────── */
+
+    /// Keep what a pane's terminal is showing, as its emulator rendered it.
+    ///
+    /// The log is the stream of bytes the pane's programs wrote, and that is
+    /// not the same thing as the screen they produced. A shell's output reads
+    /// back fine as a stream. A program that redraws in place — an agent's
+    /// spinner and status line, a progress bar — writes *instructions*: move up
+    /// three rows, clear this line, write this. Those were worked out against
+    /// the width the pane had at the time and the rows already on screen, so
+    /// played back into a pane of any other width, or starting from a log that
+    /// was trimmed partway through a redraw, they land somewhere else. What
+    /// comes back is words stacked one per row and frames drawn over frames.
+    ///
+    /// The frontend already has the answer those instructions produced: its
+    /// emulator parsed them once, at the right width, and holds the resulting
+    /// rows. Serialised, that is plain text and colours with no cursor motion
+    /// in it, and it re-wraps in a pane of any size like any other output.
+    ///
+    /// Written atomically and synced, like the session. It is not rewritten on
+    /// every chunk — the frontend throttles it — and the write it replaces is the
+    /// one a crash is most likely to interrupt.
+    pub fn save_screen(&self, id: &str, text: &str) -> Result<(), String> {
+        let Some(path) = self.screen_path(id) else {
+            return Err("invalid pane id".into());
+        };
+        if text.len() > SCREEN_MAX {
+            return Err(format!("a screen of {} bytes is past the cap", text.len()));
+        }
+        self.write_atomic(&path, text)
+            .map_err(|err| format!("could not save the screen: {err}"))
+    }
+
+    /// What to draw in a pane whose shell did not survive.
+    ///
+    /// The saved screen where there is one and it is not stale against the log,
+    /// and the log otherwise — see `SCREEN_SLACK` for when that happens, and
+    /// `save_screen` for why the screen is preferred at all.
+    pub fn read_restore(&self, id: &str) -> String {
+        let (Some(screen), Some(log)) = (self.screen_path(id), self.scrollback_path(id)) else {
+            return String::new();
+        };
+        self.flush_scrollback(id);
+        let modified = |path: &Path| fs::metadata(path).and_then(|meta| meta.modified()).ok();
+
+        if let Some(saved) = modified(&screen) {
+            if prefer_screen(saved, modified(&log)) {
+                if let Ok(text) = fs::read_to_string(&screen) {
+                    return text;
+                }
+            }
+        }
+        self.read_scrollback(id)
     }
 
     /// Replace a pane's recorded output wholesale, as an import does.
@@ -419,6 +504,11 @@ impl Store {
             return Err("invalid pane id".into());
         };
         self.recorders.lock().remove(id);
+        // An imported log is the record now. A screen left from before the
+        // import would be fresher than it and win the restore.
+        if let Some(screen) = self.screen_path(id) {
+            let _ = fs::remove_file(screen);
+        }
         fs::create_dir_all(self.root.join("scrollback"))
             .map_err(|err| format!("cannot create the scrollback directory: {err}"))?;
         fs::write(path, bytes).map_err(|err| format!("cannot replace scrollback: {err}"))
@@ -429,21 +519,36 @@ impl Store {
     /// Run at startup: a tab closed during a crash never got its own delete,
     /// and without this the directory only ever grows.
     pub fn prune_scrollback(&self, keep: &[String]) {
-        let Ok(entries) = fs::read_dir(self.root.join("scrollback")) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_none_or(|ext| ext != "log") {
-                continue;
-            }
-            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        // Screens too: they are named by pane the same way and leak the same way.
+        for (dir, extension) in [("scrollback", "log"), ("screens", "txt")] {
+            let Ok(entries) = fs::read_dir(self.root.join(dir)) else {
                 continue;
             };
-            if !keep.iter().any(|id| id == stem) {
-                let _ = fs::remove_file(&path);
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_none_or(|ext| ext != extension) {
+                    continue;
+                }
+                let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                    continue;
+                };
+                if !keep.iter().any(|id| id == stem) {
+                    let _ = fs::remove_file(&path);
+                }
             }
         }
+    }
+}
+
+/// Whether a saved screen is fresh enough to restore in place of the log.
+///
+/// No log at all is the easy case — nothing to be stale against. Otherwise the
+/// screen may trail the log by `SCREEN_SLACK` and still win; past that, the log
+/// saw an ending the screen did not.
+fn prefer_screen(screen: std::time::SystemTime, log: Option<std::time::SystemTime>) -> bool {
+    match log {
+        None => true,
+        Some(log) => screen + SCREEN_SLACK >= log,
     }
 }
 
@@ -589,6 +694,21 @@ pub fn scrollback_drop(store: tauri::State<'_, Arc<Store>>, id: String) {
 #[tauri::command]
 pub fn scrollback_prune(store: tauri::State<'_, Arc<Store>>, keep: Vec<String>) {
     store.prune_scrollback(&keep);
+}
+
+#[tauri::command]
+pub fn screen_save(
+    store: tauri::State<'_, Arc<Store>>,
+    id: String,
+    text: String,
+) -> Result<(), String> {
+    store.save_screen(&id, &text)
+}
+
+/// What a pane whose shell did not survive should draw. See `Store::read_restore`.
+#[tauri::command]
+pub fn restore_read(store: tauri::State<'_, Arc<Store>>, id: String) -> String {
+    store.read_restore(&id)
 }
 
 #[cfg(test)]
@@ -767,6 +887,77 @@ mod tests {
         store.prune_scrollback(&["keep".to_string()]);
         assert!(store.scrollback_path("keep").unwrap().exists());
         assert!(!store.scrollback_path("gone").unwrap().exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    /// The screen is what a restore draws, because it is the one record that
+    /// comes back right at any width — see `save_screen`.
+    #[test]
+    fn a_restore_draws_the_saved_screen_over_the_log() {
+        let (store, root) = temp_store();
+        store.append_scrollback("pane", b"\x1b[3A\x1b[2Kspinner frame");
+        store.flush_scrollback("pane");
+        store.save_screen("pane", "what was on screen").unwrap();
+        assert_eq!(store.read_restore("pane"), "what was on screen");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_restore_falls_back_to_the_log_without_a_screen() {
+        let (store, root) = temp_store();
+        store.append_scrollback("pane", b"only the log");
+        store.flush_scrollback("pane");
+        assert_eq!(store.read_restore("pane"), "only the log");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_screen_left_far_behind_the_log_loses_to_it() {
+        use std::time::{Duration, UNIX_EPOCH};
+        let at = |secs| UNIX_EPOCH + Duration::from_secs(secs);
+        assert!(prefer_screen(at(1000), None));
+        // Saved moments apart, as in an ordinary crash.
+        assert!(prefer_screen(at(1000), Some(at(1005))));
+        assert!(prefer_screen(at(1010), Some(at(1005))));
+        // The log went on without a webview to render it.
+        assert!(!prefer_screen(
+            at(1000),
+            Some(at(1000) + SCREEN_SLACK + Duration::from_secs(1))
+        ));
+    }
+
+    #[test]
+    fn dropping_and_pruning_take_the_screen_with_the_log() {
+        let (store, root) = temp_store();
+        for id in ["closed", "gone", "kept"] {
+            store.save_screen(id, "screen").unwrap();
+        }
+        store.drop_scrollback("closed");
+        assert!(!store.screen_path("closed").unwrap().exists());
+
+        store.prune_scrollback(&["kept".to_string()]);
+        assert!(!store.screen_path("gone").unwrap().exists());
+        assert!(store.screen_path("kept").unwrap().exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn an_import_replaces_the_screen_along_with_the_log() {
+        let (store, root) = temp_store();
+        store.save_screen("pane", "from before the import").unwrap();
+        store.replace_scrollback("pane", b"imported").unwrap();
+        assert_eq!(store.read_restore("pane"), "imported");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_screen_is_refused_past_the_cap_or_at_a_path() {
+        let (store, root) = temp_store();
+        assert!(store
+            .save_screen("pane", &"x".repeat(SCREEN_MAX + 1))
+            .is_err());
+        assert!(store.save_screen("../escape", "screen").is_err());
+        assert!(!root.join("escape.txt").exists());
         let _ = fs::remove_dir_all(root);
     }
 

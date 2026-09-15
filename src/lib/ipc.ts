@@ -204,6 +204,13 @@ export const recents = {
 
 export const scrollback = {
   read: (id: string): Promise<string> => call("scrollback_read", { id }, ""),
+  /**
+   * What to draw in a pane whose shell did not survive: the saved screen where
+   * there is a fresh one, the raw log otherwise. See `Store::read_restore`.
+   */
+  restore: (id: string): Promise<string> => call("restore_read", { id }, ""),
+  /** Keep what the pane's emulator is showing. See `Store::save_screen`. */
+  saveScreen: (id: string, text: string) => call("screen_save", { id, text }, undefined),
   drop: (id: string) => call("scrollback_drop", { id }, undefined),
   prune: (keep: string[]) => call("scrollback_prune", { keep }, undefined),
 };

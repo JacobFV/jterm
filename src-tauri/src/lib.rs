@@ -159,6 +159,8 @@ pub fn run() {
             store::scrollback_read,
             store::scrollback_drop,
             store::scrollback_prune,
+            store::screen_save,
+            store::restore_read,
             files::file_read_text,
             files::file_write_text,
             files::dir_list,
