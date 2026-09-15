@@ -16,6 +16,9 @@
  * without anyone having to track who started it.
  */
 
+// The agents jterm knows, from the one place that lists them. The sidebar's
+// agent is one of these, and the backend's `agent_cli::TOOLS` is the same three.
+import { TOOLS as AGENT_TOOLS, type AgentTool } from "@/lib/agents";
 import { applyAppearance } from "@/lib/appearance";
 import { isThemeChoice } from "@/lib/customAmbients";
 import { SETTINGS_CHANGED_EVENT, listen, settings as settingsApi } from "@/lib/ipc";
@@ -69,14 +72,6 @@ export type FileOpenTarget = "popup" | "tab" | "pane";
  * `pty_probe` in the Rust side.
  */
 export type ShellBackend = "direct" | "tmux";
-
-/**
- * Which agent CLI the sidebar wraps. Ids match `lib/programs.ts` and the
- * backend's `agent_cli::TOOLS`, which is what knows how to hand each of them
- * jterm's MCP server.
- */
-export type AgentTool = "claude" | "codex" | "gemini";
-export const AGENT_TOOLS: AgentTool[] = ["claude", "codex", "gemini"];
 
 export interface Settings {
   theme: ThemeChoice;
@@ -304,8 +299,8 @@ function decodeKeys(raw: unknown): Partial<Record<ActionId, string>> {
   return keys;
 }
 
-function pick<T extends string>(value: unknown, allowed: T[], fallback: T): T {
-  return typeof value === "string" && (allowed as string[]).includes(value)
+function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value)
     ? (value as T)
     : fallback;
 }

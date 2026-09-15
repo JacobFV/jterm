@@ -16,7 +16,7 @@
 import type { Foreground } from "./ipc";
 
 export type AgentTool = "claude" | "codex" | "gemini";
-const TOOLS: readonly AgentTool[] = ["claude", "codex", "gemini"];
+export const TOOLS: readonly AgentTool[] = ["claude", "codex", "gemini"];
 
 export interface AgentRecord {
   tool: AgentTool;
