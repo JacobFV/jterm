@@ -217,6 +217,41 @@ export function decodeSettings(json: string | null | undefined): Settings | null
   };
 }
 
+/* ── Writing the file ────────────────────────────────────────────────────── */
+
+/**
+ * The settings as they are written down: only what differs from the defaults.
+ *
+ * Writing every field is what this used to do, and it quietly turned every
+ * default into a choice. The file is rewritten whenever anything in Settings
+ * moves, so the first time someone changed their theme, the value of every
+ * *other* setting was copied in beside it — and from then on a default that
+ * moved in a later release never reached them, because as far as the file was
+ * concerned they had picked the old one. That is exactly how machines upgraded
+ * past the release that made tmux the default were still starting plain shells,
+ * with nobody having asked for one.
+ *
+ * `keys` already worked this way for the same reason; this is that rule, for
+ * the rest of the file. The order is the order of `DEFAULTS`, so two equal sets
+ * of settings always serialise to the same string — `serialized` is compared
+ * against, and a comparison that depended on the order fields were set in would
+ * write a file that had not changed.
+ *
+ * What cannot be told apart is a file written *before* this: a value equal to
+ * an old default there may be a choice or may be the old default, and nothing
+ * in the file says which. It is left as it is. Guessing in the direction of the
+ * new default would override somebody who meant it.
+ */
+export function encodeSettings(settings: Settings): string {
+  const changed: Record<string, unknown> = {};
+  for (const key of Object.keys(DEFAULTS) as (keyof Settings)[]) {
+    if (JSON.stringify(settings[key]) !== JSON.stringify(DEFAULTS[key])) {
+      changed[key] = settings[key];
+    }
+  }
+  return JSON.stringify(changed);
+}
+
 function decodeKeys(raw: unknown): Partial<Record<ActionId, string>> {
   if (!isRecord(raw)) return {};
   const known = new Set<string>(ACTION_IDS);
@@ -254,7 +289,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 type Listener = (settings: Settings) => void;
 
 let current: Settings = DEFAULTS;
-let serialized = JSON.stringify(DEFAULTS);
+let serialized = encodeSettings(DEFAULTS);
 const listeners = new Set<Listener>();
 
 export function getSettings(): Settings {
@@ -292,7 +327,7 @@ function adopt(next: Settings, json: string): void {
  */
 export function updateSettings(patch: Partial<Settings>): void {
   const next: Settings = { ...current, ...patch };
-  const json = JSON.stringify(next);
+  const json = encodeSettings(next);
   if (json === serialized) return;
   adopt(next, json);
   schedulePersist();
@@ -362,7 +397,7 @@ function receive(json: string | null): void {
   // Re-serialised rather than stored as received: the file may be missing
   // fields or carrying junk, and `serialized` is compared against future
   // writes, so it has to be the canonical form of what we now hold.
-  adopt(decoded, JSON.stringify(decoded));
+  adopt(decoded, encodeSettings(decoded));
 }
 
 /**
@@ -376,7 +411,7 @@ export async function initSettings(): Promise<Settings> {
   // has failed much harder than one running on the defaults.
   const stored = decodeSettings(await settingsApi.load().catch(() => null));
   const initial = stored ?? DEFAULTS;
-  adopt(initial, JSON.stringify(initial));
+  adopt(initial, encodeSettings(initial));
 
   if (channel !== null) {
     channel.onmessage = (event) => receive(typeof event.data === "string" ? event.data : null);

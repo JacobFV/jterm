@@ -5,6 +5,7 @@ import {
   LIMITS,
   decodeFontSize,
   decodeSettings,
+  encodeSettings,
   getSettings,
   resetSettings,
   stepFontSize,
@@ -81,6 +82,42 @@ describe("decodeSettings", () => {
     // is written down, and it has to survive a round trip through the file.
     const decoded = decodeSettings(JSON.stringify({ keys: { "pane.close": "" } }))!;
     expect(decoded.keys).toEqual({ "pane.close": "" });
+  });
+});
+
+describe("encodeSettings", () => {
+  it("writes nothing down for settings nobody changed", () => {
+    expect(encodeSettings(DEFAULTS)).toBe("{}");
+  });
+
+  it("writes down only what differs, so a default that moves reaches the user", () => {
+    // The failure this exists for: changing the theme used to copy every other
+    // field into the file, freezing `shellBackend` at whatever it was then.
+    const written = JSON.parse(encodeSettings({ ...DEFAULTS, theme: "light" }));
+    expect(written).toEqual({ theme: "light" });
+    expect(written).not.toHaveProperty("shellBackend");
+  });
+
+  it("keeps a deliberate choice of something that is not the default", () => {
+    const written = JSON.parse(encodeSettings({ ...DEFAULTS, shellBackend: "direct" }));
+    expect(written).toEqual({ shellBackend: "direct" });
+  });
+
+  it("reads back as the settings it was written from", () => {
+    const chosen = {
+      ...DEFAULTS,
+      fontSize: 15,
+      cursorStyle: "block" as const,
+      keys: { "tab.new": "Mod+Shift+N" },
+    };
+    expect(decodeSettings(encodeSettings(chosen))).toEqual(chosen);
+  });
+
+  it("does not depend on the order fields were set in", () => {
+    // `serialized` is compared against, so equal settings must be equal strings.
+    const one = { ...DEFAULTS, fontSize: 15, theme: "light" };
+    const other = { ...DEFAULTS, theme: "light", fontSize: 15 };
+    expect(encodeSettings(one)).toBe(encodeSettings(other));
   });
 });
 
