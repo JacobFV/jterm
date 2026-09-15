@@ -2,10 +2,12 @@
 //!
 //! One file per concern:
 //!   - `files`         — reading and saving what editor panes have open
+//!   - `git`           — the sidebar's Git tab
 //!   - `history`       — the JSONL every terminal leaves behind, and export/import
 //!   - `isolation`     — keeping one tab's collapse away from the rest of the app
 //!   - `pty`           — a pseudoterminal per terminal pane
 //!   - `recover`       — putting the window back when WebKit's renderer dies
+//!   - `search`        — the sidebar's Search tab
 //!   - `store`         — session snapshots and scrollback on disk
 //!   - `window_chrome` — the native half of the custom titlebar
 //!
@@ -16,10 +18,12 @@
 pub mod agents;
 pub mod control;
 pub mod files;
+pub mod git;
 pub mod history;
 pub mod isolation;
 pub mod pty;
 pub mod recover;
+pub mod search;
 pub mod store;
 pub mod tmux;
 #[cfg(windows)]
@@ -130,6 +134,14 @@ pub fn run() {
         .manage(control)
         .manage(maximize_bounds)
         .invoke_handler(tauri::generate_handler![
+            git::git_status,
+            git::git_stage,
+            git::git_unstage,
+            git::git_commit,
+            git::git_diff,
+            git::git_log,
+            git::git_action,
+            search::search_files,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
