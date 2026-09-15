@@ -13,6 +13,20 @@ import {
 } from "./settings";
 
 describe("decodeSettings", () => {
+  it("keeps an agent it knows and drops one it does not", () => {
+    const chosen = decodeSettings(
+      JSON.stringify({ agentTool: "codex", agentCommand: "/opt/codex", agentArgs: "--full-auto" }),
+    )!;
+    expect(chosen).toMatchObject({
+      agentTool: "codex",
+      agentCommand: "/opt/codex",
+      agentArgs: "--full-auto",
+    });
+    const junk = decodeSettings(JSON.stringify({ agentTool: "rm -rf /", agentArgs: 5 }))!;
+    expect(junk.agentTool).toBe(DEFAULTS.agentTool);
+    expect(junk.agentArgs).toBe(DEFAULTS.agentArgs);
+  });
+
   it("treats a missing or unreadable file as no settings at all", () => {
     expect(decodeSettings(null)).toBeNull();
     expect(decodeSettings("")).toBeNull();

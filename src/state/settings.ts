@@ -70,6 +70,14 @@ export type FileOpenTarget = "popup" | "tab" | "pane";
  */
 export type ShellBackend = "direct" | "tmux";
 
+/**
+ * Which agent CLI the sidebar wraps. Ids match `lib/programs.ts` and the
+ * backend's `agent_cli::TOOLS`, which is what knows how to hand each of them
+ * jterm's MCP server.
+ */
+export type AgentTool = "claude" | "codex" | "gemini";
+export const AGENT_TOOLS: AgentTool[] = ["claude", "codex", "gemini"];
+
 export interface Settings {
   theme: ThemeChoice;
   /** The chrome's text size. The terminal has its own, below. */
@@ -126,6 +134,16 @@ export interface Settings {
    * suggest tmux" is something you would want on the next machine too.
    */
   quietSuggestions: string[];
+  /** The agent the sidebar's Agent tab runs. */
+  agentTool: AgentTool;
+  /**
+   * What to run in place of the agent's own name — a path, or something like
+   * `npx @google/gemini-cli`. Empty means the name, found on the PATH the
+   * user's shell sets up. Split into words by `lib/argv.ts`, never by a shell.
+   */
+  agentCommand: string;
+  /** Extra arguments for the agent, split the same way. */
+  agentArgs: string;
 }
 
 /**
@@ -170,6 +188,9 @@ export const DEFAULTS: Settings = {
   ambientActivity: 1,
   keys: {},
   quietSuggestions: [],
+  agentTool: "claude",
+  agentCommand: "",
+  agentArgs: "",
 };
 
 const CURSORS: CursorStyle[] = ["bar", "block", "underline"];
@@ -222,6 +243,9 @@ export function decodeSettings(json: string | null | undefined): Settings | null
     ),
     keys: decodeKeys(parsed.keys),
     quietSuggestions: decodeIds(parsed.quietSuggestions),
+    agentTool: pick(parsed.agentTool, AGENT_TOOLS, DEFAULTS.agentTool),
+    agentCommand: text(parsed.agentCommand, DEFAULTS.agentCommand),
+    agentArgs: text(parsed.agentArgs, DEFAULTS.agentArgs),
   };
 }
 

@@ -21,6 +21,7 @@ import { WindowFrame } from "@/components/shell/WindowFrame";
 import { ThemeSwatch } from "@/components/shell/ThemeSwatch";
 import { dialog } from "@/lib/ipc";
 import { displayKeys, keysFor, type ActionId } from "@/lib/keymap";
+import { TOOLS as MCP_TOOLS } from "@/lib/mcp";
 import { MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
 import { useIsFullscreen } from "@/lib/useFullscreen";
 import { THEME_GROUPS, THEMES } from "@/lib/themes";
@@ -127,7 +128,7 @@ function zoomHint(): string {
  * is the same question as "what does a terminal do", and it disappears with the
  * rest of the tmux settings on a machine without it.
  */
-const TABS = ["Appearance", "Terminal", "Files", "Keyboard", "Data"] as const;
+const TABS = ["Appearance", "Terminal", "Files", "Agent", "Keyboard", "Data"] as const;
 type Tab = (typeof TABS)[number];
 
 function TabBar({ active, onPick }: { active: Tab; onPick: (tab: Tab) => void }) {
@@ -460,6 +461,81 @@ export function SettingsWindow() {
           </Row>
         </Section>
           </>
+        ) : null}
+
+        {tab === "Agent" ? (
+          <Section title="Agent">
+            <Row
+              label="Agent"
+              hint="What the sidebar's Agent tab runs, in the directory the sidebar is following. An agent that is already running keeps going when this changes — restart it from the tab to switch."
+            >
+              <Segmented
+                label="Agent"
+                value={settings.agentTool}
+                onChange={(agentTool) => updateSettings({ agentTool })}
+                options={[
+                  { value: "claude", label: "Claude Code" },
+                  { value: "codex", label: "Codex" },
+                  { value: "gemini", label: "Gemini CLI" },
+                ]}
+              />
+            </Row>
+
+            <Row
+              label="Command"
+              stacked
+              hint="What to run instead of the agent's own name: a path, or something like npx @google/gemini-cli. Quote it as you would at a prompt; it is split into words but never run through a shell's parser. Empty finds the agent on the PATH your shell sets up."
+            >
+              <TextInput
+                label="Agent command"
+                value={settings.agentCommand}
+                placeholder={settings.agentTool}
+                onChange={(agentCommand) => updateSettings({ agentCommand })}
+              />
+            </Row>
+
+            <Row
+              label="Extra arguments"
+              stacked
+              hint="Added every time the agent starts — a model, a sandbox or approval mode."
+            >
+              <TextInput
+                label="Agent arguments"
+                value={settings.agentArgs}
+                placeholder={
+                  settings.agentTool === "claude"
+                    ? "--model opus"
+                    : settings.agentTool === "codex"
+                      ? "--full-auto"
+                      : "--model gemini-2.5-pro"
+                }
+                onChange={(agentArgs) => updateSettings({ agentArgs })}
+              />
+            </Row>
+
+            <Row
+              label="Connected to jterm"
+              stacked
+              hint={
+                <>
+                  The agent is always started with jterm's own MCP server, called{" "}
+                  <strong className="font-normal text-ink-2">jterm</strong>, so it can work with
+                  this window as well as with files. It is added for that run only — nothing is
+                  written into your agent's own configuration — and its address and key change
+                  every time jterm starts. The agent still asks before using a tool, unless you
+                  have told it not to.
+                </>
+              }
+            >
+              <ul className="space-y-1">
+                {MCP_TOOLS.map((tool) => (
+                  <li key={tool.name} className="text-[length:var(--fs-105)] leading-relaxed text-ink-3">
+                    <span className="font-mono text-ink-2">{tool.name}</span> — {tool.title.toLowerCase()}
+                  </li>
+                ))}
+              </ul>
+            </Row>
+          </Section>
         ) : null}
 
         {tab === "Keyboard" ? (
