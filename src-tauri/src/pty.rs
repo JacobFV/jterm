@@ -31,6 +31,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+use crate::agents;
 use crate::control::{self, ControlRegistry};
 use crate::isolation;
 use crate::store::Store;
@@ -667,6 +668,35 @@ pub fn pty_probe(
         cwd: pid.and_then(cwd_of),
         tmux: in_tmux,
     }
+}
+
+/// What is in the foreground of a pane, and which agent conversation it is.
+///
+/// Asked on a slower timer than `pty_probe` and for every pane rather than only
+/// the visible ones: the pane that most needs its agent's session remembered is
+/// the one in a background tab that has been working for an hour. See
+/// `crate::agents` for how the answer is read.
+///
+/// The shell to ask is not always this pty's child. A pane jterm put in tmux
+/// has a tmux *client* on this pty, and the agent is on tmux's terminal, in the
+/// session's pane — so that pane's shell is asked instead. A tmux the user
+/// started by hand is not looked through: the session is theirs and may hold
+/// any number of panes, none of which this one pane stands for.
+#[tauri::command]
+pub fn pty_foreground(
+    registry: tauri::State<'_, Arc<PtyRegistry>>,
+    control: tauri::State<'_, Arc<ControlRegistry>>,
+    id: String,
+) -> Option<agents::Foreground> {
+    if control.has(&id) {
+        return None;
+    }
+    let session = registry.get(&id)?;
+    let root = match &session.tmux {
+        Some(name) => tmux::pane_pid(name)?,
+        None => session.child.lock().process_id()?,
+    };
+    agents::foreground(root)
 }
 
 /// Where a live process has its working directory, when the platform will say.

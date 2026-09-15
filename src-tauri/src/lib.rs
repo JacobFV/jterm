@@ -13,6 +13,7 @@
 //! `src/panes/BrowserPane.tsx`. Opening a URL in the user's real browser is the
 //! opener plugin's job.
 
+pub mod agents;
 pub mod control;
 pub mod files;
 pub mod history;
@@ -134,6 +135,7 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_kill,
             pty::pty_probe,
+            pty::pty_foreground,
             pty::pty_attach,
             tmux::tmux_available,
             tmux::tmux_has_session,

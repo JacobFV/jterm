@@ -104,7 +104,29 @@ export const pty = {
 
   probe: (id: string): Promise<Probe> =>
     call("pty_probe", { id }, { cwd: null, tmux: false }),
+
+  /** What is running in the pane right now, or `null` for a shell at its prompt. */
+  foreground: (id: string): Promise<Foreground | null> =>
+    call("pty_foreground", { id }, null),
 };
+
+/**
+ * The program in the foreground of a pane. See `src-tauri/src/agents.rs`.
+ *
+ * `session` is the agent's own id for its conversation, which is what lets a
+ * pane that died be resumed into *its* conversation rather than whichever one
+ * in the directory was most recent. `null` wherever the process did not give
+ * it away — every platform but Linux, and every agent that files nothing by
+ * process.
+ */
+export interface Foreground {
+  tool: string | null;
+  name: string;
+  session: string | null;
+  cwd: string | null;
+  /** An agent's arguments after its name; empty for anything else. */
+  args: string[];
+}
 
 export interface TmuxSession {
   name: string;

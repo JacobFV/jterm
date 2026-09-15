@@ -148,6 +148,20 @@ pub fn tmux_has_session(name: String) -> bool {
         .unwrap_or(false)
 }
 
+/// The pid of the process in a session's current pane — its shell, normally.
+///
+/// What `agents::foreground` has to start from for a tmux-backed pane. jterm's
+/// own pty has a tmux client in front of it, and the client's terminal is not
+/// the one the agent is running in; the pane's shell is on tmux's terminal, and
+/// that is where the foreground process can be read.
+pub fn pane_pid(session: &str) -> Option<u32> {
+    let target = format!("={session}:");
+    run(&["display-message", "-p", "-t", &target, "#{pane_pid}"])?
+        .trim()
+        .parse()
+        .ok()
+}
+
 #[tauri::command]
 pub fn tmux_sessions() -> Vec<TmuxSession> {
     let Some(stdout) = run(&["list-sessions", "-F", FIELDS]) else {
