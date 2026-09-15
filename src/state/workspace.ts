@@ -45,6 +45,10 @@ import {
 
 export type PaneKind = "terminal" | "notepad" | "browser" | "image" | "media" | "model";
 
+/** The sidebar's tools, in the order its menu lists them. */
+export type SidebarTab = "files" | "search" | "git" | "agent";
+export const SIDEBAR_TABS: SidebarTab[] = ["files", "search", "git", "agent"];
+
 interface PaneCommon {
   id: string;
   /** Set by the pane itself — a shell's title, a page's title, a file name. */
@@ -244,6 +248,11 @@ export interface Workspace {
   /** Whether the file tree is showing. Persisted: a sidebar that closes itself
    *  on every launch is one the user has to reopen on every launch. */
   sidebarOpen: boolean;
+  /**
+   * Which of the sidebar's tools is showing. Optional because a snapshot from
+   * before there was more than one has no opinion, and that means files.
+   */
+  sidebarTab?: SidebarTab;
   /**
    * The pop-ups over every tab, back to front. Raising one moves it to the end
    * rather than sorting on a z-index — the array *is* the order, so there is
@@ -449,6 +458,7 @@ export function hostOf(url: string): string | null {
 export type Action =
   | { type: "restore"; workspace: Workspace }
   | { type: "ui/sidebar"; open?: boolean }
+  | { type: "ui/sidebarTab"; tab: SidebarTab }
   | { type: "tab/new"; kind: PaneKind }
   | { type: "tab/open"; kind: PaneKind; seed: Partial<PaneState> }
   | { type: "tab/close"; tabId: string }
@@ -585,6 +595,9 @@ function apply(state: Workspace, action: Action): Workspace {
 
     case "ui/sidebar":
       return { ...state, sidebarOpen: action.open ?? !state.sidebarOpen };
+
+    case "ui/sidebarTab":
+      return { ...state, sidebarTab: action.tab };
 
     case "tab/new": {
       const tab = newTab(action.kind);

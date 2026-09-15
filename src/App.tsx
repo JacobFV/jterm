@@ -17,7 +17,8 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { AmbientBackdrop } from "@/components/shell/AmbientBackdrop";
-import { FileTree } from "@/components/shell/FileTree";
+import { Sidebar } from "@/components/shell/Sidebar";
+import { agentPaneId } from "@/components/shell/SidebarAgent";
 import type { PaneMenuActions } from "@/components/shell/PaneMenu";
 import { ResizeHandles } from "@/components/shell/ResizeHandles";
 import { TabStrip } from "@/components/shell/TabStrip";
@@ -42,7 +43,12 @@ import {
   scrollback as scrollbackApi,
   session,
   tmuxControl,
+  MCP_REQUEST_EVENT,
+  mcp,
+  pty,
+  type McpRequest,
 } from "@/lib/ipc";
+import { handleRequest, type ToolContext } from "@/lib/mcp";
 import { kindForPath } from "@/lib/filetypes";
 import { resolve, type ActionId } from "@/lib/keymap";
 import { resumeLine } from "@/lib/programs";
@@ -62,6 +68,7 @@ import type { TmuxSessionShape } from "@/lib/tmuxControl";
 import { useSettings } from "@/lib/useSettings";
 import {
   announceReady,
+  currentWindowLabel,
   isMainWindow,
   onPaneHandover,
   openWorkspaceWindow,
@@ -844,6 +851,48 @@ export function App() {
     return true;
   }, []);
 
+  /* ── Tools for the agent ──────────────────────────────────────────── */
+
+  /**
+   * Answer the sidebar agent's MCP tool calls.
+   *
+   * The backend speaks the protocol and hands each tool call to the window the
+   * agent belongs to; this is that window running it against its own workspace.
+   * The tools themselves are in `lib/mcp.ts`. The label is checked as well as
+   * the event being aimed here, because a listener hears events for every
+   * target, and two windows answering one call would do everything twice.
+   */
+  useEffect(() => {
+    const context: ToolContext = {
+      getWorkspace: () => workspaceRef.current,
+      dispatch,
+      openPath: (path, target) => openPath(path, target),
+      terminal: terminalHandle,
+      newId,
+      setDraft: (paneId, text) => updateContent(paneId, { draft: text }),
+      splitDirection: () => getSettings().openPaneDirection,
+      sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
+    };
+    const here = currentWindowLabel();
+    let stop: (() => void) | null = null;
+    let disposed = false;
+    void listen<McpRequest>(MCP_REQUEST_EVENT, (request) => {
+      if (request.window !== here) return;
+      void handleRequest(request.method, request.params, context).then(
+        (result) => mcp.respond(request.id, result),
+        (error: unknown) =>
+          mcp.respond(request.id, null, error instanceof Error ? error.message : String(error)),
+      );
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else stop = unlisten;
+    });
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, [openPath]);
+
   /* ── Closing the window ───────────────────────────────────────────── */
 
   /**
@@ -871,6 +920,9 @@ export function App() {
           win,
           () => workspaceRef.current,
           async () => {
+            // The window's agent goes with the window: its MCP tools answer
+            // for this window alone, and would have nothing left to act on.
+            await pty.kill(agentPaneId(currentWindowLabel()));
             if (!isMainWindow()) await session.drop();
           },
         ),
@@ -1177,14 +1229,14 @@ export function App() {
           className={cn("shrink-0 border-r border-border", !workspace.sidebarOpen && "hidden")}
           style={{ width: settings.sidebarWidth }}
         >
-          {sidebarRoot ? (
-            <FileTree
-              root={sidebarRoot}
-              visible={workspace.sidebarOpen}
-              onOpen={openPath}
-              onRootChange={setSidebarRoot}
-            />
-          ) : null}
+          <Sidebar
+            root={sidebarRoot}
+            visible={workspace.sidebarOpen}
+            tab={workspace.sidebarTab ?? "files"}
+            onTab={(tab) => dispatch({ type: "ui/sidebarTab", tab })}
+            onOpen={openPath}
+            theme={windowTheme}
+          />
         </div>
 
         <div className="relative min-h-0 flex-1">

@@ -19,6 +19,7 @@ import { decodeFontSize, type ThemeChoice } from "./settings";
 import type { Node } from "./tree";
 import { clampRatio, hasPane, paneIds } from "./tree";
 import type { PaneKind, PaneState, Popup, Tab, Workspace } from "./workspace";
+import { SIDEBAR_TABS } from "./workspace";
 
 /** Bumped when the shape changes in a way older files cannot satisfy. */
 export const SNAPSHOT_VERSION = 1;
@@ -171,6 +172,9 @@ export function decode(json: string | null | undefined): Snapshot | null {
       tabs,
       activeTabId,
       sidebarOpen: rawWorkspace.sidebarOpen === true,
+      // A tab this build does not have is files, which is where the sidebar
+      // always started before it had any others.
+      sidebarTab: SIDEBAR_TABS.find((tab) => tab === rawWorkspace.sidebarTab) ?? "files",
       popups,
       focusedPopupId,
     },

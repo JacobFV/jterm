@@ -1,5 +1,5 @@
 /**
- * The left sidebar: the focused terminal's working directory, as a tree.
+ * The sidebar's Files tab: the focused terminal's working directory, as a tree.
  *
  * Rooted on wherever the focused shell currently is, so `cd` moves the tree
  * with you. That is the whole reason it is worth having next to a terminal
@@ -14,11 +14,10 @@
  * payoff most sessions never notice, and the refresh button is one click.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
-  CornerLeftUp,
   Eye,
   EyeOff,
   Folder,
@@ -39,10 +38,11 @@ interface FileTreeProps {
    *  `App` — and this is how it knows to catch up when it comes back. */
   visible: boolean;
   onOpen: (path: string) => void;
-  onRootChange: (path: string) => void;
+  /** The sidebar's tab menu, drawn at the start of the header. See `Sidebar`. */
+  switcher: ReactNode;
 }
 
-export function FileTree({ root, visible, onOpen, onRootChange }: FileTreeProps) {
+export function FileTree({ root, visible, onOpen, switcher }: FileTreeProps) {
   // Kept in settings rather than in this component, so the eye in the tree and
   // the switch in the settings window are two views of one preference — and so
   // that turning dotfiles on survives a restart, which is the only way anyone
@@ -106,15 +106,7 @@ export function FileTree({ root, visible, onOpen, onRootChange }: FileTreeProps)
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-surface-1">
       <div className="flex h-7 shrink-0 items-center gap-1 border-b border-border px-1.5">
-        <button
-          type="button"
-          title="Go up one directory"
-          aria-label="Go up one directory"
-          onClick={() => void fs.parent(root).then((parent) => parent && onRootChange(parent))}
-          className="shrink-0 rounded-sm p-1 text-ink-4 hover:bg-surface-2 hover:text-ink-1"
-        >
-          <CornerLeftUp className="h-3 w-3" />
-        </button>
+        {switcher}
         <span
           className="min-w-0 flex-1 truncate font-mono text-[length:var(--fs-10)] text-ink-2"
           title={root}
