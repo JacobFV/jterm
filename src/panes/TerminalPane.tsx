@@ -29,6 +29,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { ImageAddon } from "@xterm/addon-image";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 
@@ -86,6 +87,24 @@ const DRAFT_LOG_INTERVAL_MS = 1200;
  * and this is what keeps the file tree pointed at the directory you are in.
  */
 const CWD_POLL_MS = 1500;
+
+/**
+ * How often, at most, the rendered screen is written down while output arrives.
+ *
+ * This is what a pane whose shell died is restored *from* — see `save_screen` in
+ * `store.rs` for why the raw log is not. A throttle rather than a debounce: an
+ * agent's spinner never goes quiet, and a debounce would never fire for exactly
+ * the panes that most need it. Three seconds is inside the backend's slack for
+ * preferring the screen, and serialising a pane that often costs nothing anyone
+ * would see.
+ */
+const SCREEN_SAVE_MS = 3000;
+/**
+ * Rows of history kept with the screen. The emulator's own scrollback can be
+ * far longer, and restoring all of it would make every relaunch parse megabytes
+ * per pane for history hardly anyone scrolls back to.
+ */
+const SCREEN_ROWS = 2000;
 
 /**
  * The palette this pane is standing in, as xterm wants it.
@@ -467,6 +486,36 @@ export function TerminalPane({
      */
     term.loadAddon(new ImageAddon({ storageLimit: 64 }));
 
+    const serializer = new SerializeAddon();
+    term.loadAddon(serializer);
+
+    /**
+     * Write down what the terminal is showing, at most every `SCREEN_SAVE_MS`.
+     *
+     * The alternate screen is left out: `vim` or `less` is not something a
+     * restore can bring back, and the reset after a replay leaves the alternate
+     * screen anyway, so what would come back is the shell that was under it.
+     * Modes are left out for the reason `lib/scrollback.ts` gives — a mode is a
+     * program's arrangement with a terminal, and that program will be gone.
+     *
+     * Control-mode panes are skipped: tmux owns them and they are not in the
+     * snapshot to be restored.
+     */
+    let screenTimer = 0;
+    const saveScreen = () => {
+      screenTimer = 0;
+      const text = serializer.serialize({
+        scrollback: SCREEN_ROWS,
+        excludeAltBuffer: true,
+        excludeModes: true,
+      });
+      void scrollbackApi.saveScreen(paneId, text);
+    };
+    const scheduleScreen = () => {
+      if (screenTimer !== 0 || initialRef.current.control) return;
+      screenTimer = window.setTimeout(saveScreen, SCREEN_SAVE_MS);
+    };
+
     term.open(host);
     termRef.current = term;
     fitRef.current = fit;
@@ -620,6 +669,7 @@ export function TerminalPane({
       (chunk) => {
         term.write(chunk);
         bumpReplay();
+        scheduleScreen();
 
         const scan = scanOsc(chunk, oscCarryRef.current);
         oscCarryRef.current = scan.carry;
@@ -761,8 +811,15 @@ export function TerminalPane({
         // output it is continuing from rather than on top of it. On an adopt
         // this is also the only copy of what the shell printed while there was
         // no webview to print it to: the reader thread kept recording
-        // throughout, which is the whole reason that is not simply lost.
-        const previous = await scrollbackApi.read(paneId);
+        // throughout, which is the whole reason that is not simply lost — so an
+        // adopt reads the log.
+        //
+        // A shell that did not survive is drawn from the saved screen instead,
+        // where there is a fresh one. The log is a program's drawing
+        // instructions, and anything that redraws in place — every agent CLI —
+        // replays from them as a pile of misplaced fragments. See `save_screen`
+        // in `store.rs`.
+        const previous = await (adopted ? scrollbackApi.read(paneId) : scrollbackApi.restore(paneId));
         if (disposed) return;
         if (previous) {
           // Guarded across both writes, and released by the second one's
@@ -822,6 +879,7 @@ export function TerminalPane({
 
     return () => {
       disposed = true;
+      window.clearTimeout(screenTimer);
       cancelReplay();
       stopSettings();
       applySettingsRef.current = null;
