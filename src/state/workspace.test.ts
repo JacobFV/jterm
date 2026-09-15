@@ -780,4 +780,34 @@ describe("icons", () => {
     state = reduce(state, { type: "pane/profile", paneId, profile: "sql" });
     expect(state.popups[0].pane.profile).toBe("sql");
   });
+
+  it("zooms one pane's text and leaves its neighbour on the setting", () => {
+    const start = emptyWorkspace();
+    const tabId = start.tabs[0].id;
+    const first = start.tabs[0].focusedPaneId;
+    let state = reduce(start, {
+      type: "pane/split",
+      tabId,
+      paneId: first,
+      axis: "x",
+      kind: "terminal",
+    });
+    const second = state.tabs[0].focusedPaneId;
+
+    state = reduce(state, { type: "pane/fontSize", paneId: first, fontSize: 17 });
+    expect(state.tabs[0].panes[first].fontSize).toBe(17);
+    expect(state.tabs[0].panes[second].fontSize).toBeUndefined();
+    // The same size again is not a change, so nothing re-renders for it.
+    expect(reduce(state, { type: "pane/fontSize", paneId: first, fontSize: 17 })).toBe(state);
+
+    state = reduce(state, { type: "pane/fontSize", paneId: first, fontSize: undefined });
+    expect(state.tabs[0].panes[first].fontSize).toBeUndefined();
+  });
+
+  it("zooms a floating pane's text too", () => {
+    let state = reduce(emptyWorkspace(), { type: "popup/open", kind: "terminal" });
+    const paneId = state.popups[0].pane.id;
+    state = reduce(state, { type: "pane/fontSize", paneId, fontSize: 20 });
+    expect(state.popups[0].pane.fontSize).toBe(20);
+  });
 });

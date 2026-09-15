@@ -3,11 +3,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULTS,
   LIMITS,
+  decodeFontSize,
   decodeSettings,
   getSettings,
   resetSettings,
+  stepFontSize,
   updateSettings,
-  zoomText,
 } from "./settings";
 
 describe("decodeSettings", () => {
@@ -83,41 +84,36 @@ describe("decodeSettings", () => {
   });
 });
 
-describe("zoomText", () => {
+describe("stepFontSize", () => {
   // The store is module state, so a test that moves it has to put it back.
   afterEach(() => resetSettings());
 
-  it("steps the font size the settings slider shows", () => {
-    zoomText("in");
-    expect(getSettings().fontSize).toBe(DEFAULTS.fontSize + LIMITS.fontSize.step);
-    zoomText("out");
-    zoomText("out");
-    expect(getSettings().fontSize).toBe(DEFAULTS.fontSize - LIMITS.fontSize.step);
+  it("steps by the slider's step", () => {
+    const size = DEFAULTS.fontSize;
+    expect(stepFontSize(size, "in")).toBe(size + LIMITS.fontSize.step);
+    expect(stepFontSize(size, "out")).toBe(size - LIMITS.fontSize.step);
   });
 
   it("stops where the slider stops", () => {
-    updateSettings({ fontSize: LIMITS.fontSize.max });
-    zoomText("in");
-    expect(getSettings().fontSize).toBe(LIMITS.fontSize.max);
-
-    updateSettings({ fontSize: LIMITS.fontSize.min });
-    zoomText("out");
-    expect(getSettings().fontSize).toBe(LIMITS.fontSize.min);
+    expect(stepFontSize(LIMITS.fontSize.max, "in")).toBe(LIMITS.fontSize.max);
+    expect(stepFontSize(LIMITS.fontSize.min, "out")).toBe(LIMITS.fontSize.min);
   });
 
-  it("resets to the size jterm ships with, not to wherever you were", () => {
-    // The honest consequence of zoom being the setting rather than a second
-    // number laid over it — there is no earlier size of yours to return to.
-    updateSettings({ fontSize: DEFAULTS.fontSize + 5 });
-    zoomText("in");
-    zoomText("reset");
-    expect(getSettings().fontSize).toBe(DEFAULTS.fontSize);
+  it("does not touch the setting", () => {
+    // Zoom belongs to a pane now; the setting is only where panes start from.
+    updateSettings({ fontSize: 15 });
+    stepFontSize(15, "in");
+    expect(getSettings().fontSize).toBe(15);
   });
+});
 
-  it("leaves every other setting alone", () => {
-    updateSettings({ theme: "light", scrollback: 500 });
-    zoomText("in");
-    expect(getSettings().theme).toBe("light");
-    expect(getSettings().scrollback).toBe(500);
+describe("decodeFontSize", () => {
+  it("keeps a size the slider could show, and nothing else", () => {
+    expect(decodeFontSize(16)).toBe(16);
+    expect(decodeFontSize(LIMITS.fontSize.max + 1)).toBeUndefined();
+    expect(decodeFontSize(LIMITS.fontSize.min - 1)).toBeUndefined();
+    expect(decodeFontSize("16")).toBeUndefined();
+    expect(decodeFontSize(NaN)).toBeUndefined();
+    expect(decodeFontSize(null)).toBeUndefined();
   });
 });

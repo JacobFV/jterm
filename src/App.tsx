@@ -71,7 +71,7 @@ import {
 import { disposePane } from "@/panes/registry";
 import { dropContent, getContent, loadContent, onContentChange, snapshotContent, updateContent } from "@/state/content";
 import { decode, encode, type Snapshot } from "@/state/snapshot";
-import { getSettings, zoomText, type FileOpenTarget } from "@/state/settings";
+import { getSettings, stepFontSize, type FileOpenTarget } from "@/state/settings";
 import { type Direction, splitPlacement } from "@/state/tree";
 import {
   type PaneKind,
@@ -970,15 +970,30 @@ export function App() {
           }
           return;
 
+        // The pane with the keyboard, not the whole window: see `fontSize` on a
+        // pane. A pane that has never been zoomed steps from the setting, and
+        // reset hands it back to the setting rather than pinning today's value.
         case "view.zoomIn":
-          zoomText("in");
-          return;
         case "view.zoomOut":
-          zoomText("out");
+        case "view.zoomReset": {
+          const targetId = current.focusedPopupId ?? paneId;
+          if (!targetId) return;
+          if (id === "view.zoomReset") {
+            dispatch({ type: "pane/fontSize", paneId: targetId, fontSize: undefined });
+            return;
+          }
+          const target =
+            current.focusedPopupId !== null
+              ? current.popups.find((popup) => popup.pane.id === targetId)?.pane
+              : tab?.panes[targetId];
+          const from = target?.fontSize ?? getSettings().fontSize;
+          dispatch({
+            type: "pane/fontSize",
+            paneId: targetId,
+            fontSize: stepFontSize(from, id === "view.zoomIn" ? "in" : "out"),
+          });
           return;
-        case "view.zoomReset":
-          zoomText("reset");
-          return;
+        }
 
         case "history.search":
           setSearchingHistory(true);

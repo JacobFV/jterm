@@ -303,31 +303,27 @@ export function resetSettings(): void {
 }
 
 /**
- * Zoom: the type size the terminal and the text panes are drawn at.
+ * Zoom: one step of a pane's type size.
  *
- * This moves the same `fontSize` the Settings window edits rather than keeping
- * a second multiplier beside it, and that is the whole design. One number means
- * the slider you are looking at is the size you are looking at — zoom in from
- * the keyboard and the setting has moved, because it *is* the setting. It also
- * means a zoom survives a restart without anything new being written down, and
- * that a size chosen with the slider can be nudged from the keyboard without
- * the two disagreeing about which of them is in charge.
- *
- * The cost is what `reset` can mean. With one number there is no earlier size
- * of yours to go back to, so it goes back to the size jterm ships with — the
- * same thing `Mod+0` does in a browser, where the base size is likewise a
- * preference rather than a memory of where you were.
+ * The keyboard zooms the focused pane, not the setting — see `fontSize` on a
+ * pane in `state/workspace`. The setting is the size every pane starts from and
+ * the one `Mod+0` puts a pane back to, which is why there is no `reset` here:
+ * resetting is forgetting the pane's own number, not choosing a new one.
  *
  * Steps and stops come from `LIMITS`, so the keyboard cannot reach a size the
  * slider refuses to show.
  */
-export function zoomText(direction: "in" | "out" | "reset"): void {
+export function stepFontSize(size: number, direction: "in" | "out"): number {
   const { min, max, step } = LIMITS.fontSize;
-  const fontSize =
-    direction === "reset"
-      ? DEFAULTS.fontSize
-      : Math.min(max, Math.max(min, current.fontSize + (direction === "in" ? step : -step)));
-  updateSettings({ fontSize });
+  return Math.min(max, Math.max(min, size + (direction === "in" ? step : -step)));
+}
+
+/** A font size as it would be read back off disk, or `undefined` if it is not one. */
+export function decodeFontSize(raw: unknown): number | undefined {
+  const { min, max } = LIMITS.fontSize;
+  return typeof raw === "number" && Number.isFinite(raw) && raw >= min && raw <= max
+    ? raw
+    : undefined;
 }
 
 /** Quiet period before a change reaches the disk and the other window. */

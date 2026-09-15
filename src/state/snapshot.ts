@@ -14,7 +14,7 @@
 
 import { isThemeChoice } from "@/lib/customAmbients";
 import type { PaneContent } from "./content";
-import type { ThemeChoice } from "./settings";
+import { decodeFontSize, type ThemeChoice } from "./settings";
 import type { Node } from "./tree";
 import { clampRatio, hasPane, paneIds } from "./tree";
 import type { PaneKind, PaneState, Popup, Tab, Workspace } from "./workspace";
@@ -318,6 +318,10 @@ function decodePane(id: string, raw: unknown): PaneState | null {
   // out — the same treatment a theme that went away gets.
   const profile =
     typeof raw.profile === "string" && raw.profile ? raw.profile.slice(0, 64) : undefined;
+  // Out of range is dropped rather than clamped: a zoom that cannot be shown
+  // is better forgotten than turned into a different zoom, and forgetting it
+  // only puts the pane back on the setting.
+  const fontSize = decodeFontSize(raw.fontSize);
 
   switch (kind as PaneKind) {
     case "terminal":
@@ -327,6 +331,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         title,
         theme,
         profile,
+        fontSize,
         // What the pane was last running, for its icon and for the offer to
         // pick the session back up. Capped: it is a line of text from a file
         // that survived a crash.
@@ -345,6 +350,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         title,
         theme,
         profile,
+        fontSize,
         path: typeof raw.path === "string" && raw.path ? raw.path : undefined,
         dirty: raw.dirty === true,
       };
@@ -361,6 +367,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         title,
         theme,
         profile,
+        fontSize,
         path: raw.path,
       };
     }
@@ -371,6 +378,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         title,
         theme,
         profile,
+        fontSize,
         // Only http(s) is restored. A `file:` or `javascript:` URL in this file
         // would otherwise be a way to make the app open something it should
         // not, using a file the app itself is expected to trust.

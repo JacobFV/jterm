@@ -200,3 +200,24 @@ describe("what a pane was running", () => {
     expect(restored.tabs[0].panes[paneId].profile).toBeUndefined();
   });
 });
+
+describe("a pane's own font size", () => {
+  it("comes back after a restart", () => {
+    const start = emptyWorkspace();
+    const paneId = start.tabs[0].focusedPaneId;
+    const state = reduce(start, { type: "pane/fontSize", paneId, fontSize: 18 });
+    expect(decode(encode(state, {}))!.workspace.tabs[0].panes[paneId].fontSize).toBe(18);
+  });
+
+  it("is forgotten, not the pane, when the file holds nonsense", () => {
+    const state = emptyWorkspace();
+    const paneId = state.tabs[0].focusedPaneId;
+    for (const junk of [9000, -1, "18", null]) {
+      const parsed = JSON.parse(encode(state, {}));
+      parsed.workspace.tabs[0].panes[paneId].fontSize = junk;
+      const pane = decode(JSON.stringify(parsed))!.workspace.tabs[0].panes[paneId];
+      expect(pane).toBeDefined();
+      expect(pane.fontSize).toBeUndefined();
+    }
+  });
+});

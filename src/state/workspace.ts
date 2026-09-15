@@ -73,6 +73,17 @@ interface PaneCommon {
    * what this pane is and that outranks anything inferred from a command line.
    */
   profile?: string;
+  /**
+   * A type size for this pane alone, or absent to follow the setting.
+   *
+   * The same shape as `theme`: absent is a live reference to the Settings
+   * window's font size, and only a pane someone has zoomed holds a number.
+   * Zooming from the keyboard is nearly always about the one pane you are
+   * reading — a log you are squinting at, a notepad on a projector — and
+   * resizing every shell in the window for it re-wraps a dozen things nobody
+   * asked about.
+   */
+  fontSize?: number;
 }
 
 export interface TerminalPaneState extends PaneCommon {
@@ -512,6 +523,8 @@ export type Action =
   | { type: "pane/theme"; paneId: string; theme: ThemeChoice | undefined }
   /** An icon chosen by hand, or `undefined` to go back to working it out. */
   | { type: "pane/profile"; paneId: string; profile: string | undefined }
+  /** `undefined` puts the pane back to the font size in the settings. */
+  | { type: "pane/fontSize"; paneId: string; fontSize: number | undefined }
   | { type: "tab/profile"; tabId: string; profile: string | undefined }
   /** tmux has described a control session; make the tabs agree with it. */
   | { type: "tmux/sync"; session: string; windows: TmuxWindow[] }
@@ -969,6 +982,11 @@ function apply(state: Workspace, action: Action): Workspace {
     case "pane/profile":
       return mapPane(state, action.paneId, (pane) =>
         pane.profile === action.profile ? pane : { ...pane, profile: action.profile },
+      );
+
+    case "pane/fontSize":
+      return mapPane(state, action.paneId, (pane) =>
+        pane.fontSize === action.fontSize ? pane : { ...pane, fontSize: action.fontSize },
       );
 
     case "tab/profile":
