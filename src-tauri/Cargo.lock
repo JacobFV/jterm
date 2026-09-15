@@ -2075,7 +2075,7 @@ dependencies = [
 
 [[package]]
 name = "jterm"
-version = "0.8.6"
+version = "0.8.7"
 dependencies = [
  "dirs-next",
  "getrandom 0.2.17",
