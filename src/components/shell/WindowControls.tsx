@@ -26,10 +26,12 @@
  * event instead. On Linux none of that applies and the plain handlers act.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Copy, Maximize2, Minimize2, Minus, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isTauri } from "@/lib/tauri";
 import { isLinux, usesNativeWindowChrome } from "@/lib/platform";
 import { useIsFullscreen } from "@/lib/useFullscreen";
+import { Menu, MenuItem, useMenu } from "./Menu";
 
 const HOVER_EVENT = "window-chrome://maximize-hover";
 
@@ -38,6 +40,7 @@ type AppWindow = {
   toggleMaximize: () => Promise<void>;
   close: () => Promise<void>;
   isMaximized: () => Promise<boolean>;
+  setFullscreen: (fullscreen: boolean) => Promise<void>;
   onResized: (handler: () => void) => Promise<() => void>;
 };
 
@@ -277,7 +280,10 @@ export function WindowControls({ maximize = true }: { maximize?: boolean }) {
     <div
       className={cn(
         "flex shrink-0 items-center",
-        gtk ? "gap-[9px] pl-3 pr-3.5" : "ml-1 items-stretch border-l border-border",
+        // GNOME sits its close button about 6px from the window's edge. More
+        // than that and it reads as floating in the titlebar rather than
+        // belonging to the corner.
+        gtk ? "gap-[9px] pl-3 pr-1.5" : "ml-1 items-stretch border-l border-border",
       )}
     >
       <Button title="Minimise" onClick={act((win) => win.minimize())}>
@@ -296,6 +302,78 @@ export function WindowControls({ maximize = true }: { maximize?: boolean }) {
       <Button title="Close" danger onClick={act((win) => win.close())}>
         <CloseGlyph />
       </Button>
+    </div>
+  );
+}
+
+/**
+ * The app's icon at the left of the titlebar, and the window menu behind it.
+ *
+ * A window with no OS decorations has also lost the menu its frame would have
+ * offered — the one behind the icon in a Windows titlebar, or a right-click on
+ * a GNOME header bar. This puts it back where Windows users look for it. Not
+ * drawn on macOS, whose traffic lights already hold that corner and whose
+ * windows have no such menu.
+ *
+ * The entries are the ones the webview can actually carry out. Move and Size
+ * from the Windows menu are not here: they are keyboard-driven drags that only
+ * the OS can start.
+ */
+export function WindowMenuButton() {
+  const menu = useMenu();
+  const fullscreen = useIsFullscreen();
+  const [maximized, setMaximized] = useState(false);
+
+  const act = (run: (win: AppWindow) => Promise<void>) => () => {
+    menu.close();
+    void appWindow().then((win) => (win === null ? undefined : run(win)));
+  };
+
+  const open = () => {
+    // Asked at the moment of opening rather than tracked all session: the menu
+    // is the only thing here that cares, and it opens rarely.
+    void appWindow().then((win) =>
+      win?.isMaximized().then(setMaximized, () => undefined),
+    );
+    menu.toggle();
+  };
+
+  return (
+    <div ref={menu.wrapRef} className="flex shrink-0 items-center">
+      <button
+        type="button"
+        title="Window menu"
+        aria-label="Window menu"
+        aria-haspopup="menu"
+        aria-expanded={menu.open}
+        onClick={open}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          if (!menu.open) open();
+        }}
+        className="inline-flex h-6 w-6 items-center justify-center rounded-sm hover:bg-surface-2"
+      >
+        <img src="/icon.svg" alt="" draggable={false} className="h-4 w-4" />
+      </button>
+
+      <Menu menu={menu}>
+        <MenuItem icon={Minus} label="Minimise" onSelect={act((win) => win.minimize())} />
+        {/* Maximise means nothing to a fullscreen window, which fills the
+            screen whatever its maximised state says. */}
+        {fullscreen ? null : (
+          <MenuItem
+            icon={maximized ? Copy : Square}
+            label={maximized ? "Restore" : "Maximise"}
+            onSelect={act((win) => win.toggleMaximize())}
+          />
+        )}
+        <MenuItem
+          icon={fullscreen ? Minimize2 : Maximize2}
+          label={fullscreen ? "Leave full screen" : "Full screen"}
+          onSelect={act((win) => win.setFullscreen(!fullscreen))}
+        />
+        <MenuItem icon={X} label="Close" onSelect={act((win) => win.close())} />
+      </Menu>
     </div>
   );
 }

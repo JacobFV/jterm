@@ -40,7 +40,7 @@ import { Menu, MenuItem, MenuSubmenu, useMenu } from "./Menu";
 import { PaneMenu, type PaneMenuActions, type PaneMenuHandle } from "./PaneMenu";
 import { UpdateBadge } from "./UpdateBadge";
 import type { TabDrag } from "./Workspace";
-import { WindowControls } from "./WindowControls";
+import { WindowControls, WindowMenuButton } from "./WindowControls";
 
 /** Movement before a press on a tab counts as a drag rather than a click. */
 const DRAG_THRESHOLD_PX = 4;
@@ -214,10 +214,18 @@ export function TabStrip({
       data-tauri-drag-region
       className="relative z-40 flex h-head shrink-0 cursor-default select-none items-stretch border-b border-border bg-surface-1"
     >
-      {/* Room for the macOS traffic lights, plus a bare strip on every platform
-          that exists only to be grabbed. Draggable, so the area around the
-          system buttons still moves the window. */}
-      <div data-tauri-drag-region className="shrink-0" style={{ width: leadingInset }} />
+      {/* Room for the macOS traffic lights, plus a bare strip that exists only
+          to be grabbed. Draggable, so the area around the system buttons still
+          moves the window. Everywhere else the corner holds the app's icon and
+          the window menu behind it, with the same grabbable margin around it —
+          the padding is the drag region, the icon itself is not. */}
+      {native ? (
+        <div data-tauri-drag-region className="shrink-0" style={{ width: leadingInset }} />
+      ) : (
+        <div data-tauri-drag-region className="flex shrink-0 items-center pl-2 pr-2">
+          <WindowMenuButton />
+        </div>
+      )}
 
       {/* Takes all the room left over by the window controls, so the tabs have
           something to spread into. The drag spacer below shares this box rather
