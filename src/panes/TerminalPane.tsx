@@ -241,6 +241,12 @@ export function TerminalPane({
   });
   const metaRef = useRef(onMeta);
   metaRef.current = onMeta;
+  /** This pane's own type size, if it has been zoomed; else the setting's. */
+  const fontSizeRef = useRef(pane.fontSize);
+  fontSizeRef.current = pane.fontSize;
+  /** `applySettings` from the effect below, for the one change that is not a
+   *  settings change but has to do everything a settings change does. */
+  const applySettingsRef = useRef<(() => void) | null>(null);
 
   /** Start (or restart) the shell and wire the terminal to it. */
   const spawn = useCallback(async (cwd: string | undefined) => {
@@ -414,7 +420,7 @@ export function TerminalPane({
       fontFamily: getComputedStyle(document.documentElement)
         .getPropertyValue("--font-mono")
         .trim(),
-      fontSize: settings.fontSize,
+      fontSize: fontSizeRef.current ?? settings.fontSize,
       lineHeight: settings.lineHeight,
       // xterm keeps its own scrollback for the live session; the file on disk
       // is what survives a restart, and is capped separately.
@@ -515,7 +521,7 @@ export function TerminalPane({
       term.options.fontFamily = getComputedStyle(document.documentElement)
         .getPropertyValue("--font-mono")
         .trim();
-      term.options.fontSize = current.fontSize;
+      term.options.fontSize = fontSizeRef.current ?? current.fontSize;
       term.options.lineHeight = current.lineHeight;
       term.options.cursorStyle = current.cursorStyle;
       term.options.cursorBlink = current.cursorBlink;
@@ -526,6 +532,7 @@ export function TerminalPane({
       if (!exitedRef.current) void pty.resize(paneId, term.cols, term.rows, pixelGeometry(host));
     };
     const stopSettings = subscribeSettings(applySettings);
+    applySettingsRef.current = applySettings;
 
     // Keystrokes on their way to the shell, mirrored on the way past.
     const dataSub = term.onData((data) => {
@@ -817,6 +824,7 @@ export function TerminalPane({
       disposed = true;
       cancelReplay();
       stopSettings();
+      applySettingsRef.current = null;
       if (draftLogTimer.current !== null) clearTimeout(draftLogTimer.current);
       observer.disconnect();
       cancelAnimationFrame(frame);
@@ -855,6 +863,21 @@ export function TerminalPane({
     term.options.theme = readTheme(hostRef.current);
     if (term.rows > 0) term.refresh(0, term.rows - 1);
   }, [theme]);
+
+  /**
+   * Zoom this pane's text.
+   *
+   * Everything `applySettings` does and for the same reason — a new size is a
+   * new column count, and the shell has to hear about it. Skipped until the
+   * size actually moves, because at mount the terminal was already built at it
+   * and a resize before the shell exists is a message to nobody.
+   */
+  const appliedFontSizeRef = useRef(pane.fontSize);
+  useEffect(() => {
+    if (appliedFontSizeRef.current === pane.fontSize) return;
+    appliedFontSizeRef.current = pane.fontSize;
+    applySettingsRef.current?.();
+  }, [pane.fontSize]);
 
   return (
     <div

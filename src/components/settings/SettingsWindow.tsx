@@ -110,7 +110,7 @@ function zoomHint(): string {
   const zoomIn = keysFor("view.zoomIn");
   const zoomOut = keysFor("view.zoomOut");
   if (!zoomIn || !zoomOut) return "";
-  return ` ${displayKeys(zoomIn)} and ${displayKeys(zoomOut)} move it from the keyboard.`;
+  return ` ${displayKeys(zoomIn)} and ${displayKeys(zoomOut)} zoom the pane you are in on its own.`;
 }
 
 /**
@@ -300,7 +300,7 @@ export function SettingsWindow() {
 
           <Row
             label="Font size"
-            hint={`The terminal and the text panes, which are drawn at one size on purpose.${zoomHint()}`}
+            hint={`The size the terminal and the text panes start at.${zoomHint()}`}
           >
             <Slider
               label="Font size"

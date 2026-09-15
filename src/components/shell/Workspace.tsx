@@ -457,6 +457,13 @@ export function Workspace({
               // syntax colours below all resolve to the nearest declaration,
               // and nothing had to be told which theme it is in.
               ...themeStyle(choice, settings.ambientPresence),
+              // A zoomed pane's type size, by the same inheritance: the notepad
+              // reads this variable, and the nearest declaration is this box.
+              // The terminal is told directly, because xterm measures cells in
+              // pixels it was handed rather than in anything CSS can reach.
+              ...(pane.fontSize !== undefined
+                ? ({ "--mono-font-size": `${pane.fontSize}px` } as React.CSSProperties)
+                : {}),
             }}
           >
             {/* A backdrop of this pane's own, for a living theme the window is
