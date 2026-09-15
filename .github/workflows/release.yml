@@ -79,6 +79,13 @@ jobs:
     runs-on: ${{ matrix.platform }}
     name: ${{ matrix.label }}
 
+    # The key the in-app updater trusts, as a repository secret. Without it the
+    # release still builds and publishes — only the updater's signed artifacts
+    # and `latest.json` are left out, so installed copies simply hear of nothing.
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -116,6 +123,20 @@ jobs:
 
       - run: npm test
 
+      # Switched on here rather than in `tauri.conf.json`, so a local
+      # `tauri build` without the key still works.
+      - name: Produce signed updater artifacts
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const file = "src-tauri/tauri.conf.json";
+            const config = JSON.parse(fs.readFileSync(file, "utf8"));
+            config.bundle.createUpdaterArtifacts = true;
+            fs.writeFileSync(file, JSON.stringify(config, null, 2));
+          '
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -136,3 +157,39 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
+
+  # A copy installed from a `.deb` or `.rpm` updates from one, and the updater
+  # only installs a package whose signature checks out. The bundler signs only
+  # what it can replace itself — AppImage, `.app`, `.msi`, NSIS — so the Linux
+  # packages are signed here, once every platform has uploaded, and `latest.json`
+  # gains the `linux-<arch>-deb` / `-rpm` entries the updater looks for first.
+  # See `scripts/sign-linux-packages.mjs`.
+  linux-packages:
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.verify.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Sign the Linux packages for the updater
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
+        run: |
+          npm ci --ignore-scripts
+          mkdir packages
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir packages \
+            --pattern '*.deb' --pattern '*.rpm' --pattern 'latest.json'
+          node scripts/sign-linux-packages.mjs packages \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            packages/*.deb.sig packages/*.rpm.sig packages/latest.json
