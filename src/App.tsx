@@ -56,7 +56,7 @@ import {
 import { openSettingsWindow } from "@/lib/settingsWindow";
 import { isTauri } from "@/lib/tauri";
 import { terminalHandle } from "@/lib/terminals";
-import { newId } from "@/lib/utils";
+import { cn, newId } from "@/lib/utils";
 import { isTmuxAction, runControlAction, runTmuxAction, tmuxAvailable } from "@/lib/tmux";
 import type { TmuxSessionShape } from "@/lib/tmuxControl";
 import { useSettings } from "@/lib/useSettings";
@@ -1167,20 +1167,25 @@ export function App() {
       />
 
       <div className="flex min-h-0 flex-1">
-        {workspace.sidebarOpen ? (
-          <div
-            className="shrink-0 border-r border-border"
-            style={{ width: settings.sidebarWidth }}
-          >
-            {sidebarRoot ? (
-              <FileTree
-                root={sidebarRoot}
-                onOpen={openPath}
-                onRootChange={setSidebarRoot}
-              />
-            ) : null}
-          </div>
-        ) : null}
+        {/* Hidden while closed, not unmounted. Opening the sidebar narrows every
+            pane, and every terminal then refits and rewraps its scrollback — work
+            that holds the page up until it is done. A tree mounted at that moment
+            has nothing in hand, so it said "reading…" for as long as the
+            terminals took. One that never went away opens showing what it had,
+            and catches up behind that. */}
+        <div
+          className={cn("shrink-0 border-r border-border", !workspace.sidebarOpen && "hidden")}
+          style={{ width: settings.sidebarWidth }}
+        >
+          {sidebarRoot ? (
+            <FileTree
+              root={sidebarRoot}
+              visible={workspace.sidebarOpen}
+              onOpen={openPath}
+              onRootChange={setSidebarRoot}
+            />
+          ) : null}
+        </div>
 
         <div className="relative min-h-0 flex-1">
           {/* Under the panes, and drawn whether or not they have loaded yet:

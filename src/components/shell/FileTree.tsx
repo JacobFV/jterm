@@ -9,12 +9,12 @@
  * Directories load when they are opened and are then remembered, so walking
  * back up a tree you have already been down costs nothing. Nothing is watched:
  * a file created by the shell will not appear until the directory is collapsed
- * and reopened, or Refresh is pressed. Watching every open directory would mean
- * an inotify handle per node for a payoff most sessions never notice, and the
- * refresh button is one click.
+ * and reopened, the sidebar is closed and opened again, or Refresh is pressed.
+ * Watching every open directory would mean an inotify handle per node for a
+ * payoff most sessions never notice, and the refresh button is one click.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -35,11 +35,14 @@ import { updateSettings } from "@/state/settings";
 interface FileTreeProps {
   /** Where to root the tree — the focused terminal's cwd. */
   root: string;
+  /** False while the sidebar is closed. The tree stays mounted then — see
+   *  `App` — and this is how it knows to catch up when it comes back. */
+  visible: boolean;
   onOpen: (path: string) => void;
   onRootChange: (path: string) => void;
 }
 
-export function FileTree({ root, onOpen, onRootChange }: FileTreeProps) {
+export function FileTree({ root, visible, onOpen, onRootChange }: FileTreeProps) {
   // Kept in settings rather than in this component, so the eye in the tree and
   // the switch in the settings window are two views of one preference — and so
   // that turning dotfiles on survives a restart, which is the only way anyone
@@ -74,6 +77,21 @@ export function FileTree({ root, onOpen, onRootChange }: FileTreeProps) {
     setFailed({});
     void load(root);
   }, [root, load]);
+
+  // Nothing is watched, so the sidebar coming back into view is the moment to
+  // catch up with whatever the shell did while it was closed. Re-read in place
+  // rather than cleared: showing the listing it already had, straight away, is
+  // the whole reason the tree is kept mounted.
+  const wasVisible = useRef(visible);
+  useEffect(() => {
+    const reappeared = visible && !wasVisible.current;
+    wasVisible.current = visible;
+    if (!reappeared) return;
+    void load(root);
+    for (const [path, isOpen] of Object.entries(open)) {
+      if (isOpen) void load(path);
+    }
+  }, [visible, root, open, load]);
 
   const toggle = (path: string) => {
     setOpen((current) => {
