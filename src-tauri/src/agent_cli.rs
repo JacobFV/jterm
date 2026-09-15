@@ -25,6 +25,18 @@
 //! permissions`, `--dangerously-bypass-approvals-and-sandbox`, `--yolo` — unless
 //! the user's own arguments already say how approvals should work. See
 //! `bypass_flag`.
+//!
+//! Where a CLI makes it cheap, jterm's server is the only one it loads. The
+//! sidebar agent is a helper for this window rather than the user's general
+//! agent, and every other server — a browser, a mail connector — is tool
+//! descriptions in its context and startup time spent on nothing a sidebar uses.
+//! Claude takes `--strict-mcp-config` plus an environment switch for its
+//! claude.ai connectors, and Gemini an allow-list. Codex is left alone: its
+//! servers come from plugins as well as from `config.toml`, and switching those
+//! off one by one is more machinery than it is worth.
+//!
+//! The agent is also told to keep its replies short, since it lives in a column
+//! a few dozen characters wide. See `CONCISE_PROMPT`.
 
 use std::path::{Path, PathBuf};
 
@@ -39,6 +51,19 @@ pub const URL_ENV: &str = "JTERM_MCP_URL";
 
 /// The agents the sidebar knows how to connect. Ids match `lib/programs.ts`.
 pub const TOOLS: [&str; 3] = ["claude", "codex", "gemini"];
+
+/// What the agent is told about where it is, added to its own system prompt.
+///
+/// Appended, never a replacement: the CLI's prompt is what makes it good at its
+/// job, and this only changes how much it says. Lines and bullets rather than a
+/// word count, because a count is something a model argues with and a shape is
+/// something it copies. The shape is explicit because "reply concisely" alone,
+/// tried against Claude, still gave twenty-line answers to "why" questions.
+pub const CONCISE_PROMPT: &str = "You are running in the sidebar of jterm, a terminal app: a \
+column a few dozen characters wide beside the user's work. Be brief. Default to one to four short \
+lines: the answer, then at most one sentence of the context that matters. A list is at most four \
+short bullets. No preamble, recaps, headings, tables or closing offers. Go longer only when the \
+user asks for detail.";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Plan {
@@ -73,12 +98,32 @@ pub fn plan(
     ];
 
     let bypass = bypass_flag(tool, command.iter().chain(args));
+    // Whether the user's own command line already mentions a flag, in which case
+    // theirs stands and this one is not added beside it.
+    let said = |flags: &[&str]| {
+        command.iter().chain(args).any(|word| {
+            let name = word.split('=').next().unwrap_or(word);
+            flags.contains(&name)
+        })
+    };
 
     match tool {
         "claude" => {
             let file = config_dir.join(format!("claude-{window}.json"));
             write_private(&file, &claude_config(endpoint, token))?;
             argv.extend(bypass.map(String::from));
+            argv.push("--strict-mcp-config".into());
+            // `--strict-mcp-config` does not cover the connectors a claude.ai
+            // account brings; this switch does.
+            env.push(("ENABLE_CLAUDEAI_MCP_SERVERS".into(), "false".into()));
+            if !said(&[
+                "--system-prompt",
+                "--system-prompt-file",
+                "--append-system-prompt",
+            ]) {
+                argv.push("--append-system-prompt".into());
+                argv.push(CONCISE_PROMPT.into());
+            }
             // After the user's arguments, not before: `--mcp-config` takes a
             // list, and put first it would swallow a prompt given after it.
             argv.extend(args.iter().cloned());
@@ -87,6 +132,14 @@ pub fn plan(
         }
         "codex" => {
             argv.extend(codex_overrides(endpoint));
+            // Developer instructions are Codex's addition to its own prompt.
+            // Before the user's arguments, so a `-c developer_instructions=` of
+            // theirs is the later override and wins.
+            argv.push("-c".into());
+            argv.push(format!(
+                "developer_instructions={}",
+                serde_json::to_string(CONCISE_PROMPT).unwrap_or_default()
+            ));
             argv.extend(bypass.map(String::from));
             argv.extend(args.iter().cloned());
         }
@@ -97,6 +150,13 @@ pub fn plan(
                 .and_then(|text| serde_json::from_str::<Value>(&text).ok());
             write_private(&file, &gemini_settings(existing, endpoint, token))?;
             argv.extend(bypass.map(String::from));
+            if !said(&["--allowed-mcp-server-names"]) {
+                argv.push("--allowed-mcp-server-names".into());
+                argv.push(SERVER_NAME.into());
+            }
+            // Gemini has no flag that adds to its system prompt — only
+            // `GEMINI_SYSTEM_MD`, which replaces it outright — so it is not told
+            // to be brief. Losing its whole prompt is a worse trade than length.
             argv.extend(args.iter().cloned());
             env.push((
                 "GEMINI_CLI_SYSTEM_SETTINGS_PATH".into(),
@@ -312,12 +372,18 @@ mod tests {
             words(&[
                 "claude",
                 "--dangerously-skip-permissions",
+                "--strict-mcp-config",
+                "--append-system-prompt",
+                CONCISE_PROMPT,
                 "--model",
                 "opus",
                 "--mcp-config",
                 &file.to_string_lossy()
             ])
         );
+        assert!(plan
+            .env
+            .contains(&("ENABLE_CLAUDEAI_MCP_SERVERS".into(), "false".into())));
         let written: Value =
             serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(written, claude_config(URL, "t0k"));
@@ -355,6 +421,16 @@ mod tests {
                 &format!("mcp_servers.jterm.url=\"{URL}\""),
                 "-c",
                 "mcp_servers.jterm.bearer_token_env_var=\"JTERM_MCP_TOKEN\"",
+            ])
+        );
+        assert_eq!(
+            plan.argv[5..7],
+            words(&[
+                "-c",
+                &format!(
+                    "developer_instructions={}",
+                    serde_json::to_string(CONCISE_PROMPT).unwrap()
+                )
             ])
         );
         assert_eq!(plan.argv.last().unwrap(), "--full-auto");
@@ -418,8 +494,31 @@ mod tests {
         );
 
         let gemini = plan("gemini", &[], &[], URL, "t", &scratch(), "main").unwrap();
-        assert_eq!(gemini.argv, words(&["gemini", "--yolo"]));
+        assert_eq!(
+            gemini.argv,
+            words(&["gemini", "--yolo", "--allowed-mcp-server-names", "jterm"])
+        );
         std::fs::remove_dir_all(scratch()).ok();
+    }
+
+    #[test]
+    fn a_system_prompt_the_user_chose_is_not_added_to() {
+        // A directory of its own: other tests here remove `scratch()` whole, and
+        // may do it while this one is writing into it.
+        let dir =
+            std::env::temp_dir().join(format!("jterm-agent-cli-prompt-{}", std::process::id()));
+        let plan = plan(
+            "claude",
+            &[],
+            &words(&["--append-system-prompt=Be thorough."]),
+            URL,
+            "t",
+            &dir,
+            "main",
+        )
+        .unwrap();
+        assert!(!plan.argv.iter().any(|word| word == CONCISE_PROMPT));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
