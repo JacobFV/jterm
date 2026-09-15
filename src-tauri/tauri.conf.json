@@ -54,5 +54,13 @@
     "macOS": {
       "minimumSystemVersion": "10.15"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVFRDM4NDRCMDQ0OTM4NTkKUldSWk9Fa0VTNFRUN29KNzRUdG5nQnV6RC9XY1pheHU3T3UrYUw5VTRsWE1aWWJoV1VIclVmOXQK",
+      "endpoints": [
+        "https://github.com/JacobFV/jterm/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

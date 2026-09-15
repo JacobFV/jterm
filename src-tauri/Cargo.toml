@@ -39,6 +39,7 @@ dirs-next = "2"
 # The bearer token jterm's MCP server hands its agents, from the OS's own
 # randomness. Already in the tree through Tauri; named here so it is ours.
 getrandom = "0.2"
+tauri-plugin-updater = "2.11.0"
 
 # The webview's own crash signal, for `src/recover.rs`. Pinned to exactly what
 # wry depends on: `PlatformWebview::inner()` hands back a `webkit2gtk::WebView`

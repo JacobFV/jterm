@@ -11,6 +11,7 @@
 //!   - `recover`       — putting the window back when WebKit's renderer dies
 //!   - `search`        — the sidebar's Search tab
 //!   - `store`         — session snapshots and scrollback on disk
+//!   - `updater`       — checking for, installing and restarting into a release
 //!   - `window_chrome` — the native half of the custom titlebar
 //!
 //! Browser panes need nothing here: they are iframes, for reasons set out in
@@ -30,6 +31,7 @@ pub mod recover;
 pub mod search;
 pub mod store;
 pub mod tmux;
+pub mod updater;
 #[cfg(windows)]
 mod win32_snap;
 pub mod window_chrome;
@@ -136,6 +138,8 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(Arc::new(updater::Updates::default()))
         .manage(store)
         .manage(registry)
         .manage(control)
@@ -199,6 +203,10 @@ pub fn run() {
             history::history_import,
             history::history_path,
             window_chrome::set_maximize_button_rect,
+            updater::update_state,
+            updater::update_check,
+            updater::update_install,
+            updater::update_restart,
         ])
         .setup(move |app| {
             use tauri::Manager;
