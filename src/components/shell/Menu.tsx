@@ -247,6 +247,8 @@ export function MenuSubmenu({
   const rowRef = useRef<HTMLButtonElement | null>(null);
   const [at, setAt] = useState<MenuAnchor | null>(null);
   const open = scope?.openSub === id;
+  /** Which of *this panel's* submenus is open, if any. */
+  const [openChild, setOpenChild] = useState<string | null>(null);
 
   /**
    * The scope the panel's own rows see.
@@ -254,17 +256,27 @@ export function MenuSubmenu({
    * Context reaches through a portal, so without this every row *inside* the
    * panel would inherit the outer menu's `setOpenSub` — and since a plain row
    * closes the open submenu on hover, pointing at one would shut the panel it
-   * is in. Registration still goes to the outer menu, which is the one doing
-   * the outside-click detection.
+   * is in. So the panel is a level of its own, with its own idea of which
+   * child is open: that is what lets a submenu nest inside a submenu (`Move to
+   * › Tabs`), which a stub scope with a no-op setter silently could not — the
+   * nested row asked whether it was the open one and always heard no.
+   * Registration still goes to the outer menu, which is the one doing the
+   * outside-click detection.
    */
   const inner = useMemo<MenuScope>(
     () => ({
       addSurface: (element) => scope?.addSurface(element),
-      openSub: null,
-      setOpenSub: () => {},
+      openSub: openChild,
+      setOpenSub: setOpenChild,
     }),
-    [scope],
+    [scope, openChild],
   );
+
+  // A panel that has closed has no open child, and a stale one would come back
+  // already expanded the next time this row was hovered.
+  useEffect(() => {
+    if (!open) setOpenChild(null);
+  }, [open]);
 
   const place = useCallback(() => {
     const bounds = rowRef.current?.getBoundingClientRect();
