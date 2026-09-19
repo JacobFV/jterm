@@ -390,14 +390,22 @@ export function SettingsWindow() {
               />
             </Row>
 
+            {/* Two named destinations rather than an on/off, because "Pane
+                shortcuts drive tmux" read as an override *toward* jterm to the
+                one person it was written for. A choice that names both sides
+                cannot be read backwards. */}
             <Row
-              label="Pane shortcuts drive tmux"
-              hint="In a pane that is in tmux, splitting and moving between panes acts on tmux's panes rather than jterm's — so the split lands in the session that survives. Moving off the edge of a tmux layout still arrives at the jterm pane next door. Turn this off to split jterm around the tmux pane instead."
+              label="Split and focus shortcuts act on"
+              hint="Ctrl+D and the other pane shortcuts, in a pane that is in tmux. tmux's panes put the split inside the session that survives the app; moving off the edge of the tmux layout still arrives at the jterm pane next door. jterm's panes split jterm around the tmux pane, and the new pane gets a session of its own."
             >
-              <Toggle
-                label="Pane shortcuts drive tmux"
-                value={settings.tmuxKeys}
-                onChange={(tmuxKeys) => updateSettings({ tmuxKeys })}
+              <Segmented
+                label="Split and focus shortcuts act on"
+                value={settings.tmuxKeys ? "tmux" : "jterm"}
+                onChange={(target) => updateSettings({ tmuxKeys: target === "tmux" })}
+                options={[
+                  { value: "tmux", label: "tmux's panes" },
+                  { value: "jterm", label: "jterm's panes" },
+                ]}
               />
             </Row>
           </Section>
