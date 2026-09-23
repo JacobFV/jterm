@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { countPanes, layout, paneIds } from "./tree";
-import { type Workspace, emptyWorkspace, reduce, themeOf } from "./workspace";
+import { type Workspace, emptyWorkspace, paneLabel, reduce, tabLabel, themeOf } from "./workspace";
 
 /**
  * Two tabs: the first a lone terminal, the second split into two.
@@ -753,6 +753,43 @@ describe("pane/moveTo", () => {
 
     const received = reduce(emptyWorkspace(), { type: "pane/adopt", pane, as: "popup" });
     expect(received.popups[0].pane.id).toBe(first);
+  });
+});
+
+describe("names", () => {
+  it("lets a pane's name outlast the title its shell keeps rewriting", () => {
+    const start = emptyWorkspace();
+    const paneId = start.tabs[0].focusedPaneId;
+
+    let state = reduce(start, { type: "pane/rename", paneId, name: "  build  " });
+    state = reduce(state, { type: "pane/meta", paneId, patch: { title: "~/src" } });
+    const pane = state.tabs[0].panes[paneId];
+    expect(pane.name).toBe("build");
+    expect(paneLabel(pane)).toBe("build");
+    // An unnamed tab is named by its focused pane, so the name reaches it too.
+    expect(tabLabel(state.tabs[0])).toBe("build");
+
+    // Cleared, the pane goes back to naming itself.
+    state = reduce(state, { type: "pane/rename", paneId, name: "   " });
+    expect(state.tabs[0].panes[paneId].name).toBeUndefined();
+    expect(paneLabel(state.tabs[0].panes[paneId])).toBe("~/src");
+  });
+
+  it("names a pop-up", () => {
+    let state = reduce(emptyWorkspace(), { type: "popup/open", kind: "terminal" });
+    const paneId = state.popups[0].pane.id;
+    state = reduce(state, { type: "pane/rename", paneId, name: "logs" });
+    expect(paneLabel(state.popups[0].pane)).toBe("logs");
+  });
+
+  it("clears a tab's name back to following its pane", () => {
+    const start = emptyWorkspace();
+    const tabId = start.tabs[0].id;
+    let state = reduce(start, { type: "tab/rename", tabId, title: "work" });
+    expect(tabLabel(state.tabs[0])).toBe("work");
+    state = reduce(state, { type: "tab/rename", tabId, title: undefined });
+    expect(state.tabs[0].title).toBeUndefined();
+    expect(tabLabel(state.tabs[0])).toBe("Terminal");
   });
 });
 

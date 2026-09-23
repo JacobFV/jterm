@@ -170,6 +170,31 @@ describe("pop-ups in the snapshot", () => {
   });
 });
 
+describe("names", () => {
+  it("come back for tabs and panes alike", () => {
+    const start = emptyWorkspace();
+    const tabId = start.tabs[0].id;
+    const paneId = start.tabs[0].focusedPaneId;
+    let state = reduce(start, { type: "tab/rename", tabId, title: "work" });
+    state = reduce(state, { type: "pane/rename", paneId, name: "server" });
+
+    const restored = decode(encode(state, {}))!.workspace;
+    expect(restored.tabs[0].title).toBe("work");
+    expect(restored.tabs[0].panes[paneId].name).toBe("server");
+  });
+
+  it("drops a name that is not a string without dropping the pane", () => {
+    const start = emptyWorkspace();
+    const paneId = start.tabs[0].focusedPaneId;
+    const json = JSON.parse(encode(start, {}));
+    json.workspace.tabs[0].panes[paneId].name = { evil: true };
+
+    const restored = decode(JSON.stringify(json))!.workspace;
+    expect(restored.tabs[0].panes[paneId]).toBeDefined();
+    expect(restored.tabs[0].panes[paneId].name).toBeUndefined();
+  });
+});
+
 describe("what a pane was running", () => {
   it("comes back, so the icon and the offer to resume survive a restart", () => {
     const start = emptyWorkspace();

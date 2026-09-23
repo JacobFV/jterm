@@ -54,6 +54,15 @@ interface PaneCommon {
   /** Set by the pane itself — a shell's title, a page's title, a file name. */
   title?: string;
   /**
+   * A name the user typed, which outranks `title`.
+   *
+   * A field of its own rather than a write to `title`, because `title` is the
+   * pane's to keep current: a shell rewrites it on every prompt, and a name
+   * typed there would last until the next `cd`. Absent means the pane names
+   * itself, the same rule a tab follows.
+   */
+  name?: string;
+  /**
    * A theme for this pane alone, or absent for the default.
    *
    * Absent is the state every pane starts in and stays in until somebody
@@ -424,6 +433,9 @@ export function tabLabel(tab: Tab): string {
 }
 
 export function paneLabel(pane: PaneState): string {
+  // A notepad keeps its unsaved mark under a name too: the mark is about the
+  // buffer, not the label, and a renamed note is no less likely to be lost.
+  if (pane.name) return pane.kind === "notepad" && pane.dirty ? `${pane.name} •` : pane.name;
   if (pane.title) return pane.title;
   switch (pane.kind) {
     case "notepad":
@@ -546,6 +558,8 @@ export type Action =
   | { type: "pane/profile"; paneId: string; profile: string | undefined }
   /** `undefined` puts the pane back to the font size in the settings. */
   | { type: "pane/fontSize"; paneId: string; fontSize: number | undefined }
+  /** `undefined`, or only whitespace, puts the pane back to naming itself. */
+  | { type: "pane/rename"; paneId: string; name: string | undefined }
   | { type: "tab/profile"; tabId: string; profile: string | undefined }
   /** tmux has described a control session; make the tabs agree with it. */
   | { type: "tmux/sync"; session: string; windows: TmuxWindow[] }
@@ -1012,6 +1026,13 @@ function apply(state: Workspace, action: Action): Workspace {
       return mapPane(state, action.paneId, (pane) =>
         pane.fontSize === action.fontSize ? pane : { ...pane, fontSize: action.fontSize },
       );
+
+    case "pane/rename": {
+      const name = action.name?.trim() || undefined;
+      return mapPane(state, action.paneId, (pane) =>
+        pane.name === name ? pane : { ...pane, name },
+      );
+    }
 
     case "tab/profile":
       return mapTab(state, action.tabId, (tab) =>

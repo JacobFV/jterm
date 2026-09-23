@@ -276,7 +276,7 @@ function decodeTab(raw: unknown): Tab | null {
 
   return {
     id: raw.id,
-    title: typeof raw.title === "string" && raw.title ? raw.title : undefined,
+    title: typeof raw.title === "string" && raw.title ? raw.title.slice(0, 200) : undefined,
     theme: decodeTheme(raw.theme),
     profile:
       typeof raw.profile === "string" && raw.profile ? raw.profile.slice(0, 64) : undefined,
@@ -317,6 +317,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
   const kind = raw.kind;
   if (typeof kind !== "string" || !KINDS.includes(kind as PaneKind)) return null;
   const title = typeof raw.title === "string" && raw.title ? raw.title.slice(0, 200) : undefined;
+  const name = typeof raw.name === "string" && raw.name ? raw.name.slice(0, 200) : undefined;
   const theme = decodeTheme(raw.theme);
   // A program id, capped like every other string out of this file. An id this
   // build no longer has resolves to no icon, which falls back to working it
@@ -334,6 +335,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         id,
         kind: "terminal",
         title,
+        name,
         theme,
         profile,
         fontSize,
@@ -357,6 +359,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         id,
         kind: "notepad",
         title,
+        name,
         theme,
         profile,
         fontSize,
@@ -374,6 +377,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         id,
         kind: kind as "image" | "media" | "model",
         title,
+        name,
         theme,
         profile,
         fontSize,
@@ -385,6 +389,7 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         id,
         kind: "browser",
         title,
+        name,
         theme,
         profile,
         fontSize,
