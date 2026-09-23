@@ -35,9 +35,17 @@ import { useIsFullscreen } from "@/lib/useFullscreen";
 import { useSettings, useSystemScheme } from "@/lib/useSettings";
 import { cn } from "@/lib/utils";
 import { NEW_PANE_MENU, paneKind } from "@/panes/registry";
-import { type PaneKind, type Tab, focusedPane, tabLabel, themeOf } from "@/state/workspace";
+import {
+  type PaneKind,
+  type Tab,
+  focusedPane,
+  paneLabel,
+  tabLabel,
+  themeOf,
+} from "@/state/workspace";
 import { Menu, MenuItem, MenuSubmenu, useMenu } from "./Menu";
 import { PaneMenu, type PaneMenuActions, type PaneMenuHandle } from "./PaneMenu";
+import { RenameField } from "./RenameField";
 import { UpdateBadge } from "./UpdateBadge";
 import type { TabDrag } from "./Workspace";
 import { WindowControls, WindowMenuButton } from "./WindowControls";
@@ -328,6 +336,11 @@ function TabItem({
 }) {
   const menuRef = useRef<PaneMenuHandle | null>(null);
   const pane = focusedPane(tab);
+  const [renaming, setRenaming] = useState(false);
+  // The field starts from the tab's own name, or else from its pane's without
+  // the `+1` a split tab's label carries — that count is worked out, and would
+  // be wrong the moment a pane closed if it were saved as part of a name.
+  const renameFrom = tab.title ?? (pane ? paneLabel(pane) : "");
 
   // Each tab wears its own theme, not the window's. The root's tokens are the
   // active tab's, so without this every tab in the strip would be painted in
@@ -414,17 +427,32 @@ function TabItem({
             scope="tab"
             actions={paneMenu}
             muted={!active}
+            onStartRename={() => setRenaming(true)}
           />
         </div>
       ) : null}
-      <span
-        className={cn(
-          "min-w-0 flex-1 truncate text-left text-[length:var(--fs-11)]",
-          active ? "text-ink-1" : "text-ink-3",
-        )}
-      >
-        {tabLabel(tab)}
-      </span>
+      {renaming ? (
+        <RenameField
+          initial={renameFrom}
+          className="text-[length:var(--fs-11)]"
+          onDone={(value) => {
+            setRenaming(false);
+            // Accepting the name the tab already had unnamed is not naming
+            // it: that name would stop following the pane from then on.
+            if (value === null || (tab.title === undefined && value.trim() === renameFrom)) return;
+            paneMenu.onTabRename(tab.id, value);
+          }}
+        />
+      ) : (
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-left text-[length:var(--fs-11)]",
+            active ? "text-ink-1" : "text-ink-3",
+          )}
+        >
+          {tabLabel(tab)}
+        </span>
+      )}
       {/* The active tab's close control is always visible rather than waiting
           for a hover, since it is the one most likely wanted. */}
       <button

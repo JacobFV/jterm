@@ -21,6 +21,10 @@
  * own header, from a pop-up's, and from a tab whose single pane leaves no doubt
  * about which pane is meant.
  *
+ * And **Rename**, which gives the tab or the pane a name of the user's own in
+ * place of the one it works out, with **Clear name** beside it once there is one
+ * to clear. Its level follows `scope` like Theme's does, below.
+ *
  * And **Theme**, which is neither: it changes nothing about what this pane is.
  * It is here because this is the menu that is always one press away from
  * wherever you are looking, and a theme is the setting people change most often
@@ -38,10 +42,12 @@ import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import {
   AppWindow,
   Columns2,
+  Eraser,
   Layers,
   Move,
   PictureInPicture2,
   Palette,
+  Pencil,
   Plus,
   Shapes,
   Wand2,
@@ -85,6 +91,9 @@ export interface PaneMenuActions {
   /** Pin an icon to a tab or a pane. `undefined` goes back to working it out. */
   onTabProfile: (tabId: string, profile: string | undefined) => void;
   onPaneProfile: (paneId: string, profile: string | undefined) => void;
+  /** Name a tab or a pane. `undefined` goes back to the name it works out. */
+  onTabRename: (tabId: string, title: string | undefined) => void;
+  onPaneRename: (paneId: string, name: string | undefined) => void;
 }
 
 interface PaneMenuProps {
@@ -102,6 +111,9 @@ interface PaneMenuProps {
   actions: PaneMenuActions;
   /** Dimmed when the pane, or its tab, is not the one being looked at. */
   muted?: boolean;
+  /** Turn the label beside this icon into a field. The label belongs to
+   *  whoever drew this menu, so the editing does too. */
+  onStartRename: () => void;
 }
 
 /**
@@ -120,7 +132,7 @@ export interface PaneMenuHandle {
 const GROUPS: Program["group"][] = ["AI", "Development", "Operations", "Data", "Shell"];
 
 export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneMenu(
-  { tabs, tab, activeTabId, pane, scope, actions, muted = false },
+  { tabs, tab, activeTabId, pane, scope, actions, muted = false, onStartRename },
   ref,
 ) {
   const settings = useSettings();
@@ -168,6 +180,11 @@ export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneM
   const chosenProfile = asTab ? tab.profile : pane.profile;
   const setProfile = (profile: string | undefined) =>
     asTab ? actions.onTabProfile(tab.id, profile) : actions.onPaneProfile(pane.id, profile);
+
+  // And the name, at the same level again.
+  const named = asTab ? tab.title !== undefined : pane.name !== undefined;
+  const clearName = () =>
+    asTab ? actions.onTabRename(tab.id, undefined) : actions.onPaneRename(pane.id, undefined);
 
   /**
    * Panes this one could be put beside.
@@ -228,6 +245,25 @@ export const PaneMenu = forwardRef<PaneMenuHandle, PaneMenuProps>(function PaneM
       </button>
 
       <Menu menu={menu}>
+        <MenuItem
+          icon={Pencil}
+          label={asTab ? "Rename tab…" : "Rename pane…"}
+          onSelect={() => {
+            menu.close();
+            onStartRename();
+          }}
+        />
+        {named ? (
+          <MenuItem
+            icon={Eraser}
+            label="Clear name"
+            onSelect={() => {
+              menu.close();
+              clearName();
+            }}
+          />
+        ) : null}
+
         <MenuSubmenu icon={Palette} label={asTab ? "Tab theme" : "Pane theme"}>
           <ThemeMenu value={themed} defer={defer} onChange={setTheme} onPick={menu.close} />
         </MenuSubmenu>

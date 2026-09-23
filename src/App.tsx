@@ -818,6 +818,9 @@ export function App() {
       // The same two levels again, for the icon rather than the colours.
       onTabProfile: (tabId, profile) => dispatch({ type: "tab/profile", tabId, profile }),
       onPaneProfile: (paneId, profile) => dispatch({ type: "pane/profile", paneId, profile }),
+      // And once more for the name.
+      onTabRename: (tabId, title) => dispatch({ type: "tab/rename", tabId, title }),
+      onPaneRename: (paneId, name) => dispatch({ type: "pane/rename", paneId, name }),
     }),
     [replacePane, moveToWindow],
   );

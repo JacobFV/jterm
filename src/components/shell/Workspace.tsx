@@ -50,7 +50,8 @@ import { type Action, type Popup, type Tab, paneLabel, themeOf } from "@/state/w
 import { type DropEdge, type Layout, type Rect, countPanes, layout } from "@/state/tree";
 import { AmbientBackdrop } from "./AmbientBackdrop";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { PaneMenu, type PaneMenuActions } from "./PaneMenu";
+import { PaneMenu, type PaneMenuActions, type PaneMenuHandle } from "./PaneMenu";
+import { RenameField } from "./RenameField";
 
 /** Height of the strip above each pane. Only drawn when a tab has splits. */
 const HEADER_PX = 22;
@@ -134,6 +135,14 @@ export function Workspace({
   const [paneDrag, setPaneDrag] = useState<PaneDrag | null>(null);
   const [dividerNode, setDividerNode] = useState<string | null>(null);
   const [tabDrop, setTabDrop] = useState<TabDropTarget | null>(null);
+  /** The pane whose header label is a field right now, if any. */
+  const [renamingPaneId, setRenamingPaneId] = useState<string | null>(null);
+  /**
+   * Each header's menu, so a right-click anywhere on the header can open it —
+   * the same arrangement a tab has with its icon. Keyed by pane id; a header
+   * that is not drawn has no entry.
+   */
+  const menuRefs = useRef(new Map<string, PaneMenuHandle>());
 
   const layouts = useMemo(
     () => new Map<string, Layout>(tabs.map((tab) => [tab.id, layout(tab.root)])),
@@ -506,6 +515,10 @@ export function Workspace({
                     // to be double-clicked back down.
                     if (!isZoomed) beginPaneDrag(tab!.id, paneId)(event);
                   }}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    menuRefs.current.get(paneId)?.openAt(event.clientX, event.clientY);
+                  }}
                   onDoubleClick={() =>
                     popup !== null
                       ? dispatch({
@@ -527,6 +540,10 @@ export function Workspace({
                   {onScreen ? (
                     <span onPointerDown={(event) => event.stopPropagation()}>
                       <PaneMenu
+                        ref={(handle) => {
+                          if (handle) menuRefs.current.set(paneId, handle);
+                          else menuRefs.current.delete(paneId);
+                        }}
                         tabs={tabs}
                         tab={tab}
                         activeTabId={activeTabId}
@@ -538,20 +555,37 @@ export function Workspace({
                         scope="pane"
                         actions={paneMenu}
                         muted={!focused}
+                        onStartRename={() => setRenamingPaneId(paneId)}
                       />
                     </span>
                   ) : (
                     <PaneIcon className="h-3 w-3 shrink-0 text-ink-4" />
                   )}
-                  <span
-                    className={cn(
-                      "min-w-0 flex-1 truncate font-mono text-[length:var(--fs-10)]",
-                      focused ? "text-ink-2" : "text-ink-4",
-                    )}
-                    title={paneLabel(pane)}
-                  >
-                    {paneLabel(pane)}
-                  </span>
+                  {renamingPaneId === paneId && onScreen ? (
+                    <RenameField
+                      initial={pane.name ?? paneLabel(pane)}
+                      className="font-mono text-[length:var(--fs-10)]"
+                      onDone={(value) => {
+                        setRenamingPaneId(null);
+                        // Accepting the label an unnamed pane already had is
+                        // not naming it — the label would stop following the
+                        // shell's title from then on.
+                        if (value === null) return;
+                        if (pane.name === undefined && value.trim() === paneLabel(pane)) return;
+                        paneMenu.onPaneRename(paneId, value);
+                      }}
+                    />
+                  ) : (
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate font-mono text-[length:var(--fs-10)]",
+                        focused ? "text-ink-2" : "text-ink-4",
+                      )}
+                      title={paneLabel(pane)}
+                    >
+                      {paneLabel(pane)}
+                    </span>
+                  )}
                   {isZoomed ? (
                     <button
                       type="button"
