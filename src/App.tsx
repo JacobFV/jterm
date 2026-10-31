@@ -1166,6 +1166,19 @@ export function App() {
     return () => document.removeEventListener("contextmenu", onContextMenu);
   }, []);
 
+  /** The same two ways back in as the session picker's, for the titlebar's
+   *  orphan menu. See `OrphanedSessions`. */
+  const orphanActions = useMemo(
+    () => ({
+      attach: (session: string) =>
+        dispatch({ type: "tab/open", kind: "terminal", seed: { tmux: session } }),
+      // As in the picker: no tab is made here, because tmux is about to say
+      // which windows it has and the tabs come from that.
+      attachControl: (session: string) => void tmuxControl.attach(session, 80, 24),
+    }),
+    [],
+  );
+
   const tabs = useMemo(() => workspace.tabs, [workspace.tabs]);
 
   return (
@@ -1217,6 +1230,7 @@ export function App() {
         onOpenFile={() => void openFile("tab")}
         onOpenRecent={openRecent}
         onTmuxSessions={hasTmux ? () => setPickingSession(true) : null}
+        orphanActions={hasTmux ? orphanActions : null}
         paneMenu={paneMenu}
         sidebarOpen={workspace.sidebarOpen}
         onToggleSidebar={() => dispatch({ type: "ui/sidebar" })}

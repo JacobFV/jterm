@@ -19,6 +19,8 @@ const {
   isOwnSession,
   isTmuxAction,
   looksLikeOwnSession,
+  orphanLabel,
+  orphanedSessions,
   sessionNameFor,
 } = await import("./tmux");
 
@@ -118,5 +120,34 @@ describe("which shortcuts tmux takes", () => {
     for (const id of ["terminal.eof", "edit.copy", "edit.paste"] as const) {
       expect(isTmuxAction(id), id).toBe(false);
     }
+  });
+});
+
+describe("orphaned sessions", () => {
+  const session = (name: string, attached: boolean, activity: number, command = "", path = "") => ({
+    name,
+    windows: 1,
+    attached,
+    activity,
+    path,
+    command,
+  });
+
+  it("lists only the sessions no client has, most recently active first", () => {
+    const found = orphanedSessions([
+      session("jterm-old", false, 100),
+      session("jterm-open", true, 900),
+      session("work", false, 500),
+    ]);
+    expect(found.map((s) => s.name)).toEqual(["work", "jterm-old"]);
+  });
+
+  it("names an orphan by what it was doing, not by its pane id", () => {
+    const now = 1_800_000_000;
+    expect(orphanLabel(session("jterm-ab", false, now - 3 * 3600, "claude", "/home/me/repo"), now))
+      .toBe("claude — repo · 3h");
+    expect(orphanLabel(session("jterm-ab", false, now - 120, "", "/home/me"), now)).toBe("me · 2m");
+    // Nothing to go on but the name, and no age when tmux gave none.
+    expect(orphanLabel(session("jterm-ab", false, 0), now)).toBe("jterm-ab");
   });
 });

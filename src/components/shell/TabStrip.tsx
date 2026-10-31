@@ -44,6 +44,7 @@ import {
   themeOf,
 } from "@/state/workspace";
 import { Menu, MenuItem, MenuSubmenu, useMenu } from "./Menu";
+import { type OrphanActions, OrphanedSessions } from "./OrphanedSessions";
 import { PaneMenu, type PaneMenuActions, type PaneMenuHandle } from "./PaneMenu";
 import { RenameField } from "./RenameField";
 import { UpdateBadge } from "./UpdateBadge";
@@ -79,6 +80,9 @@ interface TabStripProps {
   /** Offer the tmux sessions on this machine, or `null` where there is no tmux
    *  — which is Windows, and any machine without it installed. */
   onTmuxSessions: (() => void) | null;
+  /** What the titlebar's orphaned-session menu does with a session it lists,
+   *  or `null` where there is no tmux and so nothing to list. */
+  orphanActions: OrphanActions | null;
   onReorder: (tabId: string, toIndex: number) => void;
   /** What a tab's kind icon offers — the same menu a split pane's header has,
    *  aimed at whichever pane that tab is focused on. It lives here too because
@@ -105,6 +109,7 @@ export function TabStrip({
   onOpenFile,
   onOpenRecent,
   onTmuxSessions,
+  orphanActions,
   onReorder,
   paneMenu,
   sidebarOpen,
@@ -291,6 +296,7 @@ export function TabStrip({
         >
           <PanelLeft className="h-3.5 w-3.5" />
         </ChromeButton>
+        {orphanActions ? <OrphanedSessions actions={orphanActions} /> : null}
         <UpdateBadge />
         <ChromeButton label="Settings" onClick={onOpenSettings}>
           <SettingsIcon className="h-3.5 w-3.5" />

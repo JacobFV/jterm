@@ -21,7 +21,7 @@
  * `OWN_PREFIX` is what tells the two apart, so it is not decoration.
  */
 
-import { tmuxControl as controlApi, tmux as tmuxApi } from "./ipc";
+import { tmuxControl as controlApi, tmux as tmuxApi, type TmuxSession } from "./ipc";
 import type { ActionId } from "./keymap";
 
 const OWN_PREFIX = "jterm-";
@@ -134,4 +134,43 @@ export async function runControlAction(pane: string, id: ActionId): Promise<bool
 export async function disposeSession(paneId: string, session: string | undefined): Promise<void> {
   if (!session || !isOwnSession(paneId, session)) return;
   await tmuxApi.killSession(session);
+}
+
+/* ── Sessions nothing is looking at ──────────────────────────────────────── */
+
+/**
+ * The sessions no client is attached to, most recently active first.
+ *
+ * What the strip's orphan menu lists. "No client" rather than "not in this
+ * window" because that is the question tmux can answer for every window of the
+ * app at once: each pane holds a client for as long as it exists, and a
+ * control-mode attach is a client too. A session with none is one whose pane
+ * went away without ending it — an extra window closed, a pane closed while
+ * tmux was not answering — and whatever it was running is still running.
+ */
+export function orphanedSessions(sessions: TmuxSession[]): TmuxSession[] {
+  return sessions
+    .filter((session) => !session.attached)
+    .sort((a, b) => b.activity - a.activity || a.name.localeCompare(b.name));
+}
+
+/**
+ * One line that says what an orphan was doing: `claude — commandagi · 3h`.
+ *
+ * The name is the last resort rather than the first thing shown, because a
+ * jterm session's name is a pane id and says nothing about the work in it.
+ */
+export function orphanLabel(session: TmuxSession, nowSeconds: number): string {
+  const where = session.path.split(/[\\/]/).filter(Boolean).pop() ?? "";
+  const what = [session.command, where].filter(Boolean).join(" — ") || session.name;
+  const age = session.activity > 0 ? ` · ${idleFor(nowSeconds - session.activity)}` : "";
+  return `${what}${age}`;
+}
+
+/** A coarse age — a menu row has room for "3h", not "3 hours 12 minutes". */
+function idleFor(seconds: number): string {
+  if (seconds < 60) return "now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86400)}d`;
 }
