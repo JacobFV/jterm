@@ -108,13 +108,23 @@ pub struct TmuxSession {
     pub windows: u32,
     /// Whether some client — this app or a terminal elsewhere — is looking at it.
     pub attached: bool,
+    /// When anything last happened in it, in Unix seconds — `0` if tmux did not
+    /// say. What tells a session left behind an hour ago from one left a week
+    /// ago, which is most of what deciding about it takes.
+    pub activity: u64,
+    /// Where its current pane is, and what is running there. A session nobody
+    /// is looking at is recognised by what it was doing, not by its name: two
+    /// `jterm-…` sessions read the same until one says `claude` in the repo.
+    pub path: String,
+    pub command: String,
 }
 
 /// Field separator for `list-sessions`.
 ///
 /// A tab rather than the more usual colon or space, because a session name may
 /// contain both and tmux will not stop anyone from choosing one that does.
-const FIELDS: &str = "#{session_name}\t#{session_windows}\t#{session_attached}";
+const FIELDS: &str = "#{session_name}\t#{session_windows}\t#{session_attached}\t\
+                      #{session_activity}\t#{pane_current_path}\t#{pane_current_command}";
 
 #[tauri::command]
 pub fn tmux_available() -> bool {
@@ -164,9 +174,16 @@ pub fn pane_pid(session: &str) -> Option<u32> {
 
 #[tauri::command]
 pub fn tmux_sessions() -> Vec<TmuxSession> {
-    let Some(stdout) = run(&["list-sessions", "-F", FIELDS]) else {
-        return Vec::new();
-    };
+    run(&["list-sessions", "-F", FIELDS])
+        .map(|stdout| parse_sessions(&stdout))
+        .unwrap_or_default()
+}
+
+/// `list-sessions` output, read one line per session.
+///
+/// Every field after the name is optional, so a tmux old enough to leave one
+/// of them blank costs that field rather than the session.
+fn parse_sessions(stdout: &str) -> Vec<TmuxSession> {
     stdout
         .lines()
         .filter_map(|line| {
@@ -179,6 +196,9 @@ pub fn tmux_sessions() -> Vec<TmuxSession> {
                 name,
                 windows: parts.next().and_then(|n| n.parse().ok()).unwrap_or(1),
                 attached: parts.next().is_some_and(|flag| flag == "1"),
+                activity: parts.next().and_then(|n| n.parse().ok()).unwrap_or(0),
+                path: parts.next().unwrap_or_default().to_string(),
+                command: parts.next().unwrap_or_default().to_string(),
             })
         })
         .collect()
@@ -411,8 +431,26 @@ pub fn has_client(_pid: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{argv, attach_argv, edge_for};
+    use super::{argv, attach_argv, edge_for, parse_sessions};
     use std::path::Path;
+
+    #[test]
+    fn a_session_line_carries_what_it_was_doing() {
+        let found = parse_sessions(
+            "jterm-ab12cd34\t2\t0\t1793400000\t/home/me/repo\tclaude\nwork\t1\t1\t\t\t\n",
+        );
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].name, "jterm-ab12cd34");
+        assert_eq!(found[0].windows, 2);
+        assert!(!found[0].attached);
+        assert_eq!(found[0].activity, 1793400000);
+        assert_eq!(found[0].path, "/home/me/repo");
+        assert_eq!(found[0].command, "claude");
+        // Blank fields cost the field, not the session.
+        assert!(found[1].attached);
+        assert_eq!(found[1].activity, 0);
+        assert_eq!(found[1].command, "");
+    }
 
     #[test]
     fn attaching_creates_the_session_if_it_is_not_there() {

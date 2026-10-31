@@ -133,6 +133,11 @@ export interface TmuxSession {
   windows: number;
   /** True when some client — a jterm pane, or a terminal elsewhere — has it. */
   attached: boolean;
+  /** Unix seconds of its last activity; 0 when tmux did not say. */
+  activity: number;
+  /** Where its current pane is, and what is running there. */
+  path: string;
+  command: string;
 }
 
 /**
