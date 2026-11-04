@@ -848,3 +848,123 @@ describe("icons", () => {
     expect(state.popups[0].pane.fontSize).toBe(20);
   });
 });
+
+/* ── Another jterm's window, mirrored ────────────────────────────────────── */
+
+import { controlPaneId, isPeerTabId } from "@/lib/tmuxControl";
+import type { Tab } from "./workspace";
+
+const A = "gb10:jterm-aaaa1111";
+const B = "gb10:jterm-bbbb2222";
+const PA = controlPaneId(A, "%3");
+const PB = controlPaneId(B, "%5");
+
+/** A peer tab holding one pane from each of two sessions, side by side. */
+function peerTab(): Tab {
+  return {
+    id: "peer-gb10-t1",
+    title: "CommandAGI",
+    root: {
+      kind: "split",
+      id: "peer-gb10-t1-s",
+      axis: "x",
+      ratio: 0.5,
+      children: [
+        { kind: "leaf", id: "peer-gb10-t1-a", paneId: PA },
+        { kind: "leaf", id: "peer-gb10-t1-b", paneId: PB },
+      ],
+    },
+    panes: {
+      [PA]: { id: PA, kind: "terminal", tmux: A, tmuxPane: "%3" },
+      [PB]: { id: PB, kind: "terminal", tmux: B, tmuxPane: "%5" },
+    },
+    focusedPaneId: PA,
+    zoomedPaneId: null,
+  };
+}
+
+function oneWindow(session: string, pane: string, extra: string[] = []): TmuxWindow {
+  const id = controlPaneId(session, pane);
+  const leafOf = (tmux: string) => ({
+    kind: "pane" as const,
+    id: controlPaneId(session, tmux),
+    tmux,
+    width: 80,
+    height: 24,
+  });
+  return {
+    id: "@1",
+    name: "bash",
+    active: true,
+    layout:
+      extra.length === 0
+        ? { kind: "pane", id, tmux: pane, width: 80, height: 24 }
+        : { kind: "split", axis: "x", width: 80, height: 24, children: [leafOf(pane), ...extra.map(leafOf)] },
+  };
+}
+
+function mirrored(from: Workspace = emptyWorkspace()): Workspace {
+  return reduce(from, {
+    type: "peer/mirror",
+    prefix: "peer-gb10-",
+    tabs: [peerTab()],
+    activeTabId: "peer-gb10-t1",
+  });
+}
+
+describe("peer/mirror", () => {
+  it("takes in the one-pane tabs control mode had already made for its panes", () => {
+    // What a launch looks like: the sessions reattach first and each gets a
+    // tab of its own, then the peer's layout arrives and gathers them up.
+    let state = reduce(emptyWorkspace(), { type: "tmux/sync", session: A, windows: [oneWindow(A, "%3")] });
+    state = reduce(state, { type: "tmux/sync", session: B, windows: [oneWindow(B, "%5")] });
+    expect(state.tabs).toHaveLength(3);
+
+    state = mirrored(state);
+    const peer = state.tabs.filter((tab) => isPeerTabId(tab.id));
+    expect(peer).toHaveLength(1);
+    expect(state.tabs).toHaveLength(2); // the ordinary tab and the mirror
+    expect(paneIds(peer[0].root)).toEqual([PA, PB]);
+  });
+
+  it("is not doubled by tmux describing a session it already shows", () => {
+    const state = reduce(mirrored(), { type: "tmux/sync", session: A, windows: [oneWindow(A, "%3")] });
+    expect(state.tabs.filter((tab) => tab.panes[PA] !== undefined)).toHaveLength(1);
+  });
+
+  it("replaces its own tabs on the next read and keeps where the focus was", () => {
+    let state = mirrored();
+    state = reduce(state, { type: "pane/focus", tabId: "peer-gb10-t1", paneId: PB });
+    state = reduce(state, {
+      type: "peer/mirror",
+      prefix: "peer-gb10-",
+      tabs: [{ ...peerTab(), title: "Renamed there" }],
+      activeTabId: null,
+    });
+    const tab = state.tabs.find((entry) => entry.id === "peer-gb10-t1")!;
+    expect(tab.title).toBe("Renamed there");
+    expect(tab.focusedPaneId).toBe(PB);
+  });
+
+  it("loses only the pane of a session that ended", () => {
+    const state = reduce(mirrored(), { type: "tmux/closed", session: B });
+    const tab = state.tabs.find((entry) => entry.id === "peer-gb10-t1")!;
+    expect(paneIds(tab.root)).toEqual([PA]);
+    // And the tab goes with its last pane.
+    const empty = reduce(state, { type: "tmux/closed", session: A });
+    expect(empty.tabs.some((entry) => entry.id === "peer-gb10-t1")).toBe(false);
+  });
+
+  it("hands a pane split inside tmux to that window's own tab", () => {
+    const state = reduce(mirrored(), {
+      type: "tmux/sync",
+      session: A,
+      windows: [oneWindow(A, "%3", ["%8"])],
+    });
+    const holding = state.tabs.filter((tab) => tab.panes[PA] !== undefined);
+    expect(holding).toHaveLength(1);
+    expect(isPeerTabId(holding[0].id)).toBe(false);
+    const peer = state.tabs.find((entry) => entry.id === "peer-gb10-t1")!;
+    expect(paneIds(peer.root)).toEqual([PB]);
+  });
+});

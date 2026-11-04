@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { decode, encode } from "./snapshot";
 import { type Workspace, emptyWorkspace, reduce } from "./workspace";
 import { windowTabId } from "@/lib/tmuxControl";
+import type { LeafNode } from "./tree";
 
 /** A workspace with one ordinary tab and one control-mode tab from `work`. */
 function withControlTab(): Workspace {
@@ -273,5 +274,58 @@ describe("a pane's own font size", () => {
       expect(pane).toBeDefined();
       expect(pane.fontSize).toBeUndefined();
     }
+  });
+});
+
+describe("mirrored tabs", () => {
+  it("are left out, with every session they hold and the peer they came from kept", () => {
+    const a = "gb10:jterm-aaaa1111";
+    const b = "gb10:jterm-bbbb2222";
+    const start = emptyWorkspace();
+    const workspace: Workspace = {
+      ...start,
+      tabs: [
+        ...start.tabs,
+        {
+          id: "peer-gb10-t1",
+          root: {
+            kind: "split" as const,
+            id: "s",
+            axis: "x" as const,
+            ratio: 0.5,
+            children: [
+              { kind: "leaf" as const, id: "l1", paneId: "tmux-gb10-jterm-aaaa1111-3" },
+              { kind: "leaf" as const, id: "l2", paneId: "tmux-gb10-jterm-bbbb2222-5" },
+            ] as [LeafNode, LeafNode],
+          },
+          panes: {
+            "tmux-gb10-jterm-aaaa1111-3": {
+              id: "tmux-gb10-jterm-aaaa1111-3",
+              kind: "terminal" as const,
+              tmux: a,
+              tmuxPane: "%3",
+            },
+            "tmux-gb10-jterm-bbbb2222-5": {
+              id: "tmux-gb10-jterm-bbbb2222-5",
+              kind: "terminal" as const,
+              tmux: b,
+              tmuxPane: "%5",
+            },
+          },
+          focusedPaneId: "tmux-gb10-jterm-aaaa1111-3",
+          zoomedPaneId: null,
+        },
+      ],
+    };
+    const restored = decode(encode(workspace, {}))!;
+    expect(restored.workspace.tabs.some((tab) => tab.id === "peer-gb10-t1")).toBe(false);
+    expect(restored.controlSessions.sort()).toEqual([a, b]);
+    expect(restored.peers).toEqual(["gb10"]);
+  });
+
+  it("decode a peer list as hostile like everything else", () => {
+    const json = JSON.parse(encode(emptyWorkspace(), {}));
+    json.peers = ["gb10", "-oProxyCommand=x", 3, "me@10.0.0.7"];
+    expect(decode(JSON.stringify(json))!.peers).toEqual(["gb10", "me@10.0.0.7"]);
   });
 });

@@ -88,6 +88,7 @@ describe("session import lifecycle", () => {
       workspace: workspace(tab("imported-tab", imported)),
       content: {},
       controlSessions: ["work", "new"],
+      peers: [],
     };
 
     const plan = planSessionImport(
@@ -119,6 +120,7 @@ describe("session import lifecycle", () => {
       workspace: workspace(tab("imported", importedPane)),
       content: {},
       controlSessions: [],
+      peers: [],
     };
     const plan = planSessionImport(workspace(tab("old", oldPane)), restored);
     plan.controlSessionsToDetach.push("old-control");
@@ -210,6 +212,7 @@ describe("session import lifecycle", () => {
       workspace: workspace(tab("imported", { id: "new", kind: "terminal" })),
       content: {},
       controlSessions: [],
+      peers: [],
     };
     const plan = planSessionImport(workspace(tab("old", pane)), restored);
     plan.controlSessionsToDetach.push("control");

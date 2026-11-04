@@ -16,7 +16,10 @@ import type { AgentRecord } from "@/lib/agents";
 import { newId } from "@/lib/utils";
 import type { ThemeChoice } from "@/state/settings";
 import {
+  isControlTabId,
+  isPeerTabId,
   panesFor,
+  panesOf,
   toNode,
   windowTabId,
   type TmuxWindow,
@@ -565,7 +568,13 @@ export type Action =
   /** tmux has described a control session; make the tabs agree with it. */
   | { type: "tmux/sync"; session: string; windows: TmuxWindow[] }
   /** A control session ended or was detached from; its tabs go with it. */
-  | { type: "tmux/closed"; session: string };
+  | { type: "tmux/closed"; session: string }
+  /**
+   * Another jterm's window, as tabs here — see `lib/peer.ts`. Replaces every
+   * tab mirrored from `prefix` before, and takes in any one-pane tab that
+   * control mode had already made for one of the panes these now hold.
+   */
+  | { type: "peer/mirror"; prefix: string; tabs: Tab[]; activeTabId: string | null };
 
 /** How far one keyboard resize step moves a divider. */
 const NUDGE = 0.03;
@@ -1057,20 +1066,41 @@ function apply(state: Workspace, action: Action): Workspace {
       const wanted = new Map(
         action.windows.map((window) => [windowTabId(action.session, window.id), window]),
       );
+      const alive = new Set(action.windows.flatMap((window) => panesOf(window.layout)).map((pane) => pane.id));
 
-      const kept = state.tabs.filter(
-        (tab) => !belongsTo(tab, action.session) || wanted.has(tab.id),
-      );
+      // A mirrored tab holds one pane from each of several sessions, so it is
+      // never this session's to replace — only its panes are. One that tmux no
+      // longer has goes; one that tmux now draws as part of a bigger window
+      // (split inside tmux, over there) moves to that window's own tab rather
+      // than being in two places at once.
+      const inPeerTabs = new Set<string>();
+      let tabs: Tab[] = [];
+      for (const tab of state.tabs) {
+        if (isPeerTabId(tab.id)) {
+          const trimmed = dropPanes(tab, (pane) =>
+            isControlPane(pane, action.session) &&
+            (!alive.has(pane.id) || windowOf(action.windows, pane.id)!.panes > 1),
+          );
+          if (trimmed === null) continue;
+          for (const id of Object.keys(trimmed.panes)) inPeerTabs.add(id);
+          tabs.push(trimmed);
+          continue;
+        }
+        if (belongsTo(tab, action.session) && !wanted.has(tab.id)) continue;
+        tabs.push(tab);
+      }
 
-      const tabs = kept.map((tab) => {
+      tabs = tabs.map((tab) => {
         const window = wanted.get(tab.id);
         if (!window) return tab;
         wanted.delete(tab.id);
         return syncTab(tab, action.session, window);
       });
 
-      // Whatever is left is new, and joins the strip in tmux's order.
+      // Whatever is left is new, and joins the strip in tmux's order — unless
+      // a mirrored tab is already showing it.
       for (const [tabId, window] of wanted) {
+        if (panesOf(window.layout).every((pane) => inPeerTabs.has(pane.id))) continue;
         tabs.push(syncTab(blankTab(tabId), action.session, window));
       }
 
@@ -1090,11 +1120,24 @@ function apply(state: Workspace, action: Action): Workspace {
      * destroy the work in it.
      */
     case "tmux/closed": {
-      const tabs = state.tabs.filter((tab) => !belongsTo(tab, action.session));
+      const tabs = state.tabs.flatMap((tab) => {
+        // A mirrored tab loses this session's pane and keeps the others'.
+        if (isPeerTabId(tab.id)) {
+          const trimmed = dropPanes(tab, (pane) => isControlPane(pane, action.session));
+          return trimmed === null ? [] : [trimmed];
+        }
+        return belongsTo(tab, action.session) ? [] : [tab];
+      });
       // A control pane someone moved onto the rail belongs to the session just
       // as much as one still in a tab, and goes with it.
       const popups = state.popups.filter((popup) => !isControlPane(popup.pane, action.session));
-      if (tabs.length === state.tabs.length && popups.length === state.popups.length) return state;
+      if (
+        tabs.length === state.tabs.length &&
+        tabs.every((tab, at) => tab === state.tabs[at]) &&
+        popups.length === state.popups.length
+      ) {
+        return state;
+      }
       const activeTabId =
         state.activeTabId !== null && tabs.some((tab) => tab.id === state.activeTabId)
           ? state.activeTabId
@@ -1109,7 +1152,98 @@ function apply(state: Workspace, action: Action): Workspace {
           : null,
       };
     }
+
+    case "peer/mirror": {
+      const incoming = new Map(action.tabs.map((tab) => [tab.id, tab]));
+      const placed = new Set(action.tabs.flatMap((tab) => Object.keys(tab.panes)));
+      // Panes that already exist keep what they have learned since (a title
+      // the shell set), under what the peer says.
+      const known = new Map<string, PaneState>();
+      for (const tab of state.tabs) for (const pane of Object.values(tab.panes)) known.set(pane.id, pane);
+      const merge = (tab: Tab): Tab => ({
+        ...tab,
+        panes: Object.fromEntries(
+          Object.entries(tab.panes).map(([id, pane]) => [
+            id,
+            { ...known.get(id), ...pane } as PaneState,
+          ]),
+        ),
+      });
+
+      let absorbedFocus: string | null = null;
+      const tabs: Tab[] = [];
+      for (const tab of state.tabs) {
+        if (tab.id.startsWith(action.prefix)) {
+          const next = incoming.get(tab.id);
+          if (!next) continue;
+          incoming.delete(tab.id);
+          // Where the keyboard was in this tab is local, and survives a
+          // refresh for as long as that pane does.
+          const merged = merge(next);
+          tabs.push({
+            ...merged,
+            focusedPaneId: merged.panes[tab.focusedPaneId] ? tab.focusedPaneId : merged.focusedPaneId,
+            zoomedPaneId:
+              tab.zoomedPaneId && merged.panes[tab.zoomedPaneId] ? tab.zoomedPaneId : null,
+          });
+          continue;
+        }
+        // The one-pane tab control mode made before the mirror arrived.
+        const ids = Object.keys(tab.panes);
+        if (isControlTabId(tab.id) && ids.length > 0 && ids.every((id) => placed.has(id))) {
+          if (tab.id === state.activeTabId) absorbedFocus = tab.focusedPaneId;
+          continue;
+        }
+        tabs.push(tab);
+      }
+      for (const tab of incoming.values()) tabs.push(merge(tab));
+
+      let activeTabId = state.activeTabId;
+      if (activeTabId === null || !tabs.some((tab) => tab.id === activeTabId)) {
+        activeTabId =
+          (absorbedFocus !== null
+            ? tabs.find((tab) => tab.panes[absorbedFocus!] !== undefined)?.id
+            : undefined) ??
+          action.activeTabId ??
+          tabs[0]?.id ??
+          null;
+      }
+      return { ...state, tabs, activeTabId };
+    }
   }
+}
+
+/**
+ * A tab without the panes `drop` picks, its splits collapsed around them —
+ * or `null` when nothing is left.
+ */
+function dropPanes(tab: Tab, drop: (pane: PaneState) => boolean): Tab | null {
+  const doomed = Object.values(tab.panes).filter(drop);
+  if (doomed.length === 0) return tab;
+  let root: Node | null = tab.root;
+  const panes = { ...tab.panes };
+  for (const pane of doomed) {
+    root = root === null ? null : removePane(root, pane.id);
+    delete panes[pane.id];
+  }
+  if (root === null) return null;
+  const left = Object.keys(panes);
+  return {
+    ...tab,
+    root,
+    panes,
+    focusedPaneId: panes[tab.focusedPaneId] ? tab.focusedPaneId : left[0],
+    zoomedPaneId: tab.zoomedPaneId && panes[tab.zoomedPaneId] ? tab.zoomedPaneId : null,
+  };
+}
+
+/** The window holding `paneId`, and how many panes it has. */
+function windowOf(windows: TmuxWindow[], paneId: string): { panes: number } | null {
+  for (const window of windows) {
+    const panes = panesOf(window.layout);
+    if (panes.some((pane) => pane.id === paneId)) return { panes: panes.length };
+  }
+  return null;
 }
 
 /** Whether a tab is one of `session`'s control-mode windows. */

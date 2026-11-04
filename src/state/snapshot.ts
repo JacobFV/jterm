@@ -13,6 +13,8 @@
  */
 
 import { decodeAgent } from "@/lib/agents";
+import { splitKey, validHost } from "@/lib/remote";
+import { isPeerTabId } from "@/lib/tmuxControl";
 import { isThemeChoice } from "@/lib/customAmbients";
 import type { PaneContent } from "./content";
 import { decodeFontSize, type ThemeChoice } from "./settings";
@@ -44,6 +46,12 @@ export interface Snapshot {
   content: Record<string, PaneContent>;
   /** Control-mode sessions to reattach to. See `encode`. */
   controlSessions: string[];
+  /**
+   * Hosts whose jterm window was mirrored here — see `lib/peer.ts`. Like the
+   * control tabs, the mirrored tabs are not written down: the peer is still
+   * running and still knows its own layout, so it is read again from there.
+   */
+  peers: string[];
 }
 
 /**
@@ -61,10 +69,18 @@ export interface Snapshot {
  */
 export function encode(workspace: Workspace, content: Record<string, PaneContent>): string {
   const controlSessions = new Set<string>();
+  const peers = new Set<string>();
   const tabs = workspace.tabs.filter((tab) => {
-    const session = controlSessionOf(tab);
-    if (session === null) return true;
-    controlSessions.add(session);
+    // Every session, not the first: a mirrored tab holds one from each pane.
+    const sessions = Object.values(tab.panes)
+      .map(controlPaneSession)
+      .filter((session): session is string => session !== null);
+    if (sessions.length === 0) return true;
+    for (const session of sessions) controlSessions.add(session);
+    if (isPeerTabId(tab.id)) {
+      const { host } = splitKey(sessions[0]);
+      if (host !== null) peers.add(host);
+    }
     return false;
   });
 
@@ -94,16 +110,8 @@ export function encode(workspace: Workspace, content: Record<string, PaneContent
     },
     content,
     controlSessions: [...controlSessions],
+    peers: [...peers],
   });
-}
-
-/** The control session a tab belongs to, or `null` if it is an ordinary tab. */
-function controlSessionOf(tab: Tab): string | null {
-  for (const pane of Object.values(tab.panes)) {
-    const session = controlPaneSession(pane);
-    if (session !== null) return session;
-  }
-  return null;
 }
 
 /** The control session behind one pane, or `null` for a pane jterm itself runs. */
@@ -180,6 +188,7 @@ export function decode(json: string | null | undefined): Snapshot | null {
     },
     content,
     controlSessions: decodeSessions(parsed.controlSessions),
+    peers: decodeSessions(parsed.peers).filter(validHost),
   };
 }
 
