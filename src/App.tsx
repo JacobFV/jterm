@@ -24,6 +24,7 @@ import { ResizeHandles } from "@/components/shell/ResizeHandles";
 import { TabStrip } from "@/components/shell/TabStrip";
 import { HistorySearch } from "@/components/shell/HistorySearch";
 import { TmuxSessions } from "@/components/shell/TmuxSessions";
+import { RemoteHosts } from "@/components/shell/RemoteHosts";
 import { WindowFrame } from "@/components/shell/WindowFrame";
 import {
   Workspace as PaneWorkspace,
@@ -35,6 +36,8 @@ import { readClipboard, writeClipboard } from "@/lib/clipboard";
 import {
   SESSION_IMPORTED_EVENT,
   TMUX_CLOSED_EVENT,
+  TMUX_FAILED_EVENT,
+  type TmuxFailure,
   TMUX_WINDOWS_EVENT,
   dialog,
   fs,
@@ -48,7 +51,7 @@ import {
   pty,
   type McpRequest,
 } from "@/lib/ipc";
-import { handleRequest, type ToolContext } from "@/lib/mcp";
+import { callTool, handleRequest, type ToolContext } from "@/lib/mcp";
 import { kindForPath } from "@/lib/filetypes";
 import { resolve, type ActionId } from "@/lib/keymap";
 import { resumeLine } from "@/lib/programs";
@@ -273,6 +276,7 @@ export function App() {
   // cannot usefully change while the window is open.
   const [hasTmux, setHasTmux] = useState(false);
   const [pickingSession, setPickingSession] = useState(false);
+  const [pickingRemote, setPickingRemote] = useState(false);
   const [searchingHistory, setSearchingHistory] = useState(false);
   // Asked once, and only so the history list can print `~/src` rather than the
   // whole path. A failure here costs the abbreviation and nothing else.
@@ -474,6 +478,12 @@ export function App() {
 
     // Detached, killed, or the client died — all the same from here, and none
     // of them are a reason to end anything inside the session.
+    // Only logged here: the remote-host panel shows the reason when it is the
+    // one that asked, and a reattach on launch that fails simply has no tabs.
+    void listen<TmuxFailure>(TMUX_FAILED_EVENT, (failed) => {
+      console.warn(`[jterm] tmux session ${failed.session} did not start: ${failed.message}`);
+    }).then(keep);
+
     void listen<string>(TMUX_CLOSED_EVENT, (name) => {
       dispatch({ type: "tmux/closed", session: name });
     }).then(keep);
@@ -870,8 +880,8 @@ export function App() {
    * the event being aimed here, because a listener hears events for every
    * target, and two windows answering one call would do everything twice.
    */
-  useEffect(() => {
-    const context: ToolContext = {
+  const toolContext = useMemo<ToolContext>(
+    () => ({
       getWorkspace: () => workspaceRef.current,
       dispatch,
       openPath: (path, target) => openPath(path, target),
@@ -880,7 +890,12 @@ export function App() {
       setDraft: (paneId, text) => updateContent(paneId, { draft: text }),
       splitDirection: () => getSettings().openPaneDirection,
       sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
-    };
+    }),
+    [openPath],
+  );
+
+  useEffect(() => {
+    const context = toolContext;
     const here = currentWindowLabel();
     let stop: (() => void) | null = null;
     let disposed = false;
@@ -899,7 +914,7 @@ export function App() {
       disposed = true;
       stop?.();
     };
-  }, [openPath]);
+  }, [toolContext]);
 
   /* ── Closing the window ───────────────────────────────────────────── */
 
@@ -1219,6 +1234,28 @@ export function App() {
         />
       ) : null}
 
+      {pickingRemote ? (
+        <RemoteHosts
+          onClose={() => setPickingRemote(false)}
+          // As with a local control session, no tab is made here: tmux is
+          // about to say which windows the session has.
+          onAttach={(key) => void tmuxControl.attach(key, 80, 24)}
+          onDetach={(key) => void tmuxControl.detach(key)}
+          onShell={(target) => {
+            setPickingRemote(false);
+            // An ordinary terminal running ssh — where a password prompt can be
+            // answered, and a host without tmux is still a shell. The same path
+            // the agent's `open_terminal` takes, which already knows how long
+            // a new shell needs before it is typed into.
+            void callTool(
+              "open_terminal",
+              { command: `ssh ${target}`, run: true, where: "tab" },
+              toolContext,
+            );
+          }}
+        />
+      ) : null}
+
       <TabStrip
         tabs={tabs}
         activeTabId={workspace.activeTabId}
@@ -1230,6 +1267,7 @@ export function App() {
         onOpenFile={() => void openFile("tab")}
         onOpenRecent={openRecent}
         onTmuxSessions={hasTmux ? () => setPickingSession(true) : null}
+        onRemoteHosts={() => setPickingRemote(true)}
         orphanActions={hasTmux ? orphanActions : null}
         paneMenu={paneMenu}
         sidebarOpen={workspace.sidebarOpen}

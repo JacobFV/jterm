@@ -19,7 +19,16 @@
  */
 
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Clock, History, Layers, PanelLeft, Plus, Settings as SettingsIcon, X } from "lucide-react";
+import {
+  Clock,
+  History,
+  Layers,
+  PanelLeft,
+  Plus,
+  Server,
+  Settings as SettingsIcon,
+  X,
+} from "lucide-react";
 
 import { themeStyle } from "@/lib/appearance";
 import { kindForPath } from "@/lib/filetypes";
@@ -80,6 +89,9 @@ interface TabStripProps {
   /** Offer the tmux sessions on this machine, or `null` where there is no tmux
    *  — which is Windows, and any machine without it installed. */
   onTmuxSessions: (() => void) | null;
+  /** Offer another machine's tmux sessions, over ssh. Present everywhere: it
+   *  needs ssh here and tmux only on the far end. See `RemoteHosts`. */
+  onRemoteHosts: () => void;
   /** What the titlebar's orphaned-session menu does with a session it lists,
    *  or `null` where there is no tmux and so nothing to list. */
   orphanActions: OrphanActions | null;
@@ -109,6 +121,7 @@ export function TabStrip({
   onOpenFile,
   onOpenRecent,
   onTmuxSessions,
+  onRemoteHosts,
   orphanActions,
   onReorder,
   paneMenu,
@@ -277,6 +290,7 @@ export function TabStrip({
           onOpenFile={onOpenFile}
           onOpenRecent={onOpenRecent}
           onTmuxSessions={onTmuxSessions}
+          onRemoteHosts={onRemoteHosts}
         />
 
         {/* The window's drag handle, and where a double-click toggles maximise —
@@ -523,11 +537,13 @@ function NewTabButton({
   onOpenFile,
   onOpenRecent,
   onTmuxSessions,
+  onRemoteHosts,
 }: {
   onNew: (kind: PaneKind) => void;
   onOpenFile: () => void;
   onOpenRecent: (entry: Recent) => void;
   onTmuxSessions: (() => void) | null;
+  onRemoteHosts: () => void;
 }) {
   const menu = useMenu();
 
@@ -664,6 +680,14 @@ function NewTabButton({
             }}
           />
         ) : null}
+        <MenuItem
+          icon={Server}
+          label="Remote host…"
+          onSelect={() => {
+            menu.close();
+            onRemoteHosts();
+          }}
+        />
       </Menu>
     </div>
   );
