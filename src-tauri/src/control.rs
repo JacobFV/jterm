@@ -36,8 +36,9 @@
 //! where jterm owns the layout.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -56,6 +57,12 @@ pub const CLOSED_EVENT: &str = "tmux://closed";
 /// having spoken — an ssh that could not connect, a host without tmux. Carries
 /// the last thing the pty said, which is the reason.
 pub const FAILED_EVENT: &str = "tmux://failed";
+/// Emitted *instead of* `CLOSED_EVENT` when a remote session's connection went
+/// away under it — no `%exit`, nobody asked to detach. The session is almost
+/// certainly still running on the other machine; what ended is the link to it,
+/// and on a phone hotspot that is something that happens every few minutes. So
+/// its tabs stay, marked as disconnected, and the frontend reconnects.
+pub const LOST_EVENT: &str = "tmux://lost";
 
 const READ_BUF: usize = 32 * 1024;
 
@@ -167,6 +174,10 @@ enum Pending {
     Windows,
     /// A `capture-pane` reply: a pane's history, for the pane named here.
     Capture(String),
+    /// The same, for a pane that is already on screen from before a lost
+    /// connection. Its terminal still shows the screen as it was when the link
+    /// dropped, so the history replaces that rather than being added under it.
+    Recapture(String),
 }
 
 pub struct ControlSession {
@@ -185,6 +196,13 @@ pub struct ControlSession {
     /// The size last asked for, so a dozen panes reporting at once produce one
     /// `refresh-client` rather than a dozen contradicting ones.
     sized: Mutex<Option<(u16, u16)>>,
+    /// Set by `tmux_control_detach`, so the end that follows is known to have
+    /// been asked for even if the `%exit` confirming it never arrives.
+    detaching: AtomicBool,
+    /// Whether this attach is a reconnect, whose panes are already mounted
+    /// and need their screens fetched again — see `Pending::Recapture`.
+    /// Cleared by the first layout, which is when the panes are known.
+    recapture: AtomicBool,
 }
 
 impl ControlSession {
@@ -219,6 +237,11 @@ pub struct ControlRegistry {
     /// rather than recomputed because writing to a pane must not depend on
     /// guessing which session it came from.
     routes: Mutex<HashMap<String, (String, String)>>,
+    /// Remote sessions whose connection was lost. Their routes are kept, so a
+    /// keystroke into a disconnected pane is swallowed here rather than falling
+    /// through to the ordinary pty table as an error; reattaching takes the key
+    /// out again and marks the attach as a reconnect.
+    lost: Mutex<HashSet<String>>,
 }
 
 impl ControlRegistry {
@@ -242,6 +265,14 @@ impl ControlRegistry {
 
     pub fn has(&self, pane: &str) -> bool {
         self.routes.lock().contains_key(pane)
+    }
+
+    /// Whether `pane` belongs to a session whose connection is down.
+    fn stranded(&self, pane: &str) -> bool {
+        let Some((session, _)) = self.routes.lock().get(pane).cloned() else {
+            return false;
+        };
+        self.lost.lock().contains(&session)
     }
 }
 
@@ -350,6 +381,8 @@ pub fn tmux_control_attach(
         pending: Mutex::new(std::collections::VecDeque::new()),
         windows: Mutex::new(Vec::new()),
         sized: Mutex::new(None),
+        detaching: AtomicBool::new(false),
+        recapture: AtomicBool::new(registry.lost.lock().remove(&session)),
     });
     registry
         .sessions
@@ -370,8 +403,17 @@ pub fn tmux_control_attach(
 #[tauri::command]
 pub fn tmux_control_detach(registry: tauri::State<'_, Arc<ControlRegistry>>, session: String) {
     let Some(client) = registry.session(&session) else {
+        // A lost session has no client to detach. Detaching it is giving up on
+        // reconnecting, so its routes go, and the frontend closes its tabs.
+        if registry.lost.lock().remove(&session) {
+            registry
+                .routes
+                .lock()
+                .retain(|_, (owner, _)| owner != &session);
+        }
         return;
     };
+    client.detaching.store(true, Ordering::Relaxed);
     client.send("detach-client", Pending::Ignore);
     // Not killed here. tmux answers `detach-client` with `%exit`, and the
     // reader tears the session down when it sees it — going through the same
@@ -389,7 +431,9 @@ pub fn tmux_control_attached(registry: tauri::State<'_, Arc<ControlRegistry>>) -
 /// Send bytes to a control-mode pane. Returns false if it is not one.
 pub fn write(registry: &ControlRegistry, pane: &str, data: &str) -> bool {
     let Some((client, tmux_pane)) = registry.route(pane) else {
-        return false;
+        // Typed into a disconnected pane: there is nowhere to send it, and it
+        // is not an ordinary pty either.
+        return registry.stranded(pane);
     };
     // Hex rather than `send-keys -l`: the literal form still interprets the
     // argument as a string tmux has opinions about, and what arrives here is
@@ -412,7 +456,7 @@ pub fn write(registry: &ControlRegistry, pane: &str, data: &str) -> bool {
 /// and comes back as a `%layout-change`.
 pub fn resize(registry: &ControlRegistry, pane: &str, cols: u16, rows: u16) -> bool {
     let Some((client, tmux_pane)) = registry.route(pane) else {
-        return false;
+        return registry.stranded(pane);
     };
 
     // What arrives is one *pane's* size, and what tmux needs is the whole
@@ -508,15 +552,22 @@ pub fn tmux_control_capture(registry: tauri::State<'_, Arc<ControlRegistry>>, pa
     let Some((client, tmux_pane)) = registry.route(&pane) else {
         return;
     };
-    client.send(
-        &format!("capture-pane -p -e -J -t {tmux_pane} -S -{CAPTURE_LINES}"),
-        Pending::Capture(pane),
-    );
+    client.send(&capture_command(&tmux_pane), Pending::Capture(pane));
+}
+
+fn capture_command(tmux_pane: &str) -> String {
+    format!("capture-pane -p -e -J -t {tmux_pane} -S -{CAPTURE_LINES}")
 }
 
 /// Close a control-mode pane, which means killing tmux's.
 pub fn kill(registry: &ControlRegistry, pane: &str) -> bool {
     let Some((client, tmux_pane)) = registry.route(pane) else {
+        // Closing a disconnected pane closes it here only: the other machine
+        // cannot be told, and the pane there is left as it was.
+        if registry.stranded(pane) {
+            registry.routes.lock().remove(pane);
+            return true;
+        }
         return false;
     };
     client.send(&format!("kill-pane -t {tmux_pane}"), Pending::Ignore);
@@ -615,7 +666,7 @@ fn spawn_reader(
                     }
                     if !state.line(&app, &registry, &client, strip_wrapper(&text)) {
                         // `%exit`: tmux has finished with us.
-                        finish(&app, &registry, &client);
+                        finish(&app, &registry, &client, true);
                         return;
                     }
                 } else {
@@ -638,7 +689,7 @@ fn spawn_reader(
                 },
             );
         }
-        finish(&app, &registry, &client);
+        finish(&app, &registry, &client, false);
     });
 }
 
@@ -658,8 +709,19 @@ fn strip_wrapper(line: &str) -> &str {
     line.trim_end_matches("\u{1b}\\")
 }
 
-fn finish(app: &AppHandle, registry: &ControlRegistry, client: &ControlSession) {
+/// Tear a session down. `ended` is whether tmux said so (`%exit`), as opposed
+/// to the pty simply going quiet.
+fn finish(app: &AppHandle, registry: &ControlRegistry, client: &ControlSession, ended: bool) {
     registry.sessions.lock().remove(&client.name);
+    let _ = client.child.lock().kill();
+
+    let remote = ssh::split_key(&client.name).0.is_some();
+    if remote && !ended && !client.detaching.load(Ordering::Relaxed) {
+        // The link went, not the session. Routes stay; see `LOST_EVENT`.
+        registry.lost.lock().insert(client.name.clone());
+        let _ = app.emit(LOST_EVENT, &client.name);
+        return;
+    }
 
     // Every pane of this session is now gone as far as the window is concerned.
     // Told individually as well as collectively: a pane component listens for
@@ -685,7 +747,6 @@ fn finish(app: &AppHandle, registry: &ControlRegistry, client: &ControlSession) 
         );
     }
     let _ = app.emit(CLOSED_EVENT, &client.name);
-    let _ = client.child.lock().kill();
 }
 
 /// Where the reader is in the block/notification grammar.
@@ -840,38 +901,60 @@ impl Parser {
                         windows: self.windows.clone(),
                     },
                 );
+
+                // Back from a lost connection: every pane already on screen is
+                // showing the moment the link dropped. A pane that is new since
+                // then has not mounted yet, drops this, and asks for itself.
+                if client.recapture.swap(false, Ordering::Relaxed) {
+                    for window in &self.windows {
+                        for (id, tmux_pane) in panes_of(&window.layout) {
+                            client.send(&capture_command(&tmux_pane), Pending::Recapture(id));
+                        }
+                    }
+                }
             }
 
-            Some(Pending::Capture(pane)) => {
-                // `capture-pane` returns the pane's whole height, blank rows
-                // included, so a pane holding three lines of output comes back
-                // as three lines and forty of nothing. Written out as-is that
-                // is a screen of content followed by a gap, with the live
-                // prompt stranded at the bottom.
-                let end = lines
-                    .iter()
-                    .rposition(|line| !line.trim().is_empty())
-                    .map_or(0, |at| at + 1);
-                let lines = &lines[..end];
-                if lines.is_empty() {
-                    return;
-                }
-                // Joined rather than terminated: the last line is where the
-                // cursor is, and a newline after it would push the prompt tmux
-                // is about to redraw onto a line of its own.
-                let text = lines.join("\r\n");
-                let _ = app.emit(
-                    DATA_EVENT,
-                    DataPayload {
-                        id: &pane,
-                        chunk: &text,
-                    },
-                );
-            }
+            Some(Pending::Capture(pane)) => emit_capture(app, &pane, &lines, false),
+            Some(Pending::Recapture(pane)) => emit_capture(app, &pane, &lines, true),
 
             Some(Pending::Ignore) | None => {}
         }
     }
+}
+
+/// Hand a pane the history tmux sent for it. `replace` clears what the pane
+/// already shows first — the screen from before a lost connection.
+fn emit_capture(app: &AppHandle, pane: &str, lines: &[String], replace: bool) {
+    // `capture-pane` returns the pane's whole height, blank rows
+    // included, so a pane holding three lines of output comes back
+    // as three lines and forty of nothing. Written out as-is that
+    // is a screen of content followed by a gap, with the live
+    // prompt stranded at the bottom.
+    let end = lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty())
+        .map_or(0, |at| at + 1);
+    let lines = &lines[..end];
+    if lines.is_empty() && !replace {
+        return;
+    }
+    // Joined rather than terminated: the last line is where the
+    // cursor is, and a newline after it would push the prompt tmux
+    // is about to redraw onto a line of its own.
+    let mut text = lines.join("\r\n");
+    if replace {
+        // RIS: a full reset, scrollback included, so the history
+        // lands on a clean terminal instead of under its own
+        // older copy.
+        text.insert_str(0, "\u{1b}c");
+    }
+    let _ = app.emit(
+        DATA_EVENT,
+        DataPayload {
+            id: pane,
+            chunk: &text,
+        },
+    );
 }
 
 /// `@0 1 bb62,80x24,0,0,0 window name here`
