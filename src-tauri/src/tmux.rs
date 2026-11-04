@@ -123,7 +123,7 @@ pub struct TmuxSession {
 ///
 /// A tab rather than the more usual colon or space, because a session name may
 /// contain both and tmux will not stop anyone from choosing one that does.
-const FIELDS: &str = "#{session_name}\t#{session_windows}\t#{session_attached}\t\
+pub(crate) const FIELDS: &str = "#{session_name}\t#{session_windows}\t#{session_attached}\t\
                       #{session_activity}\t#{pane_current_path}\t#{pane_current_command}";
 
 #[tauri::command]
@@ -183,7 +183,7 @@ pub fn tmux_sessions() -> Vec<TmuxSession> {
 ///
 /// Every field after the name is optional, so a tmux old enough to leave one
 /// of them blank costs that field rather than the session.
-fn parse_sessions(stdout: &str) -> Vec<TmuxSession> {
+pub(crate) fn parse_sessions(stdout: &str) -> Vec<TmuxSession> {
     stdout
         .lines()
         .filter_map(|line| {
@@ -374,11 +374,15 @@ struct Process {
 #[cfg(target_os = "macos")]
 const TABLE_TTL: std::time::Duration = std::time::Duration::from_millis(1200);
 
+/// The last table read, and when — what `process_table` hands out until it is
+/// `TABLE_TTL` old.
+#[cfg(target_os = "macos")]
+type TableCache = parking_lot::Mutex<Option<(std::time::Instant, std::sync::Arc<Vec<Process>>)>>;
+
 #[cfg(target_os = "macos")]
 fn process_table() -> std::sync::Arc<Vec<Process>> {
     use std::time::Instant;
-    static CACHE: OnceLock<parking_lot::Mutex<Option<(Instant, std::sync::Arc<Vec<Process>>)>>> =
-        OnceLock::new();
+    static CACHE: OnceLock<TableCache> = OnceLock::new();
     let cache = CACHE.get_or_init(|| parking_lot::Mutex::new(None));
 
     let mut held = cache.lock();

@@ -29,6 +29,7 @@ pub mod mcp;
 pub mod pty;
 pub mod recover;
 pub mod search;
+pub mod ssh;
 pub mod store;
 pub mod tmux;
 pub mod updater;
@@ -173,6 +174,8 @@ pub fn run() {
             control::tmux_control_attached,
             control::tmux_control_pane_command,
             control::tmux_control_capture,
+            ssh::ssh_tmux_sessions,
+            ssh::ssh_hosts,
             store::session_save,
             store::session_load,
             store::session_load_window,

@@ -46,12 +46,16 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::pty::{DATA_EVENT, EXIT_EVENT};
-use crate::tmux;
+use crate::{ssh, tmux};
 
 /// Emitted whenever the shape of a control session changes.
 pub const WINDOWS_EVENT: &str = "tmux://windows";
 /// Emitted when a control session ends, however it ended.
 pub const CLOSED_EVENT: &str = "tmux://closed";
+/// Emitted, before `CLOSED_EVENT`, when a session ended without tmux ever
+/// having spoken — an ssh that could not connect, a host without tmux. Carries
+/// the last thing the pty said, which is the reason.
+pub const FAILED_EVENT: &str = "tmux://failed";
 
 const READ_BUF: usize = 32 * 1024;
 
@@ -166,7 +170,11 @@ enum Pending {
 }
 
 pub struct ControlSession {
+    /// The key everything above the backend knows this session by: the tmux
+    /// name for a local session, `host:name` for a remote one. See `crate::ssh`.
     name: String,
+    /// The name tmux itself knows it by, for commands sent to it.
+    tmux_name: String,
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
@@ -196,8 +204,8 @@ impl ControlSession {
         // Name last: it is the only field that may contain a space.
         self.send(
             &format!(
-                "list-windows -t ={} -F '#{{window_id}} #{{window_active}} #{{window_layout}} #{{window_name}}'",
-                self.name
+                "list-windows -t {} -F '#{{window_id}} #{{window_active}} #{{window_layout}} #{{window_name}}'",
+                quote(&format!("={}", self.tmux_name))
             ),
             Pending::Windows,
         );
@@ -244,6 +252,10 @@ static NEXT: AtomicU64 = AtomicU64::new(0);
 
 /// Attach to `session` in control mode, creating it if it is not there.
 ///
+/// `session` may be `host:name`, in which case the control client runs on that
+/// host over ssh and nothing else here changes — see `crate::ssh`. A remote
+/// session needs no tmux on *this* machine, only on that one.
+///
 /// Returns immediately; the shape of the session arrives on `tmux://windows`
 /// once tmux has described it, which is the same path every later change takes.
 /// Attaching twice to one session is a no-op rather than a second client —
@@ -260,44 +272,65 @@ pub fn tmux_control_attach(
     if session.is_empty() {
         return Err("a session needs a name".into());
     }
-    if !tmux::available() {
-        return Err("tmux is not installed".into());
-    }
     if registry.session(&session).is_some() {
         return Ok(());
     }
-    let binary = tmux::program().ok_or("tmux is not installed")?;
+    let (host, tmux_name) = ssh::split_key(&session);
+    let tmux_name = tmux_name.to_string();
+    let cols = cols.max(1);
+    let rows = rows.max(1);
+
+    let mut cmd = match host {
+        Some(host) => {
+            if !ssh::valid_host(host) {
+                return Err(format!("“{host}” is not a host name ssh can be given"));
+            }
+            if !ssh::valid_remote_name(&tmux_name) {
+                return Err(format!("“{tmux_name}” cannot be sent to {host} safely"));
+            }
+            let binary = ssh::program().ok_or("ssh is not installed")?;
+            let mut cmd = CommandBuilder::new(binary);
+            cmd.args(ssh::control_argv(host, &tmux_name, cols, rows));
+            cmd
+        }
+        None => {
+            let binary = tmux::program().ok_or("tmux is not installed")?;
+            let mut cmd = CommandBuilder::new(binary);
+            // `-C` twice is control mode with echo off, which is the mode meant
+            // here; a single `-C` leaves tmux echoing the commands back.
+            cmd.arg("-CC");
+            cmd.arg("-u");
+            cmd.arg("new-session");
+            cmd.arg("-A");
+            cmd.arg("-s");
+            cmd.arg(&tmux_name);
+            cmd.arg("-x");
+            cmd.arg(cols.to_string());
+            cmd.arg("-y");
+            cmd.arg(rows.to_string());
+            cmd
+        }
+    };
 
     let pair = native_pty_system()
         .openpty(PtySize {
-            rows: rows.max(1),
-            cols: cols.max(1),
+            rows,
+            cols,
             pixel_width: 0,
             pixel_height: 0,
         })
         .map_err(|err| format!("could not open a pseudoterminal: {err}"))?;
 
-    let mut cmd = CommandBuilder::new(binary);
-    // `-C` twice is control mode with echo off, which is the mode meant here;
-    // a single `-C` leaves tmux echoing the commands back.
-    cmd.arg("-CC");
-    cmd.arg("-u");
-    cmd.arg("new-session");
-    cmd.arg("-A");
-    cmd.arg("-s");
-    cmd.arg(&session);
-    cmd.arg("-x");
-    cmd.arg(cols.max(1).to_string());
-    cmd.arg("-y");
-    cmd.arg(rows.max(1).to_string());
+    // For ssh these are also what the far end's pty is given, which is where
+    // tmux reads them.
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "jterm");
 
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|err| format!("could not start tmux: {err}"))?;
+    let child = pair.slave.spawn_command(cmd).map_err(|err| match host {
+        Some(_) => format!("could not start ssh: {err}"),
+        None => format!("could not start tmux: {err}"),
+    })?;
     let reader = pair
         .master
         .try_clone_reader()
@@ -310,6 +343,7 @@ pub fn tmux_control_attach(
 
     let client = Arc::new(ControlSession {
         name: session.clone(),
+        tmux_name,
         writer: Mutex::new(writer),
         master: Mutex::new(pair.master),
         child: Mutex::new(child),
@@ -550,6 +584,11 @@ fn spawn_reader(
         let mut buf = vec![0u8; READ_BUF];
         let mut line = Vec::<u8>::new();
         let mut state = Parser::default();
+        // What the pty said before tmux began speaking, kept only to explain a
+        // session that never got that far. Bounded, because a host that prints
+        // a banner forever is not this file's problem to remember.
+        let mut preamble: Vec<String> = Vec::new();
+        let mut spoke = false;
 
         loop {
             let read = match reader.read(&mut buf) {
@@ -561,6 +600,19 @@ fn spawn_reader(
                 if byte == b'\n' {
                     let text = String::from_utf8_lossy(&line).replace('\r', "");
                     line.clear();
+                    if !spoke {
+                        // tmux opens with this DCS. Until it does, every line is
+                        // ssh or a shell talking, not the protocol.
+                        if text.contains("\u{1b}P1000p") {
+                            spoke = true;
+                        } else {
+                            if preamble.len() == 16 {
+                                preamble.remove(0);
+                            }
+                            preamble.push(text);
+                            continue;
+                        }
+                    }
                     if !state.line(&app, &registry, &client, strip_wrapper(&text)) {
                         // `%exit`: tmux has finished with us.
                         finish(&app, &registry, &client);
@@ -572,8 +624,28 @@ fn spawn_reader(
             }
         }
 
+        if !line.is_empty() && !spoke {
+            preamble.push(String::from_utf8_lossy(&line).replace('\r', ""));
+        }
+        if !spoke {
+            let reason = ssh::last_words(&preamble.join("\n"))
+                .unwrap_or_else(|| "the connection closed before tmux started".into());
+            let _ = app.emit(
+                FAILED_EVENT,
+                FailedPayload {
+                    session: &client.name,
+                    message: &reason,
+                },
+            );
+        }
         finish(&app, &registry, &client);
     });
+}
+
+#[derive(Clone, Serialize)]
+struct FailedPayload<'a> {
+    session: &'a str,
+    message: &'a str,
 }
 
 /// Drop the DCS the whole conversation is wrapped in.
