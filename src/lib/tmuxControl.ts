@@ -78,6 +78,27 @@ export function windowTabId(session: string, windowId: string): string {
   return `tmuxwin-${sanitize(session)}-${windowId.replace(/^@/, "")}`;
 }
 
+/**
+ * The jterm pane id for a tmux pane — the same rule as `pane_key` in
+ * `control.rs`, which is what assigns it. Needed here only where a pane has to
+ * be named before tmux has described it: a peer's layout, built ahead of the
+ * sessions it draws from.
+ */
+export function controlPaneId(session: string, tmuxPane: string): string {
+  return `tmux-${sanitize(session)}-${tmuxPane.replace(/^%/, "")}`;
+}
+
+/**
+ * Whether a tab was mirrored from another jterm's layout — see `lib/peer.ts`.
+ * Here rather than there so the reducer can ask without importing the
+ * snapshot code that `peer.ts` needs.
+ */
+export const PEER_TAB_PREFIX = "peer-";
+
+export function isPeerTabId(tabId: string): boolean {
+  return tabId.startsWith(PEER_TAB_PREFIX);
+}
+
 /** Whether a tab id belongs to a control session — used to strip them from the
  *  snapshot, since tmux is the thing that remembers them. */
 export function isControlTabId(tabId: string): boolean {

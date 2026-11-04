@@ -198,11 +198,21 @@ export interface RemoteListing {
  * Other machines, over ssh. Attaching to one of their sessions is
  * `tmuxControl.attach("host:name", …)` — see `lib/remote.ts`.
  */
+/** Another jterm's saved window and the tmux panes behind it — see
+ *  `ssh_jterm_layout` and `lib/peer.ts`. */
+export interface PeerLayout {
+  snapshot: string | null;
+  panes: { session: string; pane: string }[];
+}
+
 export const ssh = {
   hosts: (): Promise<SshHost[]> => call("ssh_hosts", {}, []),
   /** Rejects with ssh's own reason when the host cannot be reached. */
   tmuxSessions: (host: string): Promise<RemoteListing> =>
     call("ssh_tmux_sessions", { host }, { tmux: false, sessions: [] }),
+  /** Rejects with ssh's reason, like `tmuxSessions`. */
+  jtermLayout: (host: string): Promise<PeerLayout> =>
+    call("ssh_jterm_layout", { host }, { snapshot: null, panes: [] }),
 };
 
 /** Raised whenever the shape of a control session changes. */
