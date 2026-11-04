@@ -21,6 +21,7 @@ import {
   windowTabId,
   type TmuxWindow,
 } from "@/lib/tmuxControl";
+import { hostLabel, splitKey } from "@/lib/remote";
 import {
   type Axis,
   type DropEdge,
@@ -1125,6 +1126,12 @@ function blankTab(id: string): Tab {
   return { id, root: leaf(`${id}-root`, ""), panes: {}, focusedPaneId: "", zoomedPaneId: null };
 }
 
+function windowTitle(session: string, name: string): string | undefined {
+  const { host } = splitKey(session);
+  if (host === null) return name || undefined;
+  return name ? `${hostLabel(host)} · ${name}` : hostLabel(host);
+}
+
 /**
  * One tab, made to match one tmux window.
  *
@@ -1140,8 +1147,10 @@ function syncTab(tab: Tab, session: string, window: TmuxWindow): Tab {
 
   return {
     ...tab,
-    // tmux's window name, unless the user has renamed the tab here.
-    title: tab.title ?? (window.name || undefined),
+    // tmux's window name, unless the user has renamed the tab here. Another
+    // machine's window says which machine, or a tab running `claude` on the
+    // peer is indistinguishable from one running it here.
+    title: tab.title ?? windowTitle(session, window.name),
     root,
     panes,
     focusedPaneId,

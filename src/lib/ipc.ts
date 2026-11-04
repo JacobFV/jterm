@@ -180,10 +180,42 @@ export const tmuxControl = {
   capture: (pane: string) => call("tmux_control_capture", { pane }, undefined),
 };
 
+/** A machine the remote-host panel can offer — see `ssh_hosts` in `ssh.rs`. */
+export interface SshHost {
+  /** What the user calls it: `gb10`. */
+  name: string;
+  /** What ssh is given: `gb10`, or `me@10.0.0.7` when it came from an alias. */
+  target: string;
+}
+
+export interface RemoteListing {
+  /** False when the host has no tmux, so there is nothing to draw as panes. */
+  tmux: boolean;
+  sessions: TmuxSession[];
+}
+
+/**
+ * Other machines, over ssh. Attaching to one of their sessions is
+ * `tmuxControl.attach("host:name", …)` — see `lib/remote.ts`.
+ */
+export const ssh = {
+  hosts: (): Promise<SshHost[]> => call("ssh_hosts", {}, []),
+  /** Rejects with ssh's own reason when the host cannot be reached. */
+  tmuxSessions: (host: string): Promise<RemoteListing> =>
+    call("ssh_tmux_sessions", { host }, { tmux: false, sessions: [] }),
+};
+
 /** Raised whenever the shape of a control session changes. */
 export const TMUX_WINDOWS_EVENT = "tmux://windows";
 /** Raised when a control session ends, however it ended. */
 export const TMUX_CLOSED_EVENT = "tmux://closed";
+/** Raised, before `TMUX_CLOSED_EVENT`, for a session that ended before tmux
+ *  ever spoke — an ssh that could not connect. Carries the reason. */
+export const TMUX_FAILED_EVENT = "tmux://failed";
+export interface TmuxFailure {
+  session: string;
+  message: string;
+}
 
 /**
  * The session snapshot, which is per *window*.
