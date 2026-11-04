@@ -212,6 +212,9 @@ export const TMUX_CLOSED_EVENT = "tmux://closed";
 /** Raised, before `TMUX_CLOSED_EVENT`, for a session that ended before tmux
  *  ever spoke — an ssh that could not connect. Carries the reason. */
 export const TMUX_FAILED_EVENT = "tmux://failed";
+/** Raised *instead of* `TMUX_CLOSED_EVENT` when a remote session's connection
+ *  dropped. The session is still running over there; its tabs stay. */
+export const TMUX_LOST_EVENT = "tmux://lost";
 export interface TmuxFailure {
   session: string;
   message: string;

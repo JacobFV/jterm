@@ -5,6 +5,7 @@ import {
   decodeRecentHosts,
   hostLabel,
   remoteKey,
+  retryDelayMs,
   sortSessions,
   splitKey,
   validHost,
@@ -84,5 +85,15 @@ describe("recent hosts", () => {
 
   it("moves a host used again to the front", () => {
     expect(withRecentHost(["a", "b", "c"], "c")).toEqual(["c", "a", "b"]);
+  });
+});
+
+describe("retryDelayMs", () => {
+  it("starts quick and settles at half a minute", () => {
+    expect(retryDelayMs(1)).toBe(2_000);
+    expect(retryDelayMs(2)).toBe(5_000);
+    expect(retryDelayMs(5)).toBe(30_000);
+    expect(retryDelayMs(50)).toBe(30_000);
+    expect(retryDelayMs(0)).toBe(2_000);
   });
 });

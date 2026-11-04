@@ -80,6 +80,19 @@ export function isPeerPane(session: TmuxSession): boolean {
   return looksLikeOwnSession(session.name);
 }
 
+/* ── Reconnecting ────────────────────────────────────────────────────────── */
+
+/** Waits between reconnect attempts, in ms. Quick at first — a hotspot that
+ *  hiccupped is usually back in seconds — then settling at half a minute, so a
+ *  laptop left closed is not dialling out every few seconds all night. */
+const RETRY_STEPS_MS = [2_000, 5_000, 10_000, 20_000, 30_000];
+
+/** How long to wait before attempt number `attempt` (1-based). */
+export function retryDelayMs(attempt: number): number {
+  const at = Math.min(Math.max(attempt, 1), RETRY_STEPS_MS.length) - 1;
+  return RETRY_STEPS_MS[at];
+}
+
 /* ── Hosts used before ───────────────────────────────────────────────────── */
 
 const RECENT_KEY = "jterm.remoteHosts";
