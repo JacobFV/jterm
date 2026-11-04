@@ -713,7 +713,16 @@ fn strip_wrapper(line: &str) -> &str {
 /// to the pty simply going quiet.
 fn finish(app: &AppHandle, registry: &ControlRegistry, client: &ControlSession, ended: bool) {
     registry.sessions.lock().remove(&client.name);
-    let _ = client.child.lock().kill();
+    // Killed *and* waited for. A child that is only killed stays in the process
+    // table as a zombie until this process exits, and a remote session on a bad
+    // link ends and restarts every few minutes — one zombie per reconnect, all
+    // day. By here the pty has hit EOF or tmux said `%exit`, so the child is
+    // gone or going and the wait is immediate.
+    {
+        let mut child = client.child.lock();
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 
     let remote = ssh::split_key(&client.name).0.is_some();
     if remote && !ended && !client.detaching.load(Ordering::Relaxed) {
