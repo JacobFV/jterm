@@ -40,7 +40,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronUp, Maximize2, Minimize2, Minus, X } from "lucide-react";
+import { ChevronUp, Maximize2, Minimize2, Minus, Unplug, X } from "lucide-react";
 
 import { resolveTheme, themeStyle } from "@/lib/appearance";
 import { useSettings, useSystemScheme } from "@/lib/useSettings";
@@ -49,6 +49,12 @@ import { paneIcon, paneKind } from "@/panes/registry";
 import { type Action, type Popup, type Tab, paneLabel, themeOf } from "@/state/workspace";
 import { type DropEdge, type Layout, type Rect, countPanes, layout } from "@/state/tree";
 import { AmbientBackdrop } from "./AmbientBackdrop";
+import {
+  DisconnectedCover,
+  controlKeyOf,
+  sessionPlace,
+  useControlSessions,
+} from "./ControlSessions";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { PaneMenu, type PaneMenuActions, type PaneMenuHandle } from "./PaneMenu";
 import { RenameField } from "./RenameField";
@@ -132,6 +138,7 @@ export function Workspace({
 }: WorkspaceProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const settings = useSettings();
+  const controlSessions = useControlSessions();
   const [paneDrag, setPaneDrag] = useState<PaneDrag | null>(null);
   const [dividerNode, setDividerNode] = useState<string | null>(null);
   const [tabDrop, setTabDrop] = useState<TabDropTarget | null>(null);
@@ -642,6 +649,18 @@ export function Workspace({
                     </>
                   ) : null}
 
+                  {/* Beside close, because it is the gentler of the two: close
+                      kills tmux's pane, detach leaves the whole session running
+                      and only stops showing it here. */}
+                  {controlKeyOf(pane) !== null ? (
+                    <HeaderButton
+                      title={`Detach from ${sessionPlace(controlKeyOf(pane)!)} — the session keeps running`}
+                      onClick={() => controlSessions.detach(controlKeyOf(pane)!)}
+                    >
+                      <Unplug className="h-3 w-3" />
+                    </HeaderButton>
+                  ) : null}
+
                   <button
                     type="button"
                     title="Close pane"
@@ -658,7 +677,14 @@ export function Workspace({
                 </div>
               ) : null}
 
-              <div className="min-h-0 flex-1">
+              <div className="relative min-h-0 flex-1">
+                {(() => {
+                  const key = controlKeyOf(pane);
+                  const down = key === null ? undefined : controlSessions.lost.get(key);
+                  return key !== null && down ? (
+                    <DisconnectedCover sessionKey={key} state={down} />
+                  ) : null;
+                })()}
                 {/* Per pane, and keyed on the pane rather than shared: a
                     boundary that has caught stays caught, so one placed around
                     the whole grid would take every sibling down with the one

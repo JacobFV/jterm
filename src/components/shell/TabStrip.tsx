@@ -27,6 +27,8 @@ import {
   Plus,
   Server,
   Settings as SettingsIcon,
+  Unplug,
+  WifiOff,
   X,
 } from "lucide-react";
 
@@ -53,6 +55,7 @@ import {
   themeOf,
 } from "@/state/workspace";
 import { Menu, MenuItem, MenuSubmenu, useMenu } from "./Menu";
+import { controlKeyOfTab, sessionPlace, useControlSessions } from "./ControlSessions";
 import { type OrphanActions, OrphanedSessions } from "./OrphanedSessions";
 import { PaneMenu, type PaneMenuActions, type PaneMenuHandle } from "./PaneMenu";
 import { RenameField } from "./RenameField";
@@ -376,6 +379,9 @@ function TabItem({
   const settings = useSettings();
   useSystemScheme();
   const look = themeStyle(themeOf(settings.theme, tab), settings.ambientPresence);
+  const controlSessions = useControlSessions();
+  const sessionKey = controlKeyOfTab(tab);
+  const disconnected = sessionKey !== null && controlSessions.lost.has(sessionKey);
 
   return (
     // The whole rectangle selects, not just the text in it. A tab is one
@@ -390,7 +396,9 @@ function TabItem({
       role="button"
       tabIndex={0}
       aria-current={active}
-      title={tabLabel(tab)}
+      title={
+        disconnected ? `${tabLabel(tab)} — disconnected, reconnecting` : tabLabel(tab)
+      }
       onPointerDown={onPointerDown}
       // A press on a tab must not take keyboard focus off the pane. Selecting
       // a *different* tab focuses that tab's pane on the way in, so the loss
@@ -468,11 +476,34 @@ function TabItem({
           className={cn(
             "min-w-0 flex-1 truncate text-left text-[length:var(--fs-11)]",
             active ? "text-ink-1" : "text-ink-3",
+            // Still selectable — what it showed last is worth looking at — but
+            // plainly not live.
+            disconnected && "italic opacity-60",
           )}
         >
           {tabLabel(tab)}
         </span>
       )}
+      {disconnected ? (
+        <WifiOff className="h-3 w-3 shrink-0 text-ink-4" aria-label="Disconnected" />
+      ) : null}
+      {sessionKey !== null ? (
+        <button
+          type="button"
+          title={`Detach from ${sessionPlace(sessionKey)} — the session keeps running`}
+          aria-label={`Detach from ${sessionPlace(sessionKey)}`}
+          className={cn(
+            "shrink-0 rounded-sm p-0.5 text-ink-4 hover:text-ink-1 group-hover:opacity-100",
+            active ? "opacity-100" : "opacity-0",
+          )}
+          onClick={(event) => {
+            event.stopPropagation();
+            controlSessions.detach(sessionKey);
+          }}
+        >
+          <Unplug className="h-3 w-3" />
+        </button>
+      ) : null}
       {/* The active tab's close control is always visible rather than waiting
           for a hover, since it is the one most likely wanted. */}
       <button

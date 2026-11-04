@@ -25,6 +25,14 @@ import { TabStrip } from "@/components/shell/TabStrip";
 import { HistorySearch } from "@/components/shell/HistorySearch";
 import { TmuxSessions } from "@/components/shell/TmuxSessions";
 import { RemoteHosts } from "@/components/shell/RemoteHosts";
+import {
+  ControlSessionsProvider,
+  controlKeyOf,
+  controlKeyOfTab,
+  type ControlSessionsValue,
+  type LostSession,
+} from "@/components/shell/ControlSessions";
+import { retryDelayMs, splitKey } from "@/lib/remote";
 import { WindowFrame } from "@/components/shell/WindowFrame";
 import {
   Workspace as PaneWorkspace,
@@ -37,6 +45,8 @@ import {
   SESSION_IMPORTED_EVENT,
   TMUX_CLOSED_EVENT,
   TMUX_FAILED_EVENT,
+  TMUX_LOST_EVENT,
+  ssh as sshApi,
   type TmuxFailure,
   TMUX_WINDOWS_EVENT,
   dialog,
@@ -493,6 +503,170 @@ export function App() {
       for (const stop of stops) stop();
     };
   }, []);
+
+  /* ── Remote sessions whose connection dropped ─────────────────────── */
+
+  /**
+   * Sessions on another machine that jterm has lost the link to, and is
+   * getting back.
+   *
+   * On a phone hotspot the link goes every few minutes, and closing the tabs
+   * each time — which is what a session that *ended* does — would throw away
+   * where everything was for the sake of a few seconds' outage. So the tabs
+   * stay, covered and marked as disconnected (see `ControlSessions`), and this
+   * keeps trying: quickly at first, then every half a minute, and at once when
+   * the OS says the network is back. Panes come back with the same ids, so
+   * nothing is remounted; the backend repaints their screens.
+   *
+   * One check before each attempt keeps it honest. A host that answers and no
+   * longer has the session means the session ended while jterm was away, and
+   * its tabs go then, as they would have if jterm had been there to see it.
+   * Attaching blind would instead *create* an empty session under the old name
+   * (`new-session -A`), which would look like a reconnect and be nothing of
+   * the kind.
+   */
+  const [lost, setLost] = useState<ReadonlyMap<string, LostSession>>(new Map());
+  const lostRef = useRef(lost);
+  lostRef.current = lost;
+  const attemptsRef = useRef(new Map<string, number>());
+  const retryTimersRef = useRef(new Map<string, number>());
+
+  const forgetLost = useCallback((key: string) => {
+    const timer = retryTimersRef.current.get(key);
+    if (timer !== undefined) window.clearTimeout(timer);
+    retryTimersRef.current.delete(key);
+    attemptsRef.current.delete(key);
+    setLost((current) => {
+      if (!current.has(key)) return current;
+      const next = new Map(current);
+      next.delete(key);
+      return next;
+    });
+  }, []);
+
+  const markLost = useCallback((key: string, state: LostSession) => {
+    setLost((current) => new Map(current).set(key, state));
+  }, []);
+
+  // Through a ref, because scheduling and attempting call each other.
+  const attemptRef = useRef<(key: string) => void>(() => {});
+
+  const scheduleRetry = useCallback(
+    (key: string) => {
+      const attempt = (attemptsRef.current.get(key) ?? 0) + 1;
+      attemptsRef.current.set(key, attempt);
+      const delay = retryDelayMs(attempt);
+      const previous = retryTimersRef.current.get(key);
+      if (previous !== undefined) window.clearTimeout(previous);
+      retryTimersRef.current.set(
+        key,
+        window.setTimeout(() => attemptRef.current(key), delay),
+      );
+      markLost(key, { retryAt: Date.now() + delay, trying: false });
+    },
+    [markLost],
+  );
+
+  attemptRef.current = (key: string) => {
+    const state = lostRef.current.get(key);
+    if (!state || state.trying) return;
+    const timer = retryTimersRef.current.get(key);
+    if (timer !== undefined) window.clearTimeout(timer);
+    retryTimersRef.current.delete(key);
+    markLost(key, { ...state, trying: true });
+
+    const { host, name } = splitKey(key);
+    if (host === null) return;
+    sshApi.tmuxSessions(host).then(
+      (listing) => {
+        if (!lostRef.current.has(key)) return;
+        if (!listing.sessions.some((session) => session.name === name)) {
+          // Reachable, and the session is gone: it ended while we were away.
+          void tmuxControl.detach(key);
+          dispatch({ type: "tmux/closed", session: key });
+          forgetLost(key);
+          return;
+        }
+        // The outcome arrives as an event: the session's shape on success,
+        // `tmux://lost` again on failure. Both are handled below.
+        void tmuxControl.attach(key, 80, 24).catch(() => scheduleRetry(key));
+      },
+      () => {
+        if (lostRef.current.has(key)) scheduleRetry(key);
+      },
+    );
+  };
+
+  useEffect(() => {
+    const stops: (() => void)[] = [];
+    let disposed = false;
+    const keep = (unlisten: () => void) => {
+      if (disposed) unlisten();
+      else stops.push(unlisten);
+    };
+
+    void listen<string>(TMUX_LOST_EVENT, (key) => {
+      const shown =
+        workspaceRef.current.tabs.some((tab) => controlKeyOfTab(tab) === key) ||
+        workspaceRef.current.popups.some((popup) => controlKeyOf(popup.pane) === key);
+      if (shown) {
+        scheduleRetry(key);
+        return;
+      }
+      // Nothing on screen to keep — a first connection that never got as far
+      // as a window. That is a failure to connect, not a lost connection, and
+      // the panel that asked for it says so.
+      void tmuxControl.detach(key);
+      dispatch({ type: "tmux/closed", session: key });
+      forgetLost(key);
+    }).then(keep);
+
+    void listen<TmuxSessionShape>(TMUX_WINDOWS_EVENT, (shape) => {
+      if (lostRef.current.has(shape.session)) forgetLost(shape.session);
+    }).then(keep);
+
+    // The network coming back is the best moment to try, and the OS says when.
+    const onOnline = () => {
+      for (const key of lostRef.current.keys()) attemptRef.current(key);
+    };
+    window.addEventListener("online", onOnline);
+
+    return () => {
+      disposed = true;
+      for (const stop of stops) stop();
+      window.removeEventListener("online", onOnline);
+    };
+  }, [scheduleRetry, forgetLost]);
+
+  // A lost session whose last tab was closed is given up on, here and in the
+  // backend, which is otherwise still holding its routes for it.
+  useEffect(() => {
+    for (const key of lost.keys()) {
+      const shown =
+        workspace.tabs.some((tab) => controlKeyOfTab(tab) === key) ||
+        workspace.popups.some((popup) => controlKeyOf(popup.pane) === key);
+      if (!shown) {
+        void tmuxControl.detach(key);
+        forgetLost(key);
+      }
+    }
+  }, [workspace.tabs, workspace.popups, lost, forgetLost]);
+
+  const controlSessions = useMemo<ControlSessionsValue>(
+    () => ({
+      lost,
+      reconnect: (key) => attemptRef.current(key),
+      detach: (key) => {
+        void tmuxControl.detach(key);
+        if (lostRef.current.has(key)) {
+          // No client to answer with `%exit`, so the tabs are closed here.
+          dispatch({ type: "tmux/closed", session: key });
+          forgetLost(key);
+        }
+      },
+    }),
+    [lost, forgetLost],
+  );
 
   /**
    * Reattach to whatever was attached when the app last closed.
@@ -1197,132 +1371,134 @@ export function App() {
   const tabs = useMemo(() => workspace.tabs, [workspace.tabs]);
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-surface-0">
-      {searchingHistory ? (
-        <HistorySearch
-          home={home}
-          onClose={() => setSearchingHistory(false)}
-          onPick={(command) => {
-            // Typed at the prompt, never submitted — the same promise the
-            // restored draft line makes. See `HistorySearch`.
-            const tab = activeTab(workspaceRef.current);
-            if (tab === null) return;
-            const handle = terminalHandle(tab.focusedPaneId);
-            handle?.paste(command);
-            handle?.focus();
-          }}
-        />
-      ) : null}
-
-      {pickingSession ? (
-        <TmuxSessions
-          onClose={() => setPickingSession(false)}
-          onAttach={(session) => {
-            setPickingSession(false);
-            dispatch({ type: "tab/open", kind: "terminal", seed: { tmux: session } });
-          }}
-          onAttachControl={(session) => {
-            setPickingSession(false);
-            // No tab is made here. tmux is about to say which windows it has,
-            // and the tabs come from that — making one now would leave a stray
-            // pane beside the ones tmux is about to describe.
-            void tmuxControl.attach(session, 80, 24);
-          }}
-          onDetach={(session) => {
-            void tmuxControl.detach(session);
-          }}
-        />
-      ) : null}
-
-      {pickingRemote ? (
-        <RemoteHosts
-          onClose={() => setPickingRemote(false)}
-          // As with a local control session, no tab is made here: tmux is
-          // about to say which windows the session has.
-          onAttach={(key) => void tmuxControl.attach(key, 80, 24)}
-          onDetach={(key) => void tmuxControl.detach(key)}
-          onShell={(target) => {
-            setPickingRemote(false);
-            // An ordinary terminal running ssh — where a password prompt can be
-            // answered, and a host without tmux is still a shell. The same path
-            // the agent's `open_terminal` takes, which already knows how long
-            // a new shell needs before it is typed into.
-            void callTool(
-              "open_terminal",
-              { command: `ssh ${target}`, run: true, where: "tab" },
-              toolContext,
-            );
-          }}
-        />
-      ) : null}
-
-      <TabStrip
-        tabs={tabs}
-        activeTabId={workspace.activeTabId}
-        onSelect={(tabId) => dispatch({ type: "tab/select", tabId })}
-        onClose={(tabId) => void closeTab(tabId)}
-        onNew={(kind) => dispatch({ type: "tab/new", kind })}
-        // The label says "Open file…" under a new-tab button, so it makes a tab
-        // whatever the preference says.
-        onOpenFile={() => void openFile("tab")}
-        onOpenRecent={openRecent}
-        onTmuxSessions={hasTmux ? () => setPickingSession(true) : null}
-        onRemoteHosts={() => setPickingRemote(true)}
-        orphanActions={hasTmux ? orphanActions : null}
-        paneMenu={paneMenu}
-        sidebarOpen={workspace.sidebarOpen}
-        onToggleSidebar={() => dispatch({ type: "ui/sidebar" })}
-        onOpenSettings={() => void openSettingsWindow()}
-        onReorder={(tabId, toIndex) => dispatch({ type: "tab/reorder", tabId, toIndex })}
-        onDragOverWorkspace={setTabDrag}
-        onDropInWorkspace={dropTabInWorkspace}
-      />
-
-      <div className="flex min-h-0 flex-1">
-        {/* Hidden while closed, not unmounted. Opening the sidebar narrows every
-            pane, and every terminal then refits and rewraps its scrollback — work
-            that holds the page up until it is done. A tree mounted at that moment
-            has nothing in hand, so it said "reading…" for as long as the
-            terminals took. One that never went away opens showing what it had,
-            and catches up behind that. */}
-        <div
-          className={cn("shrink-0 border-r border-border", !workspace.sidebarOpen && "hidden")}
-          style={{ width: settings.sidebarWidth }}
-        >
-          <Sidebar
-            root={sidebarRoot}
-            visible={workspace.sidebarOpen}
-            tab={workspace.sidebarTab ?? "files"}
-            onTab={(tab) => dispatch({ type: "ui/sidebarTab", tab })}
-            onOpen={openPath}
-            theme={windowTheme}
+    <ControlSessionsProvider value={controlSessions}>
+      <div className="flex h-full w-full flex-col overflow-hidden bg-surface-0">
+        {searchingHistory ? (
+          <HistorySearch
+            home={home}
+            onClose={() => setSearchingHistory(false)}
+            onPick={(command) => {
+              // Typed at the prompt, never submitted — the same promise the
+              // restored draft line makes. See `HistorySearch`.
+              const tab = activeTab(workspaceRef.current);
+              if (tab === null) return;
+              const handle = terminalHandle(tab.focusedPaneId);
+              handle?.paste(command);
+              handle?.focus();
+            }}
           />
-        </div>
+        ) : null}
 
-        <div className="relative min-h-0 flex-1">
-          {/* Under the panes, and drawn whether or not they have loaded yet:
-              this is the one thing on screen that has nothing to wait for. */}
-          <AmbientBackdrop theme={resolveTheme(windowTheme)} />
-          {loaded ? (
-            <PaneWorkspace
-              key={workspaceGeneration}
-              tabs={tabs}
-              activeTabId={workspace.activeTabId}
-              popups={workspace.popups}
-              focusedPopupId={workspace.focusedPopupId}
-              dispatch={dispatch}
-              onClosePane={(paneId) => void closePane(paneId)}
-              paneMenu={paneMenu}
-              tabDrag={tabDrag}
-              onTabDropTarget={noteTabDropTarget}
+        {pickingSession ? (
+          <TmuxSessions
+            onClose={() => setPickingSession(false)}
+            onAttach={(session) => {
+              setPickingSession(false);
+              dispatch({ type: "tab/open", kind: "terminal", seed: { tmux: session } });
+            }}
+            onAttachControl={(session) => {
+              setPickingSession(false);
+              // No tab is made here. tmux is about to say which windows it has,
+              // and the tabs come from that — making one now would leave a stray
+              // pane beside the ones tmux is about to describe.
+              void tmuxControl.attach(session, 80, 24);
+            }}
+            onDetach={(session) => {
+              void tmuxControl.detach(session);
+            }}
+          />
+        ) : null}
+
+        {pickingRemote ? (
+          <RemoteHosts
+            onClose={() => setPickingRemote(false)}
+            // As with a local control session, no tab is made here: tmux is
+            // about to say which windows the session has.
+            onAttach={(key) => void tmuxControl.attach(key, 80, 24)}
+            onDetach={(key) => void tmuxControl.detach(key)}
+            onShell={(target) => {
+              setPickingRemote(false);
+              // An ordinary terminal running ssh — where a password prompt can be
+              // answered, and a host without tmux is still a shell. The same path
+              // the agent's `open_terminal` takes, which already knows how long
+              // a new shell needs before it is typed into.
+              void callTool(
+                "open_terminal",
+                { command: `ssh ${target}`, run: true, where: "tab" },
+                toolContext,
+              );
+            }}
+          />
+        ) : null}
+
+        <TabStrip
+          tabs={tabs}
+          activeTabId={workspace.activeTabId}
+          onSelect={(tabId) => dispatch({ type: "tab/select", tabId })}
+          onClose={(tabId) => void closeTab(tabId)}
+          onNew={(kind) => dispatch({ type: "tab/new", kind })}
+          // The label says "Open file…" under a new-tab button, so it makes a tab
+          // whatever the preference says.
+          onOpenFile={() => void openFile("tab")}
+          onOpenRecent={openRecent}
+          onTmuxSessions={hasTmux ? () => setPickingSession(true) : null}
+          onRemoteHosts={() => setPickingRemote(true)}
+          orphanActions={hasTmux ? orphanActions : null}
+          paneMenu={paneMenu}
+          sidebarOpen={workspace.sidebarOpen}
+          onToggleSidebar={() => dispatch({ type: "ui/sidebar" })}
+          onOpenSettings={() => void openSettingsWindow()}
+          onReorder={(tabId, toIndex) => dispatch({ type: "tab/reorder", tabId, toIndex })}
+          onDragOverWorkspace={setTabDrag}
+          onDropInWorkspace={dropTabInWorkspace}
+        />
+
+        <div className="flex min-h-0 flex-1">
+          {/* Hidden while closed, not unmounted. Opening the sidebar narrows every
+              pane, and every terminal then refits and rewraps its scrollback — work
+              that holds the page up until it is done. A tree mounted at that moment
+              has nothing in hand, so it said "reading…" for as long as the
+              terminals took. One that never went away opens showing what it had,
+              and catches up behind that. */}
+          <div
+            className={cn("shrink-0 border-r border-border", !workspace.sidebarOpen && "hidden")}
+            style={{ width: settings.sidebarWidth }}
+          >
+            <Sidebar
+              root={sidebarRoot}
+              visible={workspace.sidebarOpen}
+              tab={workspace.sidebarTab ?? "files"}
+              onTab={(tab) => dispatch({ type: "ui/sidebarTab", tab })}
+              onOpen={openPath}
+              theme={windowTheme}
             />
-          ) : null}
-        </div>
-      </div>
+          </div>
 
-      <ResizeHandles />
-      <WindowFrame />
-    </div>
+          <div className="relative min-h-0 flex-1">
+            {/* Under the panes, and drawn whether or not they have loaded yet:
+                this is the one thing on screen that has nothing to wait for. */}
+            <AmbientBackdrop theme={resolveTheme(windowTheme)} />
+            {loaded ? (
+              <PaneWorkspace
+                key={workspaceGeneration}
+                tabs={tabs}
+                activeTabId={workspace.activeTabId}
+                popups={workspace.popups}
+                focusedPopupId={workspace.focusedPopupId}
+                dispatch={dispatch}
+                onClosePane={(paneId) => void closePane(paneId)}
+                paneMenu={paneMenu}
+                tabDrag={tabDrag}
+                onTabDropTarget={noteTabDropTarget}
+              />
+            ) : null}
+          </div>
+        </div>
+
+        <ResizeHandles />
+        <WindowFrame />
+      </div>
+    </ControlSessionsProvider>
   );
 }
 
