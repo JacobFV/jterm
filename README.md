@@ -638,8 +638,13 @@ git commit -am "v0.3.0" && git tag -a v0.3.0 -m v0.3.0 && git push --follow-tags
 ```
 
 That builds macOS (Apple silicon and Intel), Windows, and Linux on both x86_64
-and arm64, and attaches the installers to the release. Builds are **not code-signed** — macOS wants
-right-click → Open, and Windows SmartScreen wants More info → Run anyway.
+and arm64, and attaches the installers to the release. Builds are **not notarized** — the macOS app is
+ad-hoc signed (`bundle.macOS.signingIdentity: "-"`), so on first launch it wants System Settings →
+Privacy & Security → Open Anyway, and Windows SmartScreen wants More info → Run anyway.
+
+The ad-hoc signature is not optional. Without it the bundle carries only the linker's signature
+over the bare binary, with no sealed resources, and macOS calls a quarantined download of that
+"damaged" and offers only Move to Trash — no Open Anyway, no right-click escape.
 
 Two things that fail quietly if they are wrong, both learned the hard way:
 
