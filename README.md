@@ -467,9 +467,24 @@ sees — and its tmux sessions are listed by what is running in them. Open one, 
 the same as a local session in control mode. A remote tab's title starts with
 the host, so `gb10 · claude` is not mistaken for the `claude` beside it.
 
-When the other machine runs jterm on tmux, each of its panes is a `jterm-…`
-session, so this list *is* that machine's panes. Both apps can show one at once;
-typing in either reaches the same shell.
+When the other machine runs jterm on tmux, the panel's first entry is **Open
+gb10's jterm tabs**: that machine's window as it is — the same tabs in the same
+order, the same splits at the same ratios, the same titles. jterm reads the
+other jterm's saved session over ssh and puts each of its panes on its tmux
+session, so typing here reaches the same shell as typing there. It follows the
+other machine every fifteen seconds: a tab opened, split or renamed there shows
+up here, and one closed there goes. A pane that is not a tmux session over there
+— a notepad, a browser, a plain shell — has nothing here to draw, and its split
+closes around it. The mirrored window comes back on the next launch the way
+control tabs do, read again from the other machine rather than from a copy.
+
+**Closing a mirrored tab or pane never ends anything.** It stops showing it
+here, and is not put back by the next refresh until the window is opened from
+the panel again. The shells belong to the other machine's tabs, and someone may
+be using them.
+
+Each session can also be opened on its own from the list below that button,
+one tab per tmux window.
 
 It is control mode over `ssh -tt host tmux -CC …`, so nothing is needed on this
 machine except ssh — not tmux — and nothing on the other except tmux. Such a
