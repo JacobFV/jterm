@@ -28,11 +28,13 @@ import { RemoteHosts } from "@/components/shell/RemoteHosts";
 import {
   ControlSessionsProvider,
   controlKeyOf,
-  controlKeyOfTab,
+  controlKeysOfTab,
   type ControlSessionsValue,
   type LostSession,
 } from "@/components/shell/ControlSessions";
 import { retryDelayMs, splitKey } from "@/lib/remote";
+import { mirrorTabs, peerTabPrefix } from "@/lib/peer";
+import { isPeerTabId } from "@/lib/tmuxControl";
 import { WindowFrame } from "@/components/shell/WindowFrame";
 import {
   Workspace as PaneWorkspace,
@@ -351,7 +353,12 @@ export function App() {
       // Other windows can hand panes over as soon as this one is listening,
       // and a window opened *in order* to receive one is waiting on this.
       void announceReady();
-      if (snapshot) reattachRef.current(snapshot.controlSessions);
+      if (snapshot) {
+        reattachRef.current(snapshot.controlSessions);
+        // Mirrored windows come back from their peers, as control tabs come
+        // back from tmux — see `lib/peer.ts`.
+        for (const host of snapshot.peers) void mirrorPeerRef.current(host);
+      }
 
       // Pruning and reopening are the main window's alone. Every window would
       // otherwise prune against its own panes and delete the scrollback of
@@ -607,7 +614,7 @@ export function App() {
 
     void listen<string>(TMUX_LOST_EVENT, (key) => {
       const shown =
-        workspaceRef.current.tabs.some((tab) => controlKeyOfTab(tab) === key) ||
+        workspaceRef.current.tabs.some((tab) => controlKeysOfTab(tab).includes(key)) ||
         workspaceRef.current.popups.some((popup) => controlKeyOf(popup.pane) === key);
       if (shown) {
         scheduleRetry(key);
@@ -643,7 +650,7 @@ export function App() {
   useEffect(() => {
     for (const key of lost.keys()) {
       const shown =
-        workspace.tabs.some((tab) => controlKeyOfTab(tab) === key) ||
+        workspace.tabs.some((tab) => controlKeysOfTab(tab).includes(key)) ||
         workspace.popups.some((popup) => controlKeyOf(popup.pane) === key);
       if (!shown) {
         void tmuxControl.detach(key);
@@ -657,6 +664,8 @@ export function App() {
       lost,
       reconnect: (key) => attemptRef.current(key),
       detach: (key) => {
+        // Not put back by the next read of a peer's layout — see `mirrorPeer`.
+        skippedRef.current.add(key);
         void tmuxControl.detach(key);
         if (lostRef.current.has(key)) {
           // No client to answer with `%exit`, so the tabs are closed here.
@@ -667,6 +676,135 @@ export function App() {
     }),
     [lost, forgetLost],
   );
+  const controlSessionsRef = useRef(controlSessions);
+  controlSessionsRef.current = controlSessions;
+
+  /* ── Another jterm's window, mirrored ─────────────────────────────── */
+
+  /**
+   * Sessions tmux has described to this window, which is when their panes can
+   * be drawn: before that a pane has no route, comes up blank and swallows
+   * whatever is typed into it.
+   */
+  const describedRef = useRef(new Set<string>());
+  useEffect(() => {
+    const stops: (() => void)[] = [];
+    let disposed = false;
+    const keep = (unlisten: () => void) => (disposed ? unlisten() : stops.push(unlisten));
+    void listen<TmuxSessionShape>(TMUX_WINDOWS_EVENT, (shape) => {
+      describedRef.current.add(shape.session);
+    }).then(keep);
+    void listen<string>(TMUX_CLOSED_EVENT, (key) => {
+      describedRef.current.delete(key);
+    }).then(keep);
+    return () => {
+      disposed = true;
+      for (const stop of stops) stop();
+    };
+  }, []);
+
+  /** Sessions detached from by hand, which a refresh must not bring back. */
+  const skippedRef = useRef(new Set<string>());
+  const mirroringRef = useRef(new Set<string>());
+
+  /**
+   * Open — or bring up to date — another jterm's window as tabs here.
+   *
+   * Reads the peer's layout over ssh (`lib/peer.ts`), attaches every session it
+   * draws from, waits for tmux to describe them, and only then puts the tabs
+   * up. A session that does not arrive in time is left out of this read and
+   * picked up by the next. Resolves to a reason when there is nothing to show.
+   */
+  const mirrorPeer = useCallback(async (host: string): Promise<string | null> => {
+    if (mirroringRef.current.has(host)) return null;
+    mirroringRef.current.add(host);
+    try {
+      const layout = await sshApi.jtermLayout(host);
+      if (!layout.snapshot) return `${host} has no saved jterm window to open.`;
+      const first = mirrorTabs(host, layout, skippedRef.current);
+      if (first.tabs.length === 0) {
+        return `None of ${host}'s tabs hold panes that can be shown here.`;
+      }
+
+      const ready = (key: string) =>
+        describedRef.current.has(key) || lostRef.current.has(key);
+      const pending = first.sessions.filter((key) => !ready(key));
+      if (pending.length > 0) {
+        await new Promise<void>((resolve) => {
+          let stop: (() => void) | null = null;
+          let settled = false;
+          const done = () => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            stop?.();
+            resolve();
+          };
+          const timer = window.setTimeout(done, 20_000);
+          void listen<TmuxSessionShape>(TMUX_WINDOWS_EVENT, () => {
+            if (pending.every(ready)) done();
+          }).then((unlisten) => {
+            stop = unlisten;
+            if (settled) unlisten();
+            for (const key of pending) void tmuxControl.attach(key, 80, 24);
+          });
+        });
+      }
+
+      const notReady = first.sessions.filter((key) => !ready(key));
+      const mirror =
+        notReady.length === 0
+          ? first
+          : mirrorTabs(host, layout, new Set([...skippedRef.current, ...notReady]));
+      dispatch({
+        type: "peer/mirror",
+        prefix: peerTabPrefix(host),
+        tabs: mirror.tabs,
+        activeTabId: mirror.activeTabId,
+      });
+      return null;
+    } catch (error) {
+      return String(error);
+    } finally {
+      mirroringRef.current.delete(host);
+    }
+  }, []);
+
+  /** Open a peer's window from the panel: everything, including tabs that
+   *  were detached from before — asking again is asking for all of it. */
+  const openPeer = useCallback(
+    (host: string) => {
+      for (const key of [...skippedRef.current]) {
+        if (splitKey(key).host === host) skippedRef.current.delete(key);
+      }
+      return mirrorPeer(host);
+    },
+    [mirrorPeer],
+  );
+
+  /**
+   * Keep mirrored windows following their peers. A tab opened, split or
+   * renamed over there shows up here within this long; one closed there goes
+   * at once, because its session ends.
+   */
+  const PEER_REFRESH_MS = 15_000;
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const hosts = new Set<string>();
+      for (const tab of workspaceRef.current.tabs) {
+        if (!isPeerTabId(tab.id)) continue;
+        for (const key of controlKeysOfTab(tab)) {
+          const { host } = splitKey(key);
+          if (host !== null) hosts.add(host);
+        }
+      }
+      for (const host of hosts) void mirrorPeer(host);
+    }, PEER_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [mirrorPeer]);
+
+  const mirrorPeerRef = useRef(mirrorPeer);
+  mirrorPeerRef.current = mirrorPeer;
 
   /**
    * Reattach to whatever was attached when the app last closed.
@@ -867,6 +1005,13 @@ export function App() {
   const closeTab = useCallback(
     async (tabId: string) => {
       const tab = workspaceRef.current.tabs.find((candidate) => candidate.id === tabId);
+      // Closing a tab mirrored from another jterm stops showing it here. It
+      // never ends the shells: those are that machine's tabs, and someone may
+      // well be sitting in front of them.
+      if (tab && isPeerTabId(tab.id)) {
+        for (const key of controlKeysOfTab(tab)) controlSessionsRef.current.detach(key);
+        return;
+      }
       if (tab && !(await confirmDiscard(Object.values(tab.panes)))) return;
       // Remembered on the way out: this is the only moment the pane's own
       // record of what it was running still exists.
@@ -891,6 +1036,14 @@ export function App() {
     async (paneId: string) => {
       const found = locatePane(workspaceRef.current, paneId);
       if (found === null) return;
+      // The same rule for one pane of a mirrored tab.
+      if (found.tabId !== null && isPeerTabId(found.tabId)) {
+        const key = controlKeyOf(found.pane);
+        if (key !== null) {
+          controlSessionsRef.current.detach(key);
+          return;
+        }
+      }
       if (!(await confirmDiscard([found.pane]))) return;
       rememberPane(found.pane);
       await disposePane(found.pane);
@@ -1416,6 +1569,7 @@ export function App() {
             // about to say which windows the session has.
             onAttach={(key) => void tmuxControl.attach(key, 80, 24)}
             onDetach={(key) => void tmuxControl.detach(key)}
+            onOpenPeer={openPeer}
             onShell={(target) => {
               setPickingRemote(false);
               // An ordinary terminal running ssh — where a password prompt can be

@@ -21,7 +21,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { LogOut, Plus, Server, SquareSplitHorizontal, SquareTerminal } from "lucide-react";
+import { AppWindow, LogOut, Plus, Server, SquareSplitHorizontal, SquareTerminal } from "lucide-react";
 
 import {
   listen,
@@ -60,8 +60,12 @@ export function RemoteHosts({
   onAttach,
   onDetach,
   onShell,
+  onOpenPeer,
   onClose,
 }: {
+  /** Open the host's jterm window as tabs here, laid out as they are there.
+   *  Resolves to a reason when there is nothing to open. See `lib/peer.ts`. */
+  onOpenPeer: (host: string) => Promise<string | null>;
   /** Open a control session by its key, `host:name`. */
   onAttach: (key: string) => void;
   onDetach: (key: string) => void;
@@ -77,6 +81,7 @@ export function RemoteHosts({
   const [opening, setOpening] = useState<string[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
   const [fresh, setFresh] = useState("");
+  const [openingPeer, setOpeningPeer] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const now = Date.now() / 1000;
 
@@ -186,6 +191,18 @@ export function RemoteHosts({
     for (const key of keys) onAttach(key);
   };
 
+  const openPeer = () => {
+    if (host === null || openingPeer) return;
+    rememberHost(host);
+    setFailure(null);
+    setOpeningPeer(true);
+    void onOpenPeer(host).then((problem) => {
+      setOpeningPeer(false);
+      if (problem === null) onClose();
+      else setFailure(problem);
+    });
+  };
+
   const sessions =
     listing.state === "ready" ? sortSessions(listing.listing.sessions) : [];
   const closed = sessions.filter((session) => !attached.includes(remoteKey(host!, session.name)));
@@ -272,6 +289,27 @@ export function RemoteHosts({
                 <Problem message={failure} onShell={() => onShell(host)} />
               ) : null}
               {opening.length > 0 && failure === null ? <Note>Connecting…</Note> : null}
+
+              {/* The first thing offered when the host runs jterm: its window
+                  as it is, rather than its panes one tab at a time. */}
+              {listing.state === "ready" && listing.listing.sessions.some(isPeerPane) ? (
+                <button
+                  type="button"
+                  onClick={openPeer}
+                  disabled={openingPeer}
+                  className="mx-3 mb-1 mt-1 flex w-[calc(100%-1.5rem)] items-center gap-2 border border-border px-2.5 py-2 text-left hover:bg-surface-3 disabled:opacity-60"
+                >
+                  <AppWindow className="h-4 w-4 shrink-0 text-ink-3" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[length:var(--fs-11)] text-ink-1">
+                      {openingPeer ? "Opening…" : `Open ${nameOf(host) ?? host}'s jterm tabs`}
+                    </span>
+                    <span className="block text-[length:var(--fs-10)] text-ink-4">
+                      The same tabs, splits and titles, and they follow changes made there
+                    </span>
+                  </span>
+                </button>
+              ) : null}
 
               {listing.state === "loading" || listing.state === "idle" ? (
                 <Note>Connecting to {host}…</Note>

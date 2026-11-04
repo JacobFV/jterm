@@ -49,13 +49,17 @@ export function controlKeyOf(pane: PaneState | undefined): string | null {
   return pane.tmux;
 }
 
-/** The control session a tab's windows come from, or null. */
-export function controlKeyOfTab(tab: Tab): string | null {
+/**
+ * Every control session a tab draws from. One for a tab control mode made from
+ * a tmux window; one per pane for a tab mirrored from another jterm.
+ */
+export function controlKeysOfTab(tab: Tab): string[] {
+  const keys = new Set<string>();
   for (const pane of Object.values(tab.panes)) {
     const key = controlKeyOf(pane);
-    if (key !== null) return key;
+    if (key !== null) keys.add(key);
   }
-  return null;
+  return [...keys];
 }
 
 /** "gb10" for a remote session, "tmux" for a local one — what to detach from. */

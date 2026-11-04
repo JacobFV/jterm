@@ -55,7 +55,7 @@ import {
   themeOf,
 } from "@/state/workspace";
 import { Menu, MenuItem, MenuSubmenu, useMenu } from "./Menu";
-import { controlKeyOfTab, sessionPlace, useControlSessions } from "./ControlSessions";
+import { controlKeysOfTab, sessionPlace, useControlSessions } from "./ControlSessions";
 import { type OrphanActions, OrphanedSessions } from "./OrphanedSessions";
 import { PaneMenu, type PaneMenuActions, type PaneMenuHandle } from "./PaneMenu";
 import { RenameField } from "./RenameField";
@@ -380,8 +380,9 @@ function TabItem({
   useSystemScheme();
   const look = themeStyle(themeOf(settings.theme, tab), settings.ambientPresence);
   const controlSessions = useControlSessions();
-  const sessionKey = controlKeyOfTab(tab);
-  const disconnected = sessionKey !== null && controlSessions.lost.has(sessionKey);
+  const sessionKeys = controlKeysOfTab(tab);
+  const sessionKey = sessionKeys[0] ?? null;
+  const disconnected = sessionKeys.some((key) => controlSessions.lost.has(key));
 
   return (
     // The whole rectangle selects, not just the text in it. A tab is one
@@ -498,7 +499,7 @@ function TabItem({
           )}
           onClick={(event) => {
             event.stopPropagation();
-            controlSessions.detach(sessionKey);
+            for (const key of sessionKeys) controlSessions.detach(key);
           }}
         >
           <Unplug className="h-3 w-3" />
