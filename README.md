@@ -480,9 +480,18 @@ prompt: a host that needs one, or that has no tmux, says so in the panel and
 offers **Open an ssh terminal instead**, an ordinary terminal running `ssh host`.
 
 Closing a remote pane kills it on that machine, as closing any control-mode pane
-does. To stop looking without ending anything, detach from the panel. A
-connection that drops takes its tabs with it; the sessions are still running on
-the other machine and are one click away in the panel.
+does. To stop looking without ending anything, use the **detach** button beside
+the close button — on the tab, or on the pane's header in a split. It closes that
+session's tabs here and leaves everything running there.
+
+**A dropped connection does not close anything.** The tabs stay where they
+were, marked disconnected, with each pane covered and its last screen still
+visible underneath. jterm reconnects by itself — after 2s, then 5s, 10s, 20s,
+and every 30s after that, and at once when the network comes back — and the
+panes repaint from tmux when it does. A pane cannot be typed into while it is
+covered. **Reconnect now** tries immediately; **Close these tabs** gives up.
+Only a host that answers and no longer has the session counts as the session
+having ended, and then its tabs go.
 
 Running `tmux` yourself inside an ordinary pane is noticed too — jterm pauses
 its scrollback recording while a tmux client is under the pane's shell, and
