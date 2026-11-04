@@ -228,6 +228,100 @@ pub fn last_words(stderr: &str) -> Option<String> {
         .map(String::from)
 }
 
+/* ── Another jterm's layout ──────────────────────────────────────────────── */
+
+/// Separates the two halves of `layout_command`'s output. Neither tmux's pane
+/// list nor a JSON file can contain a line that is exactly this.
+const LAYOUT_SPLIT: &str = "__jterm_layout__";
+
+/// Largest snapshot accepted from a peer. A real one is a few kilobytes; one
+/// far past this is not a jterm snapshot, or not one worth parsing in a webview.
+const LAYOUT_MAX: usize = 4 * 1024 * 1024;
+
+/// One tmux pane on the peer: which session it is in, and its `%N`.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct PeerPane {
+    pub session: String,
+    pub pane: String,
+}
+
+#[derive(Serialize)]
+pub struct PeerLayout {
+    /// The peer jterm's main-window snapshot, as written — `None` when the
+    /// host has no jterm, or has never saved one. Decoded by the frontend with
+    /// the same suspicion as a snapshot read off this machine's own disk.
+    pub snapshot: Option<String>,
+    /// Every tmux pane on the host. A jterm pane's session is only drawn in
+    /// the peer's layout when it has exactly one pane, and the `%N` is what
+    /// the local pane's id is derived from.
+    pub panes: Vec<PeerPane>,
+}
+
+/// The pane list, then the main window's snapshot from wherever jterm keeps
+/// its data on that platform — `dirs_next::data_dir()` plus `jterm`, as in
+/// `crate::data_dir`.
+fn layout_command() -> String {
+    wrap(&format!(
+        "tmux list-panes -a -F \"#{{session_name}}\t#{{pane_id}}\" 2>/dev/null; \
+         echo {LAYOUT_SPLIT}; \
+         for f in \"${{XDG_DATA_HOME:-$HOME/.local/share}}/jterm/session.json\" \
+                  \"$HOME/Library/Application Support/jterm/session.json\"; do \
+           if [ -f \"$f\" ]; then cat \"$f\"; break; fi; \
+         done; exit 0"
+    ))
+}
+
+fn parse_layout_output(stdout: &str) -> PeerLayout {
+    let (head, tail) = stdout
+        .split_once(&format!("{LAYOUT_SPLIT}\n"))
+        .unwrap_or((stdout, ""));
+    let panes = head
+        .lines()
+        .filter_map(|line| {
+            let (session, pane) = line.split_once('\t')?;
+            (!session.is_empty() && pane.starts_with('%')).then(|| PeerPane {
+                session: session.to_string(),
+                pane: pane.trim().to_string(),
+            })
+        })
+        .collect();
+    let snapshot = tail.trim();
+    PeerLayout {
+        snapshot: (!snapshot.is_empty() && snapshot.len() <= LAYOUT_MAX)
+            .then(|| snapshot.to_string()),
+        panes,
+    }
+}
+
+/// Another jterm's tabs as it last saved them, and the tmux panes behind them.
+///
+/// This is what lets a peer's window be opened *as that window* — the same
+/// tabs, the same splits, the same titles — rather than as one tab per session.
+#[tauri::command]
+pub async fn ssh_jterm_layout(host: String) -> Result<PeerLayout, String> {
+    if !valid_host(&host) {
+        return Err(format!("“{host}” is not a host name ssh can be given"));
+    }
+    let ssh = program().ok_or("ssh is not installed")?.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = Command::new(ssh)
+            .args(OPTIONS)
+            .args(["-T", "--", &host])
+            .arg(layout_command())
+            .output()
+            .map_err(|err| format!("could not run ssh: {err}"))?;
+        if !output.status.success() {
+            return Err(last_words(&String::from_utf8_lossy(&output.stderr))
+                .unwrap_or_else(|| format!("ssh to {host} failed")));
+        }
+        Ok(parse_layout_output(&String::from_utf8_lossy(
+            &output.stdout,
+        )))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
 /// A machine the panel can offer, by the name the user knows it by.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct SshHost {
@@ -451,6 +545,38 @@ Host !bad dev-*
 Host gb10
 ";
         assert_eq!(config_hosts(config), vec!["gb10", "pi", "pi2", "box"]);
+    }
+
+    #[test]
+    fn the_layout_command_survives_the_outer_quoting() {
+        let command = layout_command();
+        assert_eq!(command.matches('\'').count(), 2);
+        assert!(command.contains("session.json"));
+    }
+
+    #[test]
+    fn a_layout_reply_splits_into_panes_and_a_snapshot() {
+        let reply = "jterm-ab12\t%3\nwork\t%7\nbad line\n__jterm_layout__\n{\"version\":1}\n";
+        let layout = parse_layout_output(reply);
+        assert_eq!(
+            layout.panes,
+            vec![
+                PeerPane {
+                    session: "jterm-ab12".into(),
+                    pane: "%3".into()
+                },
+                PeerPane {
+                    session: "work".into(),
+                    pane: "%7".into()
+                },
+            ]
+        );
+        assert_eq!(layout.snapshot.as_deref(), Some("{\"version\":1}"));
+
+        // No jterm over there: panes, and no snapshot.
+        let bare = parse_layout_output("work\t%1\n__jterm_layout__\n");
+        assert!(bare.snapshot.is_none());
+        assert_eq!(bare.panes.len(), 1);
     }
 
     #[test]

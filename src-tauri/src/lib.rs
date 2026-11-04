@@ -176,6 +176,7 @@ pub fn run() {
             control::tmux_control_capture,
             ssh::ssh_tmux_sessions,
             ssh::ssh_hosts,
+            ssh::ssh_jterm_layout,
             store::session_save,
             store::session_load,
             store::session_load_window,
