@@ -457,6 +457,33 @@ tab is a window of the app, and `Mod+T` opening a tmux window would make the tab
 strip disagree with itself. And a control-mode tab cannot be folded into another
 tab as a split, because its layout is not jterm's to rearrange.
 
+### Another machine
+
+**+ → Remote host…** does the same for a machine you can ssh to. Pick a host —
+the panel offers the ones in `~/.ssh/config`, and the ones you reach through an
+`alias gb10="ssh me@10.0.0.7"` in your shell's rc file, which ssh itself never
+sees — and its tmux sessions are listed by what is running in them. Open one, or
+**Open all**, and its windows become tabs here and its panes become jterm panes,
+the same as a local session in control mode. A remote tab's title starts with
+the host, so `gb10 · claude` is not mistaken for the `claude` beside it.
+
+When the other machine runs jterm on tmux, each of its panes is a `jterm-…`
+session, so this list *is* that machine's panes. Both apps can show one at once;
+typing in either reaches the same shell.
+
+It is control mode over `ssh -tt host tmux -CC …`, so nothing is needed on this
+machine except ssh — not tmux — and nothing on the other except tmux. Such a
+session is known as `host:name` everywhere a local one is known as `name`, which
+is how it is reattached on the next launch like any other. ssh runs with
+`BatchMode`, so it never stops to ask for a password where you cannot see the
+prompt: a host that needs one, or that has no tmux, says so in the panel and
+offers **Open an ssh terminal instead**, an ordinary terminal running `ssh host`.
+
+Closing a remote pane kills it on that machine, as closing any control-mode pane
+does. To stop looking without ending anything, detach from the panel. A
+connection that drops takes its tabs with it; the sessions are still running on
+the other machine and are one click away in the panel.
+
 Running `tmux` yourself inside an ordinary pane is noticed too — jterm pauses
 its scrollback recording while a tmux client is under the pane's shell, and
 resumes when you leave, since otherwise the log fills with a full-screen
