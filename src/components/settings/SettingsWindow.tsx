@@ -22,7 +22,7 @@ import { dialog } from "@/lib/ipc";
 import { displayKeys, keysFor, type ActionId } from "@/lib/keymap";
 import { TOOLS as MCP_TOOLS } from "@/lib/mcp";
 import { isMacOS, MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
-import { closeSettingsWindow } from "@/lib/settingsWindow";
+import { closeSettingsWindow, focusMainWindow } from "@/lib/settingsWindow";
 import { useIsFullscreen } from "@/lib/useFullscreen";
 import { tmuxAvailable } from "@/lib/tmux";
 import { cn } from "@/lib/utils";
@@ -135,6 +135,14 @@ export function SettingsWindow() {
   const setKeys = useCallback((keys: Partial<Record<ActionId, string>>) => {
     updateSettings({ keys });
   }, []);
+
+  const runSetupAgain = async () => {
+    // Clearing the version is the whole of it: the main window reads the
+    // setting and opens the dialog itself. This window stays open, because
+    // closing it now would race the debounced write that carries the change.
+    updateSettings({ setupSeen: 0 });
+    await focusMainWindow();
+  };
 
   const resetAll = async () => {
     const sure = await dialog.confirm(
@@ -521,6 +529,12 @@ export function SettingsWindow() {
         </Section>
 
         <Section title="Start over">
+          <Row
+            label="Welcome and setup"
+            hint="The first-launch walk through tmux, the theme, the agent and updates. It opens in the main window."
+          >
+            <Button onClick={() => void runSetupAgain()}>Run setup again</Button>
+          </Row>
           <Row
             label="Reset everything"
             hint="Every setting on this page back to the default. Your tabs and terminals are untouched."

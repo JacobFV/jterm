@@ -396,8 +396,13 @@ export function updateSettings(patch: Partial<Settings>): void {
   schedulePersist();
 }
 
+/**
+ * Every preference back to how jterm ships — except having seen the welcome.
+ * Resetting a theme is not asking to be introduced to the app again, and the
+ * dialog is one button away in Settings for anyone who does want that.
+ */
 export function resetSettings(): void {
-  updateSettings(DEFAULTS);
+  updateSettings({ ...DEFAULTS, setupSeen: current.setupSeen });
 }
 
 /**

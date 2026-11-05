@@ -74,3 +74,13 @@ export async function closeSettingsWindow(): Promise<void> {
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
   await getCurrentWindow().close();
 }
+
+/** Bring the main window forward, from the settings window. */
+export async function focusMainWindow(): Promise<void> {
+  if (!isTauri()) {
+    window.opener?.focus();
+    return;
+  }
+  const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+  await (await WebviewWindow.getByLabel("main"))?.setFocus();
+}
