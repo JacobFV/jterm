@@ -35,6 +35,7 @@ pub mod ssh;
 pub mod store;
 pub mod tmux;
 pub mod updater;
+pub mod vnc;
 #[cfg(windows)]
 mod win32_snap;
 pub mod window_chrome;
@@ -231,6 +232,7 @@ pub fn run() {
         .manage(control)
         .manage(maximize_bounds)
         .manage(mcp_server)
+        .manage(Arc::new(vnc::VncRegistry::default()))
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn_agent,
             mcp::mcp_respond,
@@ -295,6 +297,9 @@ pub fn run() {
             programs::setup_probe,
             permissions::app_management_status,
             permissions::open_app_management,
+            vnc::vnc_connect,
+            vnc::vnc_send,
+            vnc::vnc_close,
             updater::update_state,
             updater::update_check,
             updater::update_install,
