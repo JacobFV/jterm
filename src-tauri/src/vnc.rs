@@ -85,7 +85,9 @@ fn connect(host: &str, port: u16) -> Result<TcpStream, String> {
 
 /// Open the socket and start streaming what arrives to `on_data`.
 ///
-/// Resolves once connected, or with the reason it could not be. The end of the
+/// Resolves once connected — with the connection's generation, which a later
+/// `vnc_close` names so it cannot close a newer connection by mistake — or
+/// with the reason it could not be. The end of the
 /// connection, whenever it comes, is one JSON message, `{"closed": reason}`,
 /// after which the channel says nothing more.
 #[tauri::command]
@@ -95,7 +97,7 @@ pub async fn vnc_connect(
     host: String,
     port: u16,
     on_data: Channel<InvokeResponseBody>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     if !valid_host(&host) || port == 0 {
         return Err("That is not an address jterm can connect to.".into());
     }
@@ -147,7 +149,7 @@ pub async fn vnc_connect(
         let message = serde_json::json!({ "closed": reason }).to_string();
         let _ = on_data.send(InvokeResponseBody::Json(message));
     });
-    Ok(())
+    Ok(generation)
 }
 
 /// Write the request body to a pane's socket. The pane is named in a header,
@@ -175,10 +177,22 @@ pub fn vnc_send(registry: State<'_, Arc<VncRegistry>>, request: Request<'_>) -> 
     stream.write_all(bytes).map_err(|error| error.to_string())
 }
 
+/// Close a pane's connection — only the one `generation` names, when given.
+///
+/// A reconnect is a close of the old connection and an open of the new one
+/// under the same pane id, and nothing orders the two requests: a close that
+/// lands after the new connect would otherwise end the connection it was
+/// never about.
 #[tauri::command]
-pub fn vnc_close(registry: State<'_, Arc<VncRegistry>>, id: String) {
-    if let Some((_, stream)) = registry.sockets.lock().remove(&id) {
-        let _ = stream.shutdown(Shutdown::Both);
+pub fn vnc_close(registry: State<'_, Arc<VncRegistry>>, id: String, generation: Option<u64>) {
+    let mut sockets = registry.sockets.lock();
+    let ours = sockets
+        .get(&id)
+        .is_some_and(|(owner, _)| generation.is_none_or(|wanted| wanted == *owner));
+    if ours {
+        if let Some((_, stream)) = sockets.remove(&id) {
+            let _ = stream.shutdown(Shutdown::Both);
+        }
     }
 }
 

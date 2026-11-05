@@ -113,8 +113,9 @@ fn json(value: serde_json::Value) -> InvokeResponseBody {
     InvokeResponseBody::Json(value.to_string())
 }
 
-/// Start a session. Returns at once; everything after — connected, the
-/// screen, the certificate to confirm, the end — arrives on `on_event`.
+/// Start a session. Returns at once with the session's generation, for
+/// `rdp_close` to name; everything after — connected, the screen, the
+/// certificate to confirm, the end — arrives on `on_event`.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn rdp_connect(
@@ -129,7 +130,7 @@ pub fn rdp_connect(
     width: u16,
     height: u16,
     on_event: Channel<InvokeResponseBody>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     if !crate::vnc::valid_host(&host) || port == 0 {
         return Err("That is not an address jterm can connect to.".into());
     }
@@ -171,7 +172,7 @@ pub fn rdp_connect(
         }
         let _ = on_event.send(json(serde_json::json!({ "closed": reason })));
     });
-    Ok(())
+    Ok(generation)
 }
 
 #[tauri::command]
@@ -183,10 +184,18 @@ pub fn rdp_input(registry: State<'_, Arc<RdpRegistry>>, id: String, events: Vec<
     }
 }
 
+/// End a pane's session — only the one `generation` names, when given. See
+/// `vnc_close` for the race this closes.
 #[tauri::command]
-pub fn rdp_close(registry: State<'_, Arc<RdpRegistry>>, id: String) {
-    if let Some((_, sender)) = registry.sessions.lock().remove(&id) {
-        let _ = sender.send(Input::Disconnect);
+pub fn rdp_close(registry: State<'_, Arc<RdpRegistry>>, id: String, generation: Option<u64>) {
+    let mut sessions = registry.sessions.lock();
+    let ours = sessions
+        .get(&id)
+        .is_some_and(|(owner, _)| generation.is_none_or(|wanted| wanted == *owner));
+    if ours {
+        if let Some((_, sender)) = sessions.remove(&id) {
+            let _ = sender.send(Input::Disconnect);
+        }
     }
 }
 

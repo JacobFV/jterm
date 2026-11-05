@@ -7,6 +7,7 @@
  */
 
 import { isTauri } from "./tauri";
+import type { RdpEvent, RdpInput } from "./rdp";
 import type { Service as SharingService, SharingStatus } from "./sharing";
 import type { IncomingMessage, Transport } from "./vncSocket";
 
@@ -178,20 +179,62 @@ export const setup = {
  * `call` does not do: a `Channel` for bytes down, and a raw body for bytes up.
  */
 export const vnc = {
-  transport: (id: string, host: string, port: number): Transport => ({
-    open: async (onMessage) => {
-      if (!isTauri()) throw new Error("Remote desktops need the jterm app, not a browser tab.");
-      const core = await import("@tauri-apps/api/core");
-      const channel = new core.Channel<IncomingMessage>(onMessage);
-      await core.invoke("vnc_connect", { id, host, port, onData: channel });
+  transport: (id: string, host: string, port: number): Transport => {
+    // Which connection this transport opened, so closing it cannot close a
+    // newer one for the same pane. See `vnc_close`.
+    let generation: number | null = null;
+    return {
+      open: async (onMessage) => {
+        if (!isTauri()) throw new Error("Remote desktops need the jterm app, not a browser tab.");
+        const core = await import("@tauri-apps/api/core");
+        const channel = new core.Channel<IncomingMessage>(onMessage);
+        generation = await core.invoke<number>("vnc_connect", { id, host, port, onData: channel });
+      },
+      send: async (bytes) => {
+        const core = await import("@tauri-apps/api/core");
+        await core.invoke("vnc_send", bytes, { headers: { "x-jterm-vnc": id } });
+      },
+      close: () => void call("vnc_close", { id, generation }, undefined),
+    };
+  },
+  /** Every connection the pane has, whatever its generation — for disposal. */
+  close: (id: string) => call("vnc_close", { id, generation: null }, undefined),
+};
+
+/**
+ * A Remote Desktop session — see `rdp.rs`. The screen arrives on the channel
+ * as binary rectangles (`decodeRect`), and everything else as `RdpEvent`s.
+ */
+export const rdp = {
+  connect: async (
+    id: string,
+    session: {
+      host: string;
+      port: number;
+      username: string;
+      password: string;
+      domain?: string;
+      trusted?: string;
+      width: number;
+      height: number;
     },
-    send: async (bytes) => {
-      const core = await import("@tauri-apps/api/core");
-      await core.invoke("vnc_send", bytes, { headers: { "x-jterm-vnc": id } });
-    },
-    close: () => void call("vnc_close", { id }, undefined),
-  }),
-  close: (id: string) => call("vnc_close", { id }, undefined),
+    onMessage: (message: ArrayBuffer | RdpEvent) => void,
+  ): Promise<number> => {
+    if (!isTauri()) throw new Error("Remote desktops need the jterm app, not a browser tab.");
+    const core = await import("@tauri-apps/api/core");
+    const channel = new core.Channel<ArrayBuffer | RdpEvent>(onMessage);
+    return core.invoke<number>("rdp_connect", {
+      id,
+      ...session,
+      domain: session.domain ?? null,
+      trusted: session.trusted ?? null,
+      onEvent: channel,
+    });
+  },
+  input: (id: string, events: RdpInput[]) => call("rdp_input", { id, events }, undefined),
+  /** End the session `generation` names, or any, for disposal. See `rdp_close`. */
+  close: (id: string, generation: number | null = null) =>
+    call("rdp_close", { id, generation }, undefined),
 };
 
 /** What this computer shares — see `sharing.rs` and `lib/sharing.ts`. */
