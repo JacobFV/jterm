@@ -23,6 +23,7 @@ import type { PaneMenuActions } from "@/components/shell/PaneMenu";
 import { ResizeHandles } from "@/components/shell/ResizeHandles";
 import { TabStrip } from "@/components/shell/TabStrip";
 import { HistorySearch } from "@/components/shell/HistorySearch";
+import { SetupDialog } from "@/components/shell/SetupDialog";
 import { TmuxSessions } from "@/components/shell/TmuxSessions";
 import { RemoteHosts } from "@/components/shell/RemoteHosts";
 import {
@@ -78,6 +79,7 @@ import { openSettingsWindow } from "@/lib/settingsWindow";
 import { isTauri } from "@/lib/tauri";
 import { startUpdateChecks } from "@/lib/updates";
 import { terminalHandle } from "@/lib/terminals";
+import { shouldOfferSetup } from "@/lib/setup";
 import { cn, newId } from "@/lib/utils";
 import { isTmuxAction, runControlAction, runTmuxAction, tmuxAvailable } from "@/lib/tmux";
 import type { TmuxSessionShape } from "@/lib/tmuxControl";
@@ -298,6 +300,24 @@ export function App() {
   }, []);
   useEffect(() => {
     void tmuxAvailable().then(setHasTmux);
+  }, []);
+
+  // The welcome dialog, read straight off the setting rather than kept as
+  // state: finishing it writes the version down and that alone closes it, and
+  // Settings' "Run setup again" clears it and that alone opens it here — from
+  // the other window, with nothing to wire between the two. Only in the main
+  // window, so a second workspace window does not greet anyone twice.
+  const settingUp = isMainWindow() && shouldOfferSetup(settings.setupSeen);
+
+  /**
+   * A tab with `command` typed at its prompt and left there. The same mechanism
+   * as reopening a closed pane — the draft is put where the new pane will look
+   * for it, which is why the id is minted here.
+   */
+  const openTyped = useCallback((command: string) => {
+    const id = newId();
+    updateContent(id, { draft: command });
+    dispatch({ type: "tab/open", kind: "terminal", seed: { id } as Partial<PaneState> });
   }, []);
 
   const workspaceRef = useRef(workspace);
@@ -1526,6 +1546,16 @@ export function App() {
   return (
     <ControlSessionsProvider value={controlSessions}>
       <div className="flex h-full w-full flex-col overflow-hidden bg-surface-0">
+        {settingUp ? (
+          <SetupDialog
+            onClose={() => {
+              const tab = activeTab(workspaceRef.current);
+              if (tab) terminalHandle(tab.focusedPaneId)?.focus();
+            }}
+            onInstall={openTyped}
+            onTmuxFound={() => setHasTmux(true)}
+          />
+        ) : null}
         {searchingHistory ? (
           <HistorySearch
             home={home}

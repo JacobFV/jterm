@@ -18,6 +18,8 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
+
 /// Where package managers install things, in the order they are worth trying.
 ///
 /// Homebrew on Apple silicon, then Homebrew on Intel (which is also where a
@@ -50,6 +52,32 @@ fn find_in(name: &str, path: impl Iterator<Item = PathBuf>) -> Option<PathBuf> {
 /// that says tmux is missing.
 fn is_program(candidate: &Path) -> bool {
     candidate.is_file()
+}
+
+/// What the welcome dialog needs to know to offer tmux honestly.
+#[derive(Serialize)]
+pub struct SetupProbe {
+    /// Where tmux is, or `None` if it is not anywhere jterm can use it from —
+    /// including everywhere on Windows, where `tmux::program` always says so.
+    tmux: Option<String>,
+    /// Where Homebrew is, which is what decides whether the dialog can offer
+    /// to install tmux or can only say how. Only looked for on macOS: Homebrew
+    /// on Linux exists, but somebody running it there has a package manager
+    /// they would rather be told to use.
+    brew: Option<String>,
+}
+
+#[tauri::command]
+pub fn setup_probe() -> SetupProbe {
+    let brew = if cfg!(target_os = "macos") {
+        find("brew")
+    } else {
+        None
+    };
+    SetupProbe {
+        tmux: crate::tmux::program().map(|path| path.to_string_lossy().into_owned()),
+        brew: brew.map(|path| path.to_string_lossy().into_owned()),
+    }
 }
 
 #[cfg(test)]

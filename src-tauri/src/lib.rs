@@ -291,6 +291,7 @@ pub fn run() {
             history::history_import,
             history::history_path,
             window_chrome::set_maximize_button_rect,
+            programs::setup_probe,
             updater::update_state,
             updater::update_check,
             updater::update_install,

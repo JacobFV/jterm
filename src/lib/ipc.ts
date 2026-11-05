@@ -160,6 +160,16 @@ export const tmux = {
   killSession: (session: string) => call("tmux_kill_session", { session }, undefined),
 };
 
+/** Where the welcome dialog's programs are, if anywhere. See `setup_probe`. */
+export interface SetupProbe {
+  tmux: string | null;
+  brew: string | null;
+}
+
+export const setup = {
+  probe: (): Promise<SetupProbe> => call("setup_probe", {}, { tmux: null, brew: null }),
+};
+
 /**
  * Control mode: tmux describing itself so jterm can draw it.
  *

@@ -68,6 +68,16 @@ export function tmuxAvailable(): Promise<boolean> {
   return availability;
 }
 
+/**
+ * Forget the cached answer, for the one moment it can have changed: the
+ * welcome dialog has just watched somebody install tmux. The backend never
+ * caches a "no" (see `tmux::program`), so the next question gets a fresh one.
+ */
+export function recheckTmux(): Promise<boolean> {
+  availability = null;
+  return tmuxAvailable();
+}
+
 /* ── Which shortcuts tmux takes ──────────────────────────────────────────── */
 
 /**
