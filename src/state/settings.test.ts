@@ -101,6 +101,15 @@ describe("decodeSettings", () => {
     );
   });
 
+  it("remembers which welcome was seen, and reads anything odd as none", () => {
+    expect(decodeSettings(JSON.stringify({ setupSeen: 1 }))!.setupSeen).toBe(1);
+    // An older file, written before there was a welcome, has never seen it.
+    expect(decodeSettings(JSON.stringify({ theme: "dark" }))!.setupSeen).toBe(0);
+    for (const junk of [-1, 1.5, "1", true, null, 1e9]) {
+      expect(decodeSettings(JSON.stringify({ setupSeen: junk }))!.setupSeen).toBe(0);
+    }
+  });
+
   it("carries a deliberate unbinding through", () => {
     // An empty string is not junk here: it is how "this action has no shortcut"
     // is written down, and it has to survive a round trip through the file.

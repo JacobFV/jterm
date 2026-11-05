@@ -146,6 +146,16 @@ export interface Settings {
    * the button whatever this says.
    */
   autoUpdate: boolean;
+  /**
+   * The last version of the welcome dialog this person has been through, or
+   * skipped — see `lib/setup.ts`. Zero is "never", which is what a fresh install
+   * and a settings file from before the dialog existed both read as.
+   *
+   * A number rather than a flag so that a later release adding a step worth
+   * seeing can ask again by raising `SETUP_VERSION`, without asking everybody
+   * who already said no to the old steps a second time about those.
+   */
+  setupSeen: number;
 }
 
 /**
@@ -194,6 +204,7 @@ export const DEFAULTS: Settings = {
   agentCommand: "",
   agentArgs: "",
   autoUpdate: true,
+  setupSeen: 0,
 };
 
 const CURSORS: CursorStyle[] = ["bar", "block", "underline"];
@@ -250,6 +261,7 @@ export function decodeSettings(json: string | null | undefined): Settings | null
     agentCommand: text(parsed.agentCommand, DEFAULTS.agentCommand),
     agentArgs: text(parsed.agentArgs, DEFAULTS.agentArgs),
     autoUpdate: parsed.autoUpdate === undefined ? DEFAULTS.autoUpdate : parsed.autoUpdate === true,
+    setupSeen: count(parsed.setupSeen),
   };
 }
 
@@ -317,6 +329,14 @@ function pick<T extends string>(value: unknown, allowed: readonly T[], fallback:
 function clamp(value: unknown, range: { min: number; max: number }, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.min(range.max, Math.max(range.min, value));
+}
+
+/** A small whole number, or zero. Zero is the safe reading of junk here: the
+ *  worst it costs is one more look at the welcome dialog. */
+function count(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 1000
+    ? value
+    : 0;
 }
 
 function text(value: unknown, fallback: string): string {
