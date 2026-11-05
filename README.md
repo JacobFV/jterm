@@ -520,6 +520,28 @@ None of this exists on Windows, where tmux does not, or on any machine without
 it installed: the settings section and the menu entry are absent, and a settings
 file carried from a machine that had it quietly gets an ordinary shell.
 
+## Remote desktops
+
+**+ → Remote desktop (VNC)** opens another computer's screen in a pane. Give it
+a name or an address; VNC's own conventions work, so `studio.local:1` is display
+1 (port 5901) and `studio.local::5905` is port 5905, and `vnc://` links paste
+straight in. If the server wants a password the pane asks for it there, and it
+is sent and never kept: a restored pane reconnects to the same address and asks
+again.
+
+The toolbar fits the screen to the pane or shows it at its own size, switches to
+view-only (no keys or clicks reach the other machine), and sends
+<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Del</kbd>, which no operating system lets a
+window have. Text copied over there lands on this machine's clipboard, and this
+machine's clipboard goes across when the pane takes focus. jterm's own shortcuts
+still belong to jterm — <kbd>Cmd</kbd>+<kbd>W</kbd> closes the pane — and every
+other key goes to the remote computer.
+
+The protocol is noVNC's, running in the pane; jterm's backend carries the TCP
+connection. VNC is not encrypted unless the server encrypts it, so outside your
+own network, reach the machine over ssh or a VPN. To share a Mac, turn on
+Screen Sharing on it: System Settings → General → Sharing.
+
 ## The agent and jterm's MCP server
 
 jterm runs a [Model Context Protocol](https://modelcontextprotocol.io) server
