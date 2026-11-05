@@ -26,6 +26,7 @@ pub mod git;
 pub mod history;
 pub mod isolation;
 pub mod mcp;
+pub mod permissions;
 pub mod programs;
 pub mod pty;
 pub mod recover;
@@ -292,6 +293,8 @@ pub fn run() {
             history::history_path,
             window_chrome::set_maximize_button_rect,
             programs::setup_probe,
+            permissions::app_management_status,
+            permissions::open_app_management,
             updater::update_state,
             updater::update_check,
             updater::update_install,
