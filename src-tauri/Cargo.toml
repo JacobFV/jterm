@@ -40,6 +40,10 @@ dirs-next = "2"
 # randomness. Already in the tree through Tauri; named here so it is ours.
 getrandom = "0.2"
 tauri-plugin-updater = "2.11.0"
+# This machine's addresses, for the Sharing page's "how others reach you".
+# Every interface, not just the default route's, so a Tailscale or VPN address
+# is listed beside the LAN one. See src/sharing.rs.
+if-addrs = "0.15"
 
 # The webview's own crash signal, for `src/recover.rs`. Pinned to exactly what
 # wry depends on: `PlatformWebview::inner()` hands back a `webkit2gtk::WebView`

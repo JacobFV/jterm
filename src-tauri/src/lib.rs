@@ -31,6 +31,7 @@ pub mod programs;
 pub mod pty;
 pub mod recover;
 pub mod search;
+pub mod sharing;
 pub mod ssh;
 pub mod store;
 pub mod tmux;
@@ -300,6 +301,8 @@ pub fn run() {
             vnc::vnc_connect,
             vnc::vnc_send,
             vnc::vnc_close,
+            sharing::sharing_status,
+            sharing::open_sharing_settings,
             updater::update_state,
             updater::update_check,
             updater::update_install,
