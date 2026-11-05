@@ -542,6 +542,23 @@ connection. VNC is not encrypted unless the server encrypts it, so outside your
 own network, reach the machine over ssh or a VPN. To share a Mac, turn on
 Screen Sharing on it: System Settings → General → Sharing.
 
+**+ → Remote Desktop (RDP)** does the same for a Windows desktop, or anything
+else running an RDP server. Sign in with the address, a user name, an optional
+domain and a password; the password is held in memory while the pane is open,
+so Reconnect works, and never written down. The protocol runs in jterm's
+backend on [IronRDP](https://github.com/Devolutions/IronRDP), and the pane is a
+canvas of the rectangles that changed.
+
+RDP servers sign their own certificates, so there is no authority to check one
+against, and most clients check nothing. jterm checks the fingerprint instead:
+the first connection to a server stops *before* the password is sent and shows
+the certificate's SHA-256 fingerprint, and once you trust it the pane remembers
+it. If it ever changes, the connection stops there again, says so, and has
+still sent nothing. Keys go across by physical position, so the remote
+machine's own keyboard layout decides what they type; <kbd>Cmd</kbd> is the
+Windows key. The desktop is the pane's size when it connects — resizing the pane
+scales the picture, and a reconnect picks up the new size.
+
 ### Sharing this computer
 
 **Settings → Sharing** says what this computer makes available to other
