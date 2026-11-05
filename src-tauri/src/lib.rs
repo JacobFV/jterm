@@ -26,6 +26,7 @@ pub mod git;
 pub mod history;
 pub mod isolation;
 pub mod mcp;
+pub mod programs;
 pub mod pty;
 pub mod recover;
 pub mod search;

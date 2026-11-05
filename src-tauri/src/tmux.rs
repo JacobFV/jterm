@@ -24,15 +24,21 @@ use std::sync::OnceLock;
 
 use serde::Serialize;
 
-/// The tmux binary, looked up once.
+/// The tmux binary, once it has been found.
 ///
-/// Once rather than per call because the answer cannot change inside a run in
-/// any way worth catching: a user who installs tmux while jterm is open gets it
-/// on the next launch, and the alternative is a `PATH` walk on the way to every
-/// keystroke that a tmux-backed pane forwards.
+/// Found once and then kept, because the alternative is a `PATH` walk on the
+/// way to every keystroke that a tmux-backed pane forwards. *Not* found is not
+/// kept: the welcome dialog offers to install tmux while jterm is open, and an
+/// answer cached from before the install would tell it that nothing happened.
+/// While tmux is absent no keystroke is forwarded to it, so the walk that
+/// repeats is the one at a shell's spawn, which is a handful of `stat`s.
 pub fn program() -> Option<&'static PathBuf> {
-    static FOUND: OnceLock<Option<PathBuf>> = OnceLock::new();
-    FOUND.get_or_init(locate).as_ref()
+    static FOUND: OnceLock<PathBuf> = OnceLock::new();
+    if let Some(found) = FOUND.get() {
+        return Some(found);
+    }
+    let found = locate()?;
+    Some(FOUND.get_or_init(|| found))
 }
 
 /// The argv that puts a pane inside `session`, making it if it is not there.
@@ -73,12 +79,11 @@ fn locate() -> Option<PathBuf> {
     None
 }
 
+/// Not only on `PATH`: see `programs` for why a Mac app launched from the Dock
+/// cannot see Homebrew's tmux that way.
 #[cfg(not(windows))]
 fn locate() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|dir| dir.join("tmux"))
-        .find(|candidate| candidate.is_file())
+    crate::programs::find("tmux")
 }
 
 pub fn available() -> bool {
