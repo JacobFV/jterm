@@ -20,12 +20,13 @@ import {
   Globe,
   Image as ImageIcon,
   Box,
+  MonitorSmartphone,
   PlayCircle,
   TerminalSquare,
   type LucideIcon,
 } from "lucide-react";
 
-import { history, pty, scrollback } from "@/lib/ipc";
+import { history, pty, scrollback, vnc } from "@/lib/ipc";
 import { disposeSession } from "@/lib/tmux";
 import { dropContent } from "@/state/content";
 import { programById, programForCommand, type ProgramIcon } from "@/lib/programs";
@@ -37,6 +38,7 @@ import { MediaPane } from "./MediaPane";
 import { ModelPane } from "./ModelPane";
 import { NotepadPane } from "./NotepadPane";
 import { TerminalPane } from "./TerminalPane";
+import { VncPane } from "./VncPane";
 import type { PaneProps } from "./types";
 
 export interface PaneKindDef {
@@ -97,6 +99,15 @@ export const PANE_KINDS: PaneKindDef[] = [
   { kind: "image", label: "Image", icon: ImageIcon, Component: ImagePane },
   { kind: "media", label: "Media", icon: PlayCircle, Component: MediaPane },
   { kind: "model", label: "3D model", icon: Box, Component: ModelPane },
+  {
+    kind: "vnc",
+    label: "Remote desktop",
+    icon: MonitorSmartphone,
+    Component: VncPane,
+    // The socket, if it is still open. Closing a remote-desktop pane ends the
+    // connection; it does nothing to the computer on the other end.
+    dispose: (pane) => vnc.close(pane.id),
+  },
 ];
 
 const BY_KIND = new Map(PANE_KINDS.map((definition) => [definition.kind, definition]));
@@ -160,4 +171,5 @@ export const NEW_PANE_MENU: NewPaneChoice[] = [
   { action: "create", kind: "notepad", label: "Notepad (new)", icon: FileText },
   { action: "open", label: "Open file…", icon: FolderOpen },
   { action: "create", kind: "browser", label: "Browser", icon: Globe },
+  { action: "create", kind: "vnc", label: "Remote desktop (VNC)", icon: MonitorSmartphone },
 ];
