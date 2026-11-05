@@ -29,6 +29,7 @@ pub mod mcp;
 pub mod permissions;
 pub mod programs;
 pub mod pty;
+pub mod rdp;
 pub mod recover;
 pub mod search;
 pub mod sharing;
@@ -234,6 +235,7 @@ pub fn run() {
         .manage(maximize_bounds)
         .manage(mcp_server)
         .manage(Arc::new(vnc::VncRegistry::default()))
+        .manage(Arc::new(rdp::RdpRegistry::default()))
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn_agent,
             mcp::mcp_respond,
@@ -301,6 +303,9 @@ pub fn run() {
             vnc::vnc_connect,
             vnc::vnc_send,
             vnc::vnc_close,
+            rdp::rdp_connect,
+            rdp::rdp_input,
+            rdp::rdp_close,
             sharing::sharing_status,
             sharing::open_sharing_settings,
             updater::update_state,

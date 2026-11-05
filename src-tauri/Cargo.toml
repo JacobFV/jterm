@@ -44,6 +44,17 @@ tauri-plugin-updater = "2.11.0"
 # Every interface, not just the default route's, so a Tailscale or VPN address
 # is listed beside the LAN one. See src/sharing.rs.
 if-addrs = "0.15"
+# Remote Desktop panes: IronRDP does the protocol — negotiation, TLS, CredSSP
+# sign-in, and decoding the screen — and jterm streams what changed to the
+# pane. The blocking flavour because a session is one thread with one socket,
+# and an async runtime would be machinery around a loop. See src/rdp.rs.
+ironrdp = { version = "0.17", features = ["connector", "session", "graphics", "input", "pdu"] }
+ironrdp-blocking = "0.10"
+# TLS for RDP, and the certificate's public key that CredSSP binds the sign-in
+# to. The same versions IronRDP itself is built against.
+rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
+x509-cert = { version = "0.2", default-features = false, features = ["std"] }
+sha2 = "0.10"
 
 # The webview's own crash signal, for `src/recover.rs`. Pinned to exactly what
 # wry depends on: `PlatformWebview::inner()` hands back a `webkit2gtk::WebView`

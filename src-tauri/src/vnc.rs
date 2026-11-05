@@ -49,7 +49,7 @@ pub struct VncRegistry {
 /// What the page may name as a host. Anything a resolver would take, within
 /// reason; the point is only that a hand-edited snapshot cannot hand this a
 /// megabyte or a newline.
-fn valid_host(host: &str) -> bool {
+pub(crate) fn valid_host(host: &str) -> bool {
     !host.is_empty()
         && host.len() <= 253
         && host
