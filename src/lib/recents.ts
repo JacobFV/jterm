@@ -110,6 +110,10 @@ export function rememberPane(pane: PaneState): void {
       });
       return;
     }
+    // Not in `REMEMBERED` yet, so never reached; named so the default below
+    // can stay the file-backed panes.
+    case "vnc":
+      return;
     default: {
       // The file-backed panes. A note with no path exists only in the snapshot
       // that is about to stop mentioning it, so there is nothing to point at.

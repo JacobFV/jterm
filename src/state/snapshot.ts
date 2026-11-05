@@ -15,6 +15,7 @@
 import { decodeAgent } from "@/lib/agents";
 import { splitKey, validHost } from "@/lib/remote";
 import { isPeerTabId } from "@/lib/tmuxControl";
+import { formatVncAddress, parseVncAddress, VNC_PORT } from "@/lib/vncAddress";
 import { isThemeChoice } from "@/lib/customAmbients";
 import type { PaneContent } from "./content";
 import { decodeFontSize, type ThemeChoice } from "./settings";
@@ -308,7 +309,7 @@ function decodeTheme(raw: unknown): ThemeChoice | undefined {
   return isThemeChoice(raw) ? raw : undefined;
 }
 
-const KINDS: PaneKind[] = ["terminal", "notepad", "browser", "image", "media", "model"];
+const KINDS: PaneKind[] = ["terminal", "notepad", "browser", "image", "media", "model", "vnc"];
 
 /**
  * One pane, validated.
@@ -407,6 +408,34 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         // not, using a file the app itself is expected to trust.
         url: safeUrl(raw.url) ?? "about:blank",
       };
+    case "vnc": {
+      // The address goes back through the same parser the form uses, so a
+      // hand-edited host cannot be anything the form would have refused. One
+      // that fails costs the address — the pane comes back asking for one —
+      // not the pane.
+      const address =
+        typeof raw.host === "string"
+          ? parseVncAddress(
+              formatVncAddress({
+                host: raw.host,
+                port: typeof raw.port === "number" ? raw.port : VNC_PORT,
+              }),
+            )
+          : null;
+      return {
+        id,
+        kind: "vnc",
+        title,
+        name,
+        theme,
+        profile,
+        fontSize,
+        host: address?.host,
+        port: address?.port,
+        viewOnly: raw.viewOnly === true ? true : undefined,
+        scale: raw.scale === "actual" ? "actual" : undefined,
+      };
+    }
   }
 }
 

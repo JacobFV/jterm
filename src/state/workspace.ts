@@ -25,6 +25,7 @@ import {
   type TmuxWindow,
 } from "@/lib/tmuxControl";
 import { hostLabel, splitKey } from "@/lib/remote";
+import { formatVncAddress, VNC_PORT } from "@/lib/vncAddress";
 import {
   type Axis,
   type DropEdge,
@@ -47,7 +48,7 @@ import {
   substituteTree,
 } from "./tree";
 
-export type PaneKind = "terminal" | "notepad" | "browser" | "image" | "media" | "model";
+export type PaneKind = "terminal" | "notepad" | "browser" | "image" | "media" | "model" | "vnc";
 
 /** The sidebar's tools, in the order its menu lists them. */
 export type SidebarTab = "files" | "search" | "git" | "agent";
@@ -187,13 +188,32 @@ export interface BrowserPaneState extends PaneCommon {
   url: string;
 }
 
+/**
+ * Another computer's screen, over VNC. See `panes/VncPane.tsx`.
+ *
+ * What is kept is where, and how to show it — never a password. A restored
+ * pane reconnects and the server asks again, which is a prompt rather than a
+ * secret sitting in a session file next to everything else.
+ */
+export interface VncPaneState extends PaneCommon {
+  kind: "vnc";
+  /** Absent until somebody has said where, which is what shows the form. */
+  host?: string;
+  port?: number;
+  /** Look without touching: no keys or pointer reach the other machine. */
+  viewOnly?: boolean;
+  /** Fit the remote screen to the pane, or show it at its own size. */
+  scale?: "fit" | "actual";
+}
+
 export type PaneState =
   | TerminalPaneState
   | NotepadPaneState
   | BrowserPaneState
   | ImagePaneState
   | MediaPaneState
-  | ModelPaneState;
+  | ModelPaneState
+  | VncPaneState;
 
 export interface Tab {
   id: string;
@@ -316,6 +336,8 @@ export function newPane(kind: PaneKind, seed?: Partial<PaneState>): PaneState {
       return { id, kind: "notepad", ...(seed as object) };
     case "browser":
       return { id, kind: "browser", url: HOME_PAGE, ...(seed as object) };
+    case "vnc":
+      return { id, kind: "vnc", ...(seed as object) } as PaneState;
     // The viewers cannot exist without a file, and `newPane` is only reached
     // for them by way of `openFile`, which always supplies one.
     case "image":
@@ -448,6 +470,8 @@ export function paneLabel(pane: PaneState): string {
       return pane.path ? `${baseName(pane.path)}${pane.dirty ? " •" : ""}` : "Notepad";
     case "browser":
       return hostOf(pane.url) ?? "Browser";
+    case "vnc":
+      return pane.host ? formatVncAddress({ host: pane.host, port: pane.port ?? VNC_PORT }) : "Remote desktop";
     case "image":
     case "media":
     case "model":

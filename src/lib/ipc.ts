@@ -7,6 +7,7 @@
  */
 
 import { isTauri } from "./tauri";
+import type { IncomingMessage, Transport } from "./vncSocket";
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -168,6 +169,28 @@ export interface SetupProbe {
 
 export const setup = {
   probe: (): Promise<SetupProbe> => call("setup_probe", {}, { tmux: null, brew: null }),
+};
+
+/**
+ * A VNC pane's connection — see `vnc.rs`, and `lib/vncSocket.ts` for the
+ * socket noVNC is handed. Not through `call`, because two of these need what
+ * `call` does not do: a `Channel` for bytes down, and a raw body for bytes up.
+ */
+export const vnc = {
+  transport: (id: string, host: string, port: number): Transport => ({
+    open: async (onMessage) => {
+      if (!isTauri()) throw new Error("Remote desktops need the jterm app, not a browser tab.");
+      const core = await import("@tauri-apps/api/core");
+      const channel = new core.Channel<IncomingMessage>(onMessage);
+      await core.invoke("vnc_connect", { id, host, port, onData: channel });
+    },
+    send: async (bytes) => {
+      const core = await import("@tauri-apps/api/core");
+      await core.invoke("vnc_send", bytes, { headers: { "x-jterm-vnc": id } });
+    },
+    close: () => void call("vnc_close", { id }, undefined),
+  }),
+  close: (id: string) => call("vnc_close", { id }, undefined),
 };
 
 /** See `permissions.rs`. `notApplicable` off macOS and outside a `.app`. */
