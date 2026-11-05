@@ -345,8 +345,10 @@ mod tests {
 
     const URL: &str = "http://127.0.0.1:4242/mcp/main";
 
-    fn scratch() -> PathBuf {
-        std::env::temp_dir().join(format!("jterm-agent-cli-{}", std::process::id()))
+    /// A directory per test. Tests run in parallel, and one that removes its
+    /// directory when it is done must not be removing another's mid-read.
+    fn scratch(test: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("jterm-agent-cli-{}-{test}", std::process::id()))
     }
 
     fn words(list: &[&str]) -> Vec<String> {
@@ -355,7 +357,7 @@ mod tests {
 
     #[test]
     fn claude_gets_a_config_file_after_the_users_arguments() {
-        let dir = scratch();
+        let dir = scratch("claude");
         let plan = plan(
             "claude",
             &[],
@@ -409,7 +411,7 @@ mod tests {
             &words(&["--full-auto"]),
             URL,
             "secret",
-            &scratch(),
+            &scratch("codex"),
             "w-1",
         )
         .unwrap();
@@ -493,20 +495,17 @@ mod tests {
             Some("--yolo")
         );
 
-        let gemini = plan("gemini", &[], &[], URL, "t", &scratch(), "main").unwrap();
+        let gemini = plan("gemini", &[], &[], URL, "t", &scratch("approvals"), "main").unwrap();
         assert_eq!(
             gemini.argv,
             words(&["gemini", "--yolo", "--allowed-mcp-server-names", "jterm"])
         );
-        std::fs::remove_dir_all(scratch()).ok();
+        std::fs::remove_dir_all(scratch("approvals")).ok();
     }
 
     #[test]
     fn a_system_prompt_the_user_chose_is_not_added_to() {
-        // A directory of its own: other tests here remove `scratch()` whole, and
-        // may do it while this one is writing into it.
-        let dir =
-            std::env::temp_dir().join(format!("jterm-agent-cli-prompt-{}", std::process::id()));
+        let dir = scratch("prompt");
         let plan = plan(
             "claude",
             &[],
@@ -523,7 +522,7 @@ mod tests {
 
     #[test]
     fn refuses_an_agent_it_does_not_know() {
-        assert!(plan("rm", &[], &[], URL, "t", &scratch(), "main").is_err());
+        assert!(plan("rm", &[], &[], URL, "t", &scratch("unknown"), "main").is_err());
     }
 
     #[cfg(not(windows))]
