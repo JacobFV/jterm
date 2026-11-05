@@ -20,13 +20,14 @@ import {
   Globe,
   Image as ImageIcon,
   Box,
+  MonitorCog,
   MonitorSmartphone,
   PlayCircle,
   TerminalSquare,
   type LucideIcon,
 } from "lucide-react";
 
-import { history, pty, scrollback, vnc } from "@/lib/ipc";
+import { history, pty, rdp, scrollback, vnc } from "@/lib/ipc";
 import { disposeSession } from "@/lib/tmux";
 import { dropContent } from "@/state/content";
 import { programById, programForCommand, type ProgramIcon } from "@/lib/programs";
@@ -37,6 +38,7 @@ import { ImagePane } from "./ImagePane";
 import { MediaPane } from "./MediaPane";
 import { ModelPane } from "./ModelPane";
 import { NotepadPane } from "./NotepadPane";
+import { RdpPane } from "./RdpPane";
 import { TerminalPane } from "./TerminalPane";
 import { VncPane } from "./VncPane";
 import type { PaneProps } from "./types";
@@ -108,6 +110,15 @@ export const PANE_KINDS: PaneKindDef[] = [
     // connection; it does nothing to the computer on the other end.
     dispose: (pane) => vnc.close(pane.id),
   },
+  {
+    kind: "rdp",
+    label: "Remote Desktop",
+    icon: MonitorCog,
+    Component: RdpPane,
+    // Signs out of the session the way closing the window of any RDP client
+    // does: the session ends here, and the server decides what to keep.
+    dispose: (pane) => rdp.close(pane.id),
+  },
 ];
 
 const BY_KIND = new Map(PANE_KINDS.map((definition) => [definition.kind, definition]));
@@ -172,4 +183,5 @@ export const NEW_PANE_MENU: NewPaneChoice[] = [
   { action: "open", label: "Open file…", icon: FolderOpen },
   { action: "create", kind: "browser", label: "Browser", icon: Globe },
   { action: "create", kind: "vnc", label: "Remote desktop (VNC)", icon: MonitorSmartphone },
+  { action: "create", kind: "rdp", label: "Remote Desktop (RDP)", icon: MonitorCog },
 ];

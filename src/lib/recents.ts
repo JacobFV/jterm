@@ -113,6 +113,7 @@ export function rememberPane(pane: PaneState): void {
     // Not in `REMEMBERED` yet, so never reached; named so the default below
     // can stay the file-backed panes.
     case "vnc":
+    case "rdp":
       return;
     default: {
       // The file-backed panes. A note with no path exists only in the snapshot

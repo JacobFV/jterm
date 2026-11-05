@@ -15,6 +15,7 @@
 import { decodeAgent } from "@/lib/agents";
 import { splitKey, validHost } from "@/lib/remote";
 import { isPeerTabId } from "@/lib/tmuxControl";
+import { formatRdpAddress, isFingerprint, parseRdpAddress, RDP_PORT } from "@/lib/rdp";
 import { formatVncAddress, parseVncAddress, VNC_PORT } from "@/lib/vncAddress";
 import { isThemeChoice } from "@/lib/customAmbients";
 import type { PaneContent } from "./content";
@@ -309,7 +310,7 @@ function decodeTheme(raw: unknown): ThemeChoice | undefined {
   return isThemeChoice(raw) ? raw : undefined;
 }
 
-const KINDS: PaneKind[] = ["terminal", "notepad", "browser", "image", "media", "model", "vnc"];
+const KINDS: PaneKind[] = ["terminal", "notepad", "browser", "image", "media", "model", "vnc", "rdp"];
 
 /**
  * One pane, validated.
@@ -433,6 +434,40 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         host: address?.host,
         port: address?.port,
         viewOnly: raw.viewOnly === true ? true : undefined,
+        scale: raw.scale === "actual" ? "actual" : undefined,
+      };
+    }
+    case "rdp": {
+      // As for VNC: back through the form's own parser, and a failure costs
+      // the address rather than the pane.
+      const address =
+        typeof raw.host === "string"
+          ? parseRdpAddress(
+              formatRdpAddress({
+                host: raw.host,
+                port: typeof raw.port === "number" ? raw.port : RDP_PORT,
+              }),
+            )
+          : null;
+      // Account names go to the server, not to a shell, but are capped like
+      // everything else out of this file.
+      const short = (value: unknown) =>
+        typeof value === "string" && value ? value.slice(0, 256) : undefined;
+      return {
+        id,
+        kind: "rdp",
+        title,
+        name,
+        theme,
+        profile,
+        fontSize,
+        host: address?.host,
+        port: address?.port,
+        username: short(raw.username),
+        domain: short(raw.domain),
+        // Only a well-formed fingerprint is trusted; anything else means the
+        // next connection asks again, which is the safe way to be wrong.
+        trusted: isFingerprint(raw.trusted) ? raw.trusted : undefined,
         scale: raw.scale === "actual" ? "actual" : undefined,
       };
     }

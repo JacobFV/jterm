@@ -25,6 +25,7 @@ import {
   type TmuxWindow,
 } from "@/lib/tmuxControl";
 import { hostLabel, splitKey } from "@/lib/remote";
+import { formatRdpAddress, RDP_PORT } from "@/lib/rdp";
 import { formatVncAddress, VNC_PORT } from "@/lib/vncAddress";
 import {
   type Axis,
@@ -48,7 +49,7 @@ import {
   substituteTree,
 } from "./tree";
 
-export type PaneKind = "terminal" | "notepad" | "browser" | "image" | "media" | "model" | "vnc";
+export type PaneKind = "terminal" | "notepad" | "browser" | "image" | "media" | "model" | "vnc" | "rdp";
 
 /** The sidebar's tools, in the order its menu lists them. */
 export type SidebarTab = "files" | "search" | "git" | "agent";
@@ -206,6 +207,24 @@ export interface VncPaneState extends PaneCommon {
   scale?: "fit" | "actual";
 }
 
+/**
+ * A Windows desktop — or anything else that speaks RDP. See `panes/RdpPane.tsx`.
+ *
+ * Kept: where, who, and the certificate fingerprint this pane has agreed to
+ * trust, which is what lets a reconnect skip the question and a changed
+ * certificate be noticed. Not kept: the password, as for VNC.
+ */
+export interface RdpPaneState extends PaneCommon {
+  kind: "rdp";
+  host?: string;
+  port?: number;
+  username?: string;
+  domain?: string;
+  /** SHA-256 of the certificate last accepted for this host. */
+  trusted?: string;
+  scale?: "fit" | "actual";
+}
+
 export type PaneState =
   | TerminalPaneState
   | NotepadPaneState
@@ -213,7 +232,8 @@ export type PaneState =
   | ImagePaneState
   | MediaPaneState
   | ModelPaneState
-  | VncPaneState;
+  | VncPaneState
+  | RdpPaneState;
 
 export interface Tab {
   id: string;
@@ -338,6 +358,8 @@ export function newPane(kind: PaneKind, seed?: Partial<PaneState>): PaneState {
       return { id, kind: "browser", url: HOME_PAGE, ...(seed as object) };
     case "vnc":
       return { id, kind: "vnc", ...(seed as object) } as PaneState;
+    case "rdp":
+      return { id, kind: "rdp", ...(seed as object) } as PaneState;
     // The viewers cannot exist without a file, and `newPane` is only reached
     // for them by way of `openFile`, which always supplies one.
     case "image":
@@ -472,6 +494,8 @@ export function paneLabel(pane: PaneState): string {
       return hostOf(pane.url) ?? "Browser";
     case "vnc":
       return pane.host ? formatVncAddress({ host: pane.host, port: pane.port ?? VNC_PORT }) : "Remote desktop";
+    case "rdp":
+      return pane.host ? formatRdpAddress({ host: pane.host, port: pane.port ?? RDP_PORT }) : "Remote Desktop";
     case "image":
     case "media":
     case "model":
