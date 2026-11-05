@@ -542,6 +542,22 @@ connection. VNC is not encrypted unless the server encrypts it, so outside your
 own network, reach the machine over ssh or a VPN. To share a Mac, turn on
 Screen Sharing on it: System Settings → General → Sharing.
 
+### Sharing this computer
+
+**Settings → Sharing** says what this computer makes available to other
+machines: terminal access over ssh (which is how another jterm opens its
+sessions as panes), its screen over VNC, and Remote Desktop over RDP. For each
+one that is on it says what it hands over, who may sign in, and the line to
+connect with; above them, every address this machine has and how far each
+reaches — this network, a private network such as Tailscale, or the internet,
+with a warning when anything shared sits on a public address.
+
+jterm runs no server of its own. These are the operating system's, switched in
+its settings, which an app should not hold the keys to; the buttons open the
+right page, and the panel checks again when you come back to it. "On" is read
+from the port itself, so it cannot disagree with what a visitor would find —
+though it cannot see a firewall between you and them.
+
 ## The agent and jterm's MCP server
 
 jterm runs a [Model Context Protocol](https://modelcontextprotocol.io) server

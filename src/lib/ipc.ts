@@ -7,6 +7,7 @@
  */
 
 import { isTauri } from "./tauri";
+import type { Service as SharingService, SharingStatus } from "./sharing";
 import type { IncomingMessage, Transport } from "./vncSocket";
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -191,6 +192,14 @@ export const vnc = {
     close: () => void call("vnc_close", { id }, undefined),
   }),
   close: (id: string) => call("vnc_close", { id }, undefined),
+};
+
+/** What this computer shares — see `sharing.rs` and `lib/sharing.ts`. */
+export const sharing = {
+  status: (): Promise<SharingStatus | null> => call("sharing_status", {}, null),
+  /** Resolves to whether a settings page was opened. */
+  open: (service: SharingService): Promise<boolean> =>
+    call("open_sharing_settings", { service }, false),
 };
 
 /** See `permissions.rs`. `notApplicable` off macOS and outside a `.app`. */

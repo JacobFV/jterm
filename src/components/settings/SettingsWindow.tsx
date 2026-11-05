@@ -30,6 +30,7 @@ import { DEFAULTS, LIMITS, resetSettings, updateSettings } from "@/state/setting
 import { useSettings } from "@/lib/useSettings";
 import { KeyBindings } from "./KeyBindings";
 import { SessionData } from "./SessionData";
+import { SharingPanel } from "./Sharing";
 import { UpdatesPanel } from "./Updates";
 import { Button, NumberInput, Row, Section, Segmented, Slider, TextInput, Toggle } from "./controls";
 import { ThemePicker } from "./ThemePicker";
@@ -62,7 +63,16 @@ function zoomHint(): string {
  * is the same question as "what does a terminal do", and it disappears with the
  * rest of the tmux settings on a machine without it.
  */
-const TABS = ["Appearance", "Terminal", "Files", "Agent", "Keyboard", "Data", "Updates"] as const;
+const TABS = [
+  "Appearance",
+  "Terminal",
+  "Files",
+  "Agent",
+  "Keyboard",
+  "Sharing",
+  "Data",
+  "Updates",
+] as const;
 type Tab = (typeof TABS)[number];
 
 function TabBar({ active, onPick }: { active: Tab; onPick: (tab: Tab) => void }) {
@@ -546,6 +556,8 @@ export function SettingsWindow() {
         </Section>
           </>
         ) : null}
+
+        {tab === "Sharing" ? <SharingPanel /> : null}
 
         {tab === "Updates" ? <UpdatesPanel autoUpdate={settings.autoUpdate} /> : null}
       </div>
