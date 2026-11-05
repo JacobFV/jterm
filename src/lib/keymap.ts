@@ -73,6 +73,19 @@ const SPLIT_DOWN = "Mod+Shift+D";
 const COPY = isMacOS() ? "Mod+C" : "Mod+Shift+C";
 const PASTE = isMacOS() ? "Mod+V" : "Mod+Shift+V";
 
+/**
+ * Closing a pane is `Cmd+W` on macOS, where that is what the key does in every
+ * tabbed app — and where, left to the stock app menu, it closed the whole
+ * window and every shell in it. The menu no longer claims it (see `app_menu` in
+ * `src-tauri/src/lib.rs`), so the press reaches this table instead. The last
+ * pane of a tab takes the tab with it, so the one key walks down from pane to
+ * tab the way it does in iTerm2.
+ *
+ * Elsewhere `Ctrl+W` is readline's delete-word-backwards, a key people press
+ * dozens of times an hour, so the shortcut keeps its Shift there.
+ */
+const CLOSE_PANE = isMacOS() ? "Mod+W" : "Mod+Shift+W";
+
 export const BINDINGS: Spec[] = [
   { id: "tab.new", keys: "Mod+T", label: "New tab", group: "Tabs" },
   { id: "tab.next", keys: "Ctrl+Tab", label: "Next tab", group: "Tabs" },
@@ -80,7 +93,7 @@ export const BINDINGS: Spec[] = [
 
   { id: "pane.splitRight", keys: SPLIT_RIGHT, label: "Split right", group: "Panes" },
   { id: "pane.splitDown", keys: SPLIT_DOWN, label: "Split down", group: "Panes" },
-  { id: "pane.close", keys: "Mod+Shift+W", label: "Close pane", group: "Panes" },
+  { id: "pane.close", keys: CLOSE_PANE, label: "Close pane", group: "Panes" },
   { id: "pane.zoom", keys: "Mod+Enter", label: "Zoom pane", group: "Panes" },
 
   { id: "pane.focusLeft", keys: "Mod+Alt+ArrowLeft", label: "Focus pane left", group: "Panes" },

@@ -160,7 +160,7 @@ runs on your behalf.
 | <kbd>Mod</kbd>+<kbd>Alt</kbd>+arrows | Move focus between panes |
 | <kbd>Mod</kbd>+<kbd>Shift</kbd>+arrows | Resize the focused pane |
 | <kbd>Mod</kbd>+<kbd>T</kbd> / <kbd>Mod</kbd>+<kbd>1…9</kbd> | New tab / go to tab |
-| <kbd>Mod</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> | Close pane |
+| <kbd>Cmd</kbd>+<kbd>W</kbd> (macOS) / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>W</kbd> | Close pane — the tab, if it was the last |
 | <kbd>Mod</kbd>+<kbd>S</kbd> | Save (in a text pane) |
 | <kbd>Mod</kbd>+<kbd>=</kbd> / <kbd>Mod</kbd>+<kbd>-</kbd> | Larger / smaller text |
 | <kbd>Mod</kbd>+<kbd>0</kbd> | Back to the default text size |
@@ -413,7 +413,7 @@ kind of pane it is aimed at. Moving the focus off the edge of a tmux layout
 arrives at the jterm pane next door, so the boundary between the two split trees
 is not a trap. Tab shortcuts are never forwarded: a jterm tab is a window of the
 app and has no tmux counterpart. Turn the setting off to split jterm *around* a
-tmux pane instead. `Mod+Shift+W` always closes the jterm pane, never the tmux
+tmux pane instead. Close pane always closes the jterm pane, never the tmux
 one — routed to `kill-pane` it would destroy a one-pane session and leave a dead
 shell behind, which is a keystroke that does not close what it is aimed at.
 

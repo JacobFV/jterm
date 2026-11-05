@@ -73,7 +73,7 @@ export function tmuxAvailable(): Promise<boolean> {
 /**
  * jterm's pane actions, in tmux's words.
  *
- * `pane.close` is deliberately absent. `Mod+Shift+W` means "close this pane of
+ * `pane.close` is deliberately absent. Its shortcut means "close this pane of
  * jterm" everywhere else in the app, and routing it to `kill-pane` would, on a
  * session with one pane left, destroy the session and leave a jterm pane behind
  * showing a dead shell — a keystroke that does not close the thing it is aimed
