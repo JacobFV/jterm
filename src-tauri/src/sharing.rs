@@ -161,6 +161,7 @@ fn allowed(_service: Service) -> (Option<Vec<String>>, Vec<String>) {
 
 /// `dscl`'s answer, which is `Key: value value` lines, possibly wrapped: the
 /// users by short name, and the nested groups by GUID.
+#[cfg(any(target_os = "macos", test))]
 fn parse_membership(record: &str) -> (Option<Vec<String>>, Vec<String>) {
     let mut users = Vec::new();
     let mut groups = Vec::new();

@@ -39,6 +39,7 @@ pub enum AppManagement {
 }
 
 /// Map the result of the probe write to an answer. Split out to be tested.
+#[cfg(any(target_os = "macos", test))]
 fn classify(result: std::io::Result<()>) -> AppManagement {
     match result {
         Ok(()) => AppManagement::Granted,
