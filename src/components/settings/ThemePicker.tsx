@@ -7,9 +7,10 @@ import { cn } from "@/lib/utils";
  *
  * A list of names would be useless here: nobody knows what "Kanagawa" looks
  * like, and the whole reason this window is a window is so a choice can be
- * seen. Each cell is a miniature of a terminal in that theme — its own
- * background, a hairline in its own border colour, and a line of its own hues —
- * so the grid answers the question the names cannot.
+ * seen. Each cell is a small terminal in that theme, typing — a prompt, a
+ * `git status`, a test run — so the grid answers the question the names
+ * cannot: what *your* terminal would look like. A living theme's cell is its
+ * drawing instead, since the drawing is the thing being chosen.
  */
 export function ThemePicker({
   value,
@@ -58,7 +59,7 @@ export function ThemePicker({
                     <ThemeSwatch
                       theme={theme}
                       className="aspect-[4/3] w-full border-0"
-                      bars={8}
+                      terminal
                     />
                     <span
                       className={cn(

@@ -19,10 +19,11 @@
  * the eight living themes make a canvas at all.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 
 import { startAmbient } from "@/lib/ambient";
-import { swatch, type Theme } from "@/lib/themes";
+import { finalFrame, frameAt, offsetFor, type Frame } from "@/lib/terminalPreview";
+import { swatch, themeById, type Palette, type Theme } from "@/lib/themes";
 import { cn } from "@/lib/utils";
 
 /** The live one. Split out so the hook is not conditional on the theme. */
@@ -96,19 +97,129 @@ function HueSwatch({
   );
 }
 
+/* ── The terminal preview ─────────────────────────────────────────────── */
+
+/**
+ * One clock for every preview on screen. A grid of thirty terminals with a
+ * timer each is thirty timers waking the page for the same reason; with one,
+ * a tick is one wake and one batch of renders. It runs only while something
+ * is subscribed, and skips its work while the document is hidden.
+ */
+const TICK_MS = 90;
+let tick = 0;
+let timer: ReturnType<typeof setInterval> | null = null;
+const tickers = new Set<() => void>();
+
+function subscribeTick(listener: () => void): () => void {
+  tickers.add(listener);
+  if (timer === null) {
+    timer = setInterval(() => {
+      if (document.hidden) return;
+      tick += 1;
+      for (const ticker of tickers) ticker();
+    }, TICK_MS);
+  }
+  return () => {
+    tickers.delete(listener);
+    if (tickers.size === 0 && timer !== null) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+}
+
+const still = () => () => {};
+const readTick = () => tick;
+
+function prefersStill(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
+  );
+}
+
+/** The screen itself: lines from the bottom up, as a terminal scrolls. */
+function Screen({ frame, palette }: { frame: Frame; palette: Palette }) {
+  const last = frame.lines.length - 1;
+  return (
+    <span
+      className="absolute inset-0 flex flex-col justify-end overflow-hidden px-1 pb-0.5 font-mono text-[8px] leading-[1.4]"
+      style={{ background: palette.bg, color: palette.fg }}
+    >
+      {frame.lines.map((line, row) => (
+        <span key={row} className="block whitespace-pre">
+          {line.map((span, at) => (
+            <span key={at} style={{ color: palette[span.ink] }}>
+              {span.text}
+            </span>
+          ))}
+          {frame.cursor && row === last ? (
+            <span
+              className="inline-block h-[1.1em] w-[0.6em] align-[-0.2em]"
+              style={{ background: palette.cursor }}
+            />
+          ) : null}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * A theme as a small terminal, typing — see `lib/terminalPreview.ts` for why a
+ * terminal rather than its colours. For the theme grids, where a cell is big
+ * enough to read; the tab menu's swatches are a few pixels across and stay as
+ * hues.
+ *
+ * `system` is the two foundations on one terminal, split on a slant: Midnight
+ * on the left, Paper on the right. A slant well left of centre, because the
+ * text sits at the left and a split down the middle left Paper's half empty.
+ */
+function TerminalSwatch({ theme, className }: { theme: Theme | null; className?: string }) {
+  const reduced = prefersStill();
+  const now = useSyncExternalStore(reduced ? still : subscribeTick, readTick, readTick);
+  const id = theme?.id ?? "system";
+  const frame = reduced ? finalFrame() : frameAt(now + offsetFor(id));
+
+  const dark = themeById("dark");
+  const light = themeById("light");
+  return (
+    <span
+      aria-hidden
+      className={cn("relative block shrink-0 overflow-hidden border border-hairline-strong", className)}
+    >
+      {theme !== null ? (
+        <Screen frame={frame} palette={theme.palette} />
+      ) : dark && light ? (
+        <>
+          <Screen frame={frame} palette={dark.palette} />
+          <span className="absolute inset-0" style={{ clipPath: "polygon(48% 0, 100% 0, 100% 100%, 22% 100%)" }}>
+            <Screen frame={frame} palette={light.palette} />
+          </span>
+        </>
+      ) : null}
+    </span>
+  );
+}
+
 export function ThemeSwatch({
   theme,
   className,
   bars = 4,
+  terminal = false,
 }: {
   /** `null` is `system`, which has no palette to show. */
   theme: Theme | null;
   className?: string;
   /** How many hues the still version lays down. */
   bars?: number;
+  /** A typing terminal in place of the hues, where there is room to read one.
+   *  A living theme is always its drawing: that is the thing being chosen. */
+  terminal?: boolean;
 }) {
   if (theme !== null && theme.ambient !== undefined) {
     return <AmbientSwatch theme={theme} className={className} />;
   }
+  if (terminal) return <TerminalSwatch theme={theme} className={className} />;
   return <HueSwatch theme={theme} className={className} bars={bars} />;
 }
