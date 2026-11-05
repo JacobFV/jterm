@@ -170,6 +170,15 @@ export const setup = {
   probe: (): Promise<SetupProbe> => call("setup_probe", {}, { tmux: null, brew: null }),
 };
 
+/** See `permissions.rs`. `notApplicable` off macOS and outside a `.app`. */
+export type AppManagement = "granted" | "blocked" | "notWritable" | "notApplicable";
+
+export const permissions = {
+  appManagement: (): Promise<AppManagement> =>
+    call("app_management_status", {}, "notApplicable" as AppManagement),
+  openAppManagement: () => call("open_app_management", {}, undefined),
+};
+
 /**
  * Control mode: tmux describing itself so jterm can draw it.
  *

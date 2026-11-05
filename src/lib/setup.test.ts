@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SETUP_VERSION, shouldOfferSetup, stepsFor, tmuxOffer } from "./setup";
+import { SETUP_VERSION, decodeResume, shouldOfferSetup, stepsFor, tmuxOffer } from "./setup";
 
 describe("shouldOfferSetup", () => {
   it("offers itself until the current version has been seen", () => {
@@ -50,5 +50,19 @@ describe("tmuxOffer", () => {
 
   it("offers nothing on Windows, even if something answered", () => {
     expect(tmuxOffer({ tmux: "C:\\tmux.exe", brew: null }, "windows").kind).toBe("unsupported");
+  });
+});
+
+describe("decodeResume", () => {
+  const steps = stepsFor("macos");
+
+  it("comes back to the step that asked for the restart", () => {
+    expect(steps[decodeResume("updates", steps)].id).toBe("updates");
+  });
+
+  it("starts at the beginning for nothing, junk, or a step this machine lacks", () => {
+    expect(decodeResume(null, steps)).toBe(0);
+    expect(decodeResume("not-a-step", steps)).toBe(0);
+    expect(decodeResume("tmux", stepsFor("windows"))).toBe(0);
   });
 });

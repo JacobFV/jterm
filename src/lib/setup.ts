@@ -97,3 +97,45 @@ export function tmuxOffer(probe: SetupProbe, platform: Platform): TmuxOffer {
     commands: ["sudo apt install tmux", "sudo dnf install tmux", "sudo pacman -S tmux"],
   };
 }
+
+/* ── Picking up after a restart ──────────────────────────────────────────── */
+
+/**
+ * The step to come back to after a restart the dialog asked for.
+ *
+ * App Management is read by macOS when the app launches, so switching it on
+ * means restarting jterm, and the dialog has to survive that — come back on
+ * the step that asked, and check again there. It is still unfinished at that
+ * point, so `setupSeen` already brings it back; this says where.
+ *
+ * Browser storage rather than the settings file, because it is not a
+ * preference: it is a note from one launch to the next, read once and thrown
+ * away, and losing it costs starting on the first step. Read as untrusted
+ * like anything else that comes off disk.
+ */
+const RESUME_KEY = "jterm.setup.resume";
+
+export function decodeResume(raw: string | null, steps: readonly Step[]): number {
+  if (raw === null) return 0;
+  const at = steps.findIndex((step) => step.id === raw);
+  return at < 0 ? 0 : at;
+}
+
+export function rememberResume(step: StepId): void {
+  try {
+    localStorage.setItem(RESUME_KEY, step);
+  } catch {
+    // Starting over on the first step is the whole cost.
+  }
+}
+
+/** Where to start, and forget it: a note is good for one launch. */
+export function takeResume(steps: readonly Step[]): number {
+  try {
+    const raw = localStorage.getItem(RESUME_KEY);
+    localStorage.removeItem(RESUME_KEY);
+    return decodeResume(raw, steps);
+  } catch {
+    return 0;
+  }
+}

@@ -379,3 +379,60 @@ body,
   font-size: var(--fs-10);
   margin-top: 0.4em;
 }
+
+/* ── The App Management demonstration ───────────────────────────────────────
+   A few seconds of someone switching jterm on in System Settings, shown in the
+   welcome dialog beside the button that opens the real thing. One 5s loop
+   shared by every part, so the pointer arrives, the switch flips under it, and
+   Touch ID asks — in that order, every time. Drawn in macOS's own light
+   colours whatever jterm's theme is, because it is a picture of a window that
+   is not jterm's. */
+.am-demo {
+  --am-loop: 5s;
+}
+.am-demo .am-track {
+  animation: am-track var(--am-loop) ease-in-out infinite;
+}
+.am-demo .am-thumb {
+  animation: am-thumb var(--am-loop) ease-in-out infinite;
+}
+.am-demo .am-pointer {
+  animation: am-pointer var(--am-loop) ease-in-out infinite;
+}
+.am-demo .am-touch {
+  animation: am-touch var(--am-loop) ease-in-out infinite;
+}
+@keyframes am-track {
+  0%, 34% { background-color: #d9d9de; }
+  40%, 92% { background-color: #0a84ff; }
+  100% { background-color: #d9d9de; }
+}
+@keyframes am-thumb {
+  0%, 34% { transform: translateX(0); }
+  40%, 92% { transform: translateX(14px); }
+  100% { transform: translateX(0); }
+}
+@keyframes am-pointer {
+  0% { transform: translate(-90px, 34px) scale(1); opacity: 0; }
+  8% { opacity: 1; }
+  30% { transform: translate(0, 0) scale(1); }
+  34% { transform: translate(0, 0) scale(0.82); }
+  40% { transform: translate(0, 0) scale(1); }
+  52% { transform: translate(0, 0) scale(1); opacity: 1; }
+  60%, 100% { transform: translate(0, 0) scale(1); opacity: 0; }
+}
+@keyframes am-touch {
+  0%, 44% { opacity: 0; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1); }
+  60% { opacity: 1; transform: scale(1.06); }
+  70% { opacity: 1; transform: scale(1); }
+  86% { opacity: 1; transform: scale(1); }
+  92%, 100% { opacity: 0; transform: scale(0.95); }
+}
+/* Still means finished: the switch on, nothing moving, nothing asking. */
+@media (prefers-reduced-motion: reduce) {
+  .am-demo .am-track { animation: none; background-color: #0a84ff; }
+  .am-demo .am-thumb { animation: none; transform: translateX(14px); }
+  .am-demo .am-pointer,
+  .am-demo .am-touch { animation: none; opacity: 0; }
+}

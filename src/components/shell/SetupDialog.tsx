@@ -12,18 +12,39 @@
  * its prompt and the dialog folds itself into a small card in the corner,
  * leaving the terminal free for Enter and a password. The card's one button
  * checks again and unfolds the dialog where it left off.
+ *
+ * **Restarted.** App Management is the other step that leaves the app: it is
+ * switched on in System Settings and only read when jterm starts. So that step
+ * shows what to do there, offers the restart, and leaves a note so the dialog
+ * comes back on the same step after it — where the check runs again and, this
+ * time, can say yes.
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Check, ExternalLink, Sparkles } from "lucide-react";
+import { Check, ExternalLink, Fingerprint, Loader2, MousePointer2, Sparkles } from "lucide-react";
 
 import { Button, Row, Segmented, Slider, Toggle } from "@/components/settings/controls";
 import { ThemePicker } from "@/components/settings/ThemePicker";
-import { openExternal, setup, type SetupProbe } from "@/lib/ipc";
+import {
+  openExternal,
+  permissions,
+  setup,
+  updates,
+  type AppManagement,
+  type SetupProbe,
+} from "@/lib/ipc";
 import { displayKeys, keysFor, labelFor, type ActionId } from "@/lib/keymap";
 import { isMacOS, isWindows } from "@/lib/platform";
-import { SETUP_VERSION, stepsFor, tmuxOffer, type Platform, type StepId } from "@/lib/setup";
+import {
+  SETUP_VERSION,
+  rememberResume,
+  stepsFor,
+  takeResume,
+  tmuxOffer,
+  type Platform,
+  type StepId,
+} from "@/lib/setup";
 import { recheckTmux } from "@/lib/tmux";
 import { useSettings } from "@/lib/useSettings";
 import { cn } from "@/lib/utils";
@@ -58,7 +79,8 @@ export function SetupDialog({
 }) {
   const settings = useSettings();
   const steps = stepsFor(platform());
-  const [index, setIndex] = useState(0);
+  // Where a restart the dialog asked for left off, or the first step.
+  const [index, setIndex] = useState(() => takeResume(steps));
   const [probe, setProbe] = useState<SetupProbe | null>(null);
   const [parked, setParked] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -332,9 +354,153 @@ function StepBody({
               onChange={(autoUpdate) => updateSettings({ autoUpdate })}
             />
           </Row>
+          <AppManagementCard />
         </>
       );
   }
+}
+
+/* ── App Management ─────────────────────────────────────────────────────── */
+
+/**
+ * Long enough that a check which answers instantly still reads as a check.
+ * A spinner that flashes for one frame looks like a glitch, and after a
+ * restart the whole point is to be seen looking.
+ */
+const MIN_CHECK_MS = 700;
+
+/**
+ * Whether macOS will let jterm replace itself, and how to make it — see
+ * `permissions.rs`. Absent where the question does not arise: other
+ * platforms, and a development build that is not running from a `.app`.
+ */
+function AppManagementCard() {
+  const [status, setStatus] = useState<AppManagement | "checking">("checking");
+  const [opened, setOpened] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    const started = Date.now();
+    void permissions.appManagement().then(async (answer) => {
+      const wait = MIN_CHECK_MS - (Date.now() - started);
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      if (live) setStatus(answer);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (status === "notApplicable") return null;
+
+  const restart = () => {
+    rememberResume("updates");
+    void updates.restart();
+  };
+
+  return (
+    <section className="mt-5 border border-hairline-strong p-3">
+      <div className="mb-1 text-[length:var(--fs-125)] text-ink-1">Permission to update itself</div>
+
+      {status === "checking" ? (
+        <p className="flex items-center gap-2 text-[length:var(--fs-11)] text-ink-3">
+          <Loader2 className="h-4 w-4 animate-spin text-ink-2" />
+          Checking whether macOS lets jterm replace itself…
+        </p>
+      ) : status === "granted" ? (
+        <p className="flex items-center gap-2 text-[length:var(--fs-11)] text-ink-2">
+          {/* Fixed green rather than a theme colour: this is the one mark in
+              the dialog that has to read as "done" in every palette, and
+              some themes' greens are a long way from that. */}
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#30d158]">
+            <Check className="h-3 w-3 text-white" strokeWidth={3} />
+          </span>
+          macOS lets jterm update itself. Nothing to do here.
+        </p>
+      ) : status === "notWritable" ? (
+        <p className="text-[length:var(--fs-11)] leading-relaxed text-ink-3">
+          jterm.app is not this account&apos;s to change — it was installed by another user, or is
+          running from the disk image. Drag it into Applications and open it from there, and it
+          can update itself.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-[length:var(--fs-11)] leading-relaxed text-ink-3">
+            macOS stops apps from changing apps — jterm included, when it installs its own update.
+            Switch jterm.app on under <span className="text-ink-1">App Management</span>; macOS
+            asks for Touch ID or your password. It takes effect when jterm restarts, and this
+            step picks up again afterwards to check.
+          </p>
+          <AppManagementDemo />
+          <p className="text-[length:var(--fs-10)] text-ink-4">
+            Not in the list? Click + under it and choose jterm from Applications.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            <Button
+              onClick={() => {
+                void permissions.openAppManagement();
+                setOpened(true);
+              }}
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Open App Management
+            </Button>
+            {/* Primary once the settings have been opened, because by then
+                the restart is the next thing that has to happen. */}
+            <button
+              type="button"
+              onClick={restart}
+              className={cn(
+                "px-3 py-1.5 text-[length:var(--fs-12)]",
+                opened
+                  ? "bg-brand text-brand-foreground hover:opacity-90"
+                  : "border border-hairline-strong bg-surface-2 text-ink-1 hover:bg-surface-3",
+              )}
+            >
+              I switched it on — restart jterm
+            </button>
+          </div>
+          <p className="text-[length:var(--fs-10)] text-ink-4">
+            Restarting brings your tabs back. Shells in tmux keep running; plain shells start
+            fresh.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * A few seconds of System Settings: the pointer goes to jterm's switch, the
+ * switch turns on, Touch ID asks. Pictures of the real window would be out of
+ * date by the next macOS; this is just enough of it to recognise. The motion
+ * is the `am-*` keyframes in `index.css`.
+ */
+function AppManagementDemo() {
+  return (
+    <div
+      aria-hidden
+      className="am-demo relative w-[280px] max-w-full select-none rounded-[10px] bg-[#f5f5f7] p-2 pb-3 text-[11px] text-[#1d1d1f] shadow-sm"
+    >
+      <div className="mb-1.5 text-[10px] text-[#6e6e73]">Privacy &amp; Security › App Management</div>
+      <div className="flex items-center gap-2 rounded-[7px] bg-white px-2 py-1.5">
+        <span className="flex h-5 w-5 items-center justify-center rounded-[5px] bg-black text-[11px] font-bold text-[#f2cd6b]">
+          J
+        </span>
+        <span className="flex-1">jterm.app</span>
+        <span className="relative">
+          <span className="am-track block h-[18px] w-[32px] rounded-full p-[2px]">
+            <span className="am-thumb block h-[14px] w-[14px] rounded-full bg-white shadow" />
+          </span>
+          <MousePointer2 className="am-pointer absolute left-[16px] top-[9px] h-4 w-4 fill-white text-black" />
+        </span>
+      </div>
+      <div className="am-touch absolute -bottom-3 right-2 flex items-center gap-1.5 rounded-[8px] bg-white px-2 py-1 shadow-md">
+        <Fingerprint className="h-4 w-4 text-[#ff375f]" />
+        <span>Touch ID to allow</span>
+      </div>
+    </div>
+  );
 }
 
 function TmuxStep({
