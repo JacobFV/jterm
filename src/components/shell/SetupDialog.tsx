@@ -268,8 +268,8 @@ function StepBody({
         <>
           <Heading>Look</Heading>
           <Lede>
-            The rest of the themes — including the ones that draw something behind the terminal —
-            are in Settings.
+            Changes as you pick. The themes that draw something behind the terminal, and a few
+            with more character, are in Settings.
           </Lede>
           <div className="space-y-4">
             <Row label="Terminal text size">
@@ -284,7 +284,9 @@ function StepBody({
             <ThemePicker
               value={settings.theme}
               onChange={(theme) => updateSettings({ theme })}
-              groups={["Foundations"]}
+              // The still ones. A living theme is a lot to meet on a first
+              // launch, and is better found than presented.
+              groups={["Foundations", "Palettes"]}
             />
           </div>
         </>

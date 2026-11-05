@@ -18,8 +18,8 @@ export function ThemePicker({
 }: {
   value: string;
   onChange: (id: string) => void;
-  /** Which groups to show, after `system`. The welcome dialog shows only the
-   *  foundations: a first look at jterm is not the moment for forty themes. */
+  /** Which groups to show, after `system`. The welcome dialog leaves out the
+   *  living themes: a first look at jterm is not the moment for all of them. */
   groups?: readonly string[];
 }) {
   return (
