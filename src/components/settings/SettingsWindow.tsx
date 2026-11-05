@@ -22,7 +22,8 @@ import { ThemeSwatch } from "@/components/shell/ThemeSwatch";
 import { dialog } from "@/lib/ipc";
 import { displayKeys, keysFor, type ActionId } from "@/lib/keymap";
 import { TOOLS as MCP_TOOLS } from "@/lib/mcp";
-import { MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
+import { isMacOS, MACOS_TRAFFIC_LIGHT_INSET_PX, usesNativeWindowChrome } from "@/lib/platform";
+import { closeSettingsWindow } from "@/lib/settingsWindow";
 import { useIsFullscreen } from "@/lib/useFullscreen";
 import { THEME_GROUPS, THEMES } from "@/lib/themes";
 import { tmuxAvailable } from "@/lib/tmux";
@@ -180,6 +181,23 @@ export function SettingsWindow() {
   const [hasTmux, setHasTmux] = useState(false);
   useEffect(() => {
     void tmuxAvailable().then(setHasTmux);
+  }, []);
+
+  // `Cmd+W` used to close this window by way of the app menu, which no longer
+  // has the item: it was taken out so the main window's press reaches its
+  // panes. This window has no panes, so here it keeps meaning the window.
+  // Bubble phase, so a shortcut being recorded — which is swallowed in the
+  // capture phase — is never mistaken for a request to leave.
+  useEffect(() => {
+    if (!isMacOS()) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.shiftKey || event.altKey || event.ctrlKey) return;
+      if (event.key.toLowerCase() !== "w") return;
+      event.preventDefault();
+      void closeSettingsWindow();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   const setKeys = useCallback((keys: Partial<Record<ActionId, string>>) => {

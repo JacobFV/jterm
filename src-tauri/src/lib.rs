@@ -120,6 +120,85 @@ pub(crate) fn append_record(root: &std::path::Path, line: &str) {
     let _ = writeln!(file, "jterm {} {line}", env!("CARGO_PKG_VERSION"));
 }
 
+/// The macOS menu bar: Tauri's stock one, less "Close Window".
+///
+/// The stock menu puts `Cmd+W` on Close Window, and a menu's key equivalent is
+/// answered before the webview ever sees the press. So `Cmd+W` — which in every
+/// tabbed app on the platform closes the tab — closed the whole window here,
+/// shells and all, and no setting could stop it because the keymap never got a
+/// look. With the item gone the press falls through to the page, where it
+/// closes a pane (see `CLOSE_PANE` in `src/lib/keymap.ts`).
+///
+/// Built by hand rather than by taking the default and deleting from it: the
+/// default's items are found only by their visible text, and a menu edited by
+/// string match breaks quietly the first time that text changes. The red
+/// button still closes a window, which is the gesture that should cost this
+/// much.
+#[cfg(target_os = "macos")]
+fn app_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<tauri::menu::Menu<R>> {
+    use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
+
+    let info = app.package_info();
+    let about = AboutMetadata {
+        name: Some(info.name.clone()),
+        version: Some(info.version.to_string()),
+        copyright: app.config().bundle.copyright.clone(),
+        ..Default::default()
+    };
+    Menu::with_items(
+        app,
+        &[
+            &Submenu::with_items(
+                app,
+                info.name.clone(),
+                true,
+                &[
+                    &PredefinedMenuItem::about(app, None, Some(about))?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::services(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::hide(app, None)?,
+                    &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::quit(app, None)?,
+                ],
+            )?,
+            // Kept even though the page does its own copy and paste: these are
+            // what make `Cmd+C`, `Cmd+V` and `Cmd+A` work in a plain text field,
+            // which on macOS go through the responder chain, not the page.
+            &Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None)?,
+                    &PredefinedMenuItem::redo(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "View",
+                true,
+                &[&PredefinedMenuItem::fullscreen(app, None)?],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Window",
+                true,
+                &[
+                    &PredefinedMenuItem::minimize(app, None)?,
+                    &PredefinedMenuItem::maximize(app, None)?,
+                ],
+            )?,
+        ],
+    )
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let root = data_dir();
@@ -135,7 +214,11 @@ pub fn run() {
     let mcp_server = mcp::McpServer::bind();
     let mcp_serving = mcp_server.clone();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(app_menu);
+
+    builder
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
