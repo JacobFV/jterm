@@ -190,7 +190,7 @@ export const DEFAULTS: Settings = {
   scrollback: 10_000,
   shell: "",
   shellBackend: "tmux",
-  tmuxKeys: true,
+  tmuxKeys: false,
   sidebarWidth: 220,
   showHiddenFiles: false,
   openFilesIn: "popup",

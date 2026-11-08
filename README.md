@@ -97,8 +97,8 @@ runs on your behalf.
   pane it displaces leaves as a tab of its own, so nothing is destroyed.
 - **Works through tmux, if you already do.** That is what the default backend
   above is — a session per terminal, so what survives a crash is the *shell*
-  rather than a recording of it — and `Mod+D` splits tmux rather than splitting
-  around it. Or attach in **control mode**, where a tmux window becomes a jterm
+  rather than a recording of it — and `Mod+D` splits jterm around it, or splits
+  tmux itself if you set it to. Or attach in **control mode**, where a tmux window becomes a jterm
   tab and a tmux pane becomes a real jterm pane: no nested status bar, no tmux
   drawn inside a box. Either way, from the **+** menu.
 - **Changes its colours at whatever depth you meant.** The whole app in
@@ -406,14 +406,15 @@ whole feature: what survives is exactly what you never deliberately closed. A
 session you attached to yourself is never ended by jterm — the pane detaches and
 leaves it as it was.
 
-**Pane shortcuts drive tmux.** In a tmux-backed pane, splitting, moving the
-focus and resizing act on tmux's panes rather than jterm's, so the split lands
+**Pane shortcuts can drive tmux.** By default a tmux-backed pane splits like
+any other: jterm splits *around* it, and the new pane gets a session of its own.
+Set **Settings → tmux → Split and focus shortcuts act on → tmux's panes** and
+splitting, moving the focus and resizing act on tmux's panes instead, so the split lands
 in the session that survives and the muscle memory does not have to know which
 kind of pane it is aimed at. Moving the focus off the edge of a tmux layout
 arrives at the jterm pane next door, so the boundary between the two split trees
 is not a trap. Tab shortcuts are never forwarded: a jterm tab is a window of the
-app and has no tmux counterpart. Turn the setting off to split jterm *around* a
-tmux pane instead. Close pane always closes the jterm pane, never the tmux
+app and has no tmux counterpart. Close pane always closes the jterm pane, never the tmux
 one — routed to `kill-pane` it would destroy a one-pane session and leave a dead
 shell behind, which is a keystroke that does not close what it is aimed at.
 
@@ -431,8 +432,8 @@ tmux stops drawing and starts *describing* itself, and jterm renders the
 description with its own panes and its own splits.
 
 **A tmux window becomes a jterm tab; a tmux pane becomes a real terminal in a
-real jterm split.** No nested status bar, because nothing is nested. Splitting
-with `Mod+D` splits tmux, and the tab strip fills with the session's windows.
+real jterm split.** No nested status bar, because nothing is nested. With the
+shortcuts set to act on tmux's panes, `Mod+D` splits tmux, and the tab strip fills with the session's windows.
 Every pane's history is fetched from tmux on arrival, so attaching to a session
 left running last week looks like arriving rather than starting.
 
