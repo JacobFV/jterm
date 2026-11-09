@@ -177,6 +177,27 @@ pub fn pane_pid(session: &str) -> Option<u32> {
         .ok()
 }
 
+/// Where the shell in a session's current pane is working.
+///
+/// What `pty_probe` reports for a tmux-backed pane. The process on jterm's own
+/// pty is the tmux *client*, whose directory is wherever it was started and
+/// never moves — reading that instead is how every such pane came to be saved
+/// in the directory it was opened in, whatever the user had `cd`'d to since.
+/// tmux tracks the pane's directory itself, on every platform it runs on, so
+/// this needs no `/proc` and no OSC 7.
+pub fn pane_cwd(session: &str) -> Option<String> {
+    let target = format!("={session}:");
+    let path = run(&[
+        "display-message",
+        "-p",
+        "-t",
+        &target,
+        "#{pane_current_path}",
+    ])?;
+    let path = path.trim_end_matches(['\r', '\n']);
+    (!path.is_empty()).then(|| path.to_string())
+}
+
 #[tauri::command]
 pub fn tmux_sessions() -> Vec<TmuxSession> {
     run(&["list-sessions", "-F", FIELDS])

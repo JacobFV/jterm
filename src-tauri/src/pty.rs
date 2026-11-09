@@ -753,7 +753,8 @@ pub fn pty_attach(
 /// about the same process — and the pid has to be taken out from under the same
 /// lock either way.
 ///
-/// **Where.** Only Linux answers directly. Elsewhere the frontend learns the
+/// **Where.** A tmux-backed pane is answered by tmux, on any platform. Otherwise
+/// only Linux answers directly. Elsewhere the frontend learns the
 /// working directory from the OSC 7 sequence the shell emits, which is why
 /// `cwd` coming back `None` is an ordinary outcome rather than a failure.
 ///
@@ -809,10 +810,16 @@ pub fn pty_probe(
         }
     }
 
-    Probe {
-        cwd: pid.and_then(cwd_of),
-        tmux: in_tmux,
-    }
+    // A pane jterm put in tmux has a tmux client on this pty, and the client
+    // stays in the directory it was started in for its whole life; the shell
+    // the user is `cd`-ing around in is on tmux's side. A tmux the user started
+    // by hand is left alone, for the reason `pty_foreground` gives.
+    let cwd = match &session.tmux {
+        Some(name) => tmux::pane_cwd(name),
+        None => pid.and_then(cwd_of),
+    };
+
+    Probe { cwd, tmux: in_tmux }
 }
 
 /// What is in the foreground of a pane, and which agent conversation it is.
