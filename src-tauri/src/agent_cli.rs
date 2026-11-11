@@ -59,11 +59,17 @@ pub const TOOLS: [&str; 3] = ["claude", "codex", "gemini"];
 /// word count, because a count is something a model argues with and a shape is
 /// something it copies. The shape is explicit because "reply concisely" alone,
 /// tried against Claude, still gave twenty-line answers to "why" questions.
+///
+/// The last sentence is where the long answers go instead. Telling a model to be
+/// brief without saying where a report or a diagram should live gets the report
+/// crammed into the column anyway, a line at a time; an artifact is a pane of
+/// its own, and the column only has to say that it is there.
 pub const CONCISE_PROMPT: &str = "You are running in the sidebar of jterm, a terminal app: a \
 column a few dozen characters wide beside the user's work. Be brief. Default to one to four short \
 lines: the answer, then at most one sentence of the context that matters. A list is at most four \
 short bullets. No preamble, recaps, headings, tables or closing offers. Go longer only when the \
-user asks for detail.";
+user asks for detail. When something is better seen than read here — a report, a table, a chart, \
+a diagram, a page — show it with jterm's create_artifact tool and say in one line that it is open.";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Plan {
