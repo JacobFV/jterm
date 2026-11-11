@@ -1,5 +1,5 @@
 /**
- * The pieces every sidebar tab is framed with, so the four of them share one
+ * The pieces every sidebar tab is framed with, so all of them share one
  * header row: the switcher on the left, a title, and that tab's own buttons on
  * the right. Kept out of `Sidebar.tsx` so the tabs can use them without
  * importing the component that imports them.

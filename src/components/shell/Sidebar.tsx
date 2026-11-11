@@ -1,10 +1,12 @@
 /**
- * The left sidebar: four tools about the directory the focused terminal is in,
+ * The left sidebar: five tools about the directory the focused terminal is in,
  * shown one at a time and switched from the chevron at the top left.
  *
  *   - **Files** — that directory as a tree. See `FileTree`.
  *   - **Search** — text in the files under it. See `SidebarSearch`.
  *   - **Git** — the repository it is in. See `SidebarGit`.
+ *   - **GitHub** — that repository's open pull requests and issues, through
+ *     the user's own `gh`. See `SidebarGithub`.
  *   - **Agent** — an agent CLI working in it, wired to jterm. See `SidebarAgent`.
  *
  * Every tab that has been shown stays mounted, and switching or closing hides
@@ -17,7 +19,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from "react";
-import { Bot, ChevronDown, Folder, GitBranch, Search } from "lucide-react";
+import { Bot, ChevronDown, Folder, GitBranch, Github, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { PaneKind, PaneState, SidebarTab } from "@/state/workspace";
@@ -26,12 +28,14 @@ import { Menu, MenuItem, useMenu, type MenuIcon } from "./Menu";
 import { SidebarAgent } from "./SidebarAgent";
 import { SidebarNote } from "./SidebarChrome";
 import { SidebarGit } from "./SidebarGit";
+import { SidebarGithub } from "./SidebarGithub";
 import { SidebarSearch } from "./SidebarSearch";
 
 const TABS: { id: SidebarTab; label: string; icon: MenuIcon }[] = [
   { id: "files", label: "Files", icon: Folder },
   { id: "search", label: "Search", icon: Search },
   { id: "git", label: "Git", icon: GitBranch },
+  { id: "github", label: "GitHub", icon: Github },
   { id: "agent", label: "Agent", icon: Bot },
 ];
 
@@ -43,7 +47,7 @@ interface SidebarProps {
   tab: SidebarTab;
   onTab: (tab: SidebarTab) => void;
   onOpen: (path: string) => void;
-  /** Open a pane that is not a file — a diff — wherever opened files go. */
+  /** Open a pane that is not a file — a diff, a pull request — wherever opened files go. */
   onOpenPane: (kind: PaneKind, seed: Partial<PaneState>) => void;
   /** The window's theme; see `SidebarAgent`. */
   theme: string;
@@ -58,7 +62,7 @@ export function Sidebar({ root, visible, tab, onTab, onOpen, onOpenPane, theme }
 
   const switcher = <Switcher tab={tab} onTab={onTab} />;
 
-  // Four fixed slots in a fixed order, each hidden unless it is the tab. A slot
+  // Fixed slots in a fixed order, each hidden unless it is the tab. A slot
   // that has not been shown yet is empty rather than absent, so no tab's
   // component ever changes position in the tree — which is what would remount
   // it.
@@ -100,6 +104,17 @@ export function Sidebar({ root, visible, tab, onTab, onOpen, onOpenPane, theme }
             active={visible && tab === "git"}
             onOpen={onOpen}
             onOpenDiff={(diff) => onOpenPane("diff", diff)}
+            switcher={switcher}
+          />
+        ) : null,
+      )}
+      {slot(
+        "github",
+        shown.has("github") && root ? (
+          <SidebarGithub
+            cwd={root}
+            active={visible && tab === "github"}
+            onOpenPane={onOpenPane}
             switcher={switcher}
           />
         ) : null,
