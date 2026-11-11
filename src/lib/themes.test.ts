@@ -93,6 +93,12 @@ describe("themeVars", () => {
       "--term-fg",
       "--term-cursor",
       "--term-selection",
+      "--diff-add",
+      "--diff-del",
+      "--diff-add-bg",
+      "--diff-del-bg",
+      "--diff-add-edge",
+      "--diff-del-edge",
       ...SLOTS.map((slot) => `--term-${slot.replace(/([A-Z])/g, "-$1").toLowerCase()}`),
     ];
     for (const theme of THEMES) {

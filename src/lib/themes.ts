@@ -148,6 +148,11 @@ function lightness(c: RGB): number {
   return (Math.max(c[0], c[1], c[2]) + Math.min(c[0], c[1], c[2])) / 510;
 }
 
+/** A colour at partial strength, to be laid over whatever is behind it. */
+function tint(hex: string, alpha: number): string {
+  return `rgba(${rgb(hex).map(Math.round).join(", ")}, ${alpha})`;
+}
+
 /** `#rrggbb` with an alpha byte on the end — a form xterm parses. */
 function withAlpha(hex: string, alpha: number): string {
   const byte = Math.round(Math.min(1, Math.max(0, alpha)) * 255);
@@ -241,6 +246,21 @@ export function themeVars(theme: Theme, presence = 1): Record<string, string> {
     // Derived rather than authored: a selection is the cursor colour laid over
     // the text at a weight that keeps the text readable, in every theme.
     "--term-selection": `rgba(${rgb(p.cursor).map(Math.round).join(", ")}, 0.26)`,
+
+    // A diff's colours, from the palette's own green and red so a diff in
+    // Solarized looks like Solarized. The ink is the version of the hue meant
+    // to be read against the page, as for `--danger`; the rows are that hue
+    // laid thinly over whatever is behind them, so the text on them stays the
+    // theme's own ink and stays readable in every theme, light or dark, and
+    // over an ambient backdrop. A light page needs less to show the tint.
+    "--diff-add": dark ? p.brightGreen : p.green,
+    "--diff-del": dark ? p.brightRed : p.red,
+    "--diff-add-bg": tint(p.green, dark ? 0.14 : 0.12),
+    "--diff-del-bg": tint(p.red, dark ? 0.14 : 0.1),
+    // The gutter beside a changed line, a step stronger so the edge of a
+    // change reads at a glance even where the row tint is faint.
+    "--diff-add-edge": tint(p.green, dark ? 0.3 : 0.24),
+    "--diff-del-edge": tint(p.red, dark ? 0.3 : 0.2),
 
     "--term-black": p.black,
     "--term-red": p.red,

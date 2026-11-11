@@ -111,6 +111,14 @@
     --term-bright-magenta: #d3a8e0;
     --term-bright-white: #ffffff;
     --term-bright-cyan: #8fd2cc;
+
+    /* A diff's colours. Derived from the palette in `themeVars`; see there. */
+    --diff-add: #a8dc96;
+    --diff-del: #ff7a7a;
+    --diff-add-bg: rgba(139, 191, 122, 0.14);
+    --diff-del-bg: rgba(227, 90, 90, 0.14);
+    --diff-add-edge: rgba(139, 191, 122, 0.3);
+    --diff-del-edge: rgba(227, 90, 90, 0.3);
   }
 
   :root[data-theme="light"] {
@@ -157,6 +165,13 @@
     --term-bright-magenta: #945bad;
     --term-bright-cyan: #349089;
     --term-bright-white: #1a1a1c;
+
+    --diff-add: #3f7a35;
+    --diff-del: #c0392b;
+    --diff-add-bg: rgba(63, 122, 53, 0.12);
+    --diff-del-bg: rgba(192, 57, 43, 0.1);
+    --diff-add-edge: rgba(63, 122, 53, 0.24);
+    --diff-del-edge: rgba(192, 57, 43, 0.2);
   }
 
   * {
@@ -435,4 +450,82 @@ body,
   .am-demo .am-thumb { animation: none; transform: translateX(14px); }
   .am-demo .am-pointer,
   .am-demo .am-touch { animation: none; opacity: 0; }
+}
+
+/*
+ * A diff. See `components/diff/DiffView.tsx`.
+ *
+ * Every row is a grid with the same columns, so the gutters line up down a
+ * whole file without a table — a table cannot be cut into the separately
+ * mounted chunks that keep a long diff responsive. Text wraps rather than
+ * scrolling sideways: the two halves of the side-by-side layout cannot share
+ * one horizontal scroll, and a long line half off-screen is worse than one on
+ * two rows.
+ *
+ * Colour sits on the cells rather than the row, which is what lets one row of
+ * the side-by-side layout be a deletion on the left and an addition on the
+ * right. The text stays the theme's own ink on a thin tint of its own green or
+ * red — see the `--diff-*` tokens in `lib/themes.ts` — so it reads the same in
+ * a light theme as a dark one.
+ */
+.diff-body {
+  font-family: var(--font-mono);
+  font-size: var(--mono-font-size);
+  line-height: 1.5;
+}
+.diff-row {
+  display: grid;
+}
+.diff-row.diff-unified {
+  grid-template-columns: var(--diff-gutter) var(--diff-gutter) 2ch minmax(0, 1fr);
+}
+.diff-row.diff-split {
+  grid-template-columns:
+    var(--diff-gutter) 2ch minmax(0, 1fr)
+    var(--diff-gutter) 2ch minmax(0, 1fr);
+}
+.diff-num {
+  padding: 0 1ch 0 0.5ch;
+  text-align: right;
+  color: hsl(var(--text-4));
+  user-select: none;
+}
+.diff-mark {
+  text-align: center;
+  color: hsl(var(--text-4));
+  user-select: none;
+}
+.diff-text {
+  min-width: 0;
+  padding-right: 1ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: hsl(var(--text-1));
+}
+.diff-add {
+  background-color: var(--diff-add-bg);
+}
+.diff-del {
+  background-color: var(--diff-del-bg);
+}
+.diff-num.diff-add {
+  background-color: var(--diff-add-edge);
+  color: hsl(var(--text-2));
+}
+.diff-num.diff-del {
+  background-color: var(--diff-del-edge);
+  color: hsl(var(--text-2));
+}
+.diff-mark.diff-add {
+  color: var(--diff-add);
+}
+.diff-mark.diff-del {
+  color: var(--diff-del);
+}
+/* The side of a side-by-side row that has nothing on it. */
+.diff-none {
+  background-color: hsl(var(--bg-2));
+}
+.diff-split .diff-gap {
+  border-left: 1px solid hsl(var(--border-1));
 }
