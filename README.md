@@ -71,13 +71,14 @@ runs on your behalf.
   pane, and viewers for images, video, audio and STL meshes. What opens is
   chosen from the file you picked; *where* it opens — a pop-up, a new tab, or a
   split on the side you like — is up to you, in Settings → Files.
-- **Keeps four tools about where you are in the sidebar.** The chevron at its
-  top left switches between them, and all four follow the directory the focused
+- **Keeps five tools about where you are in the sidebar.** The chevron at its
+  top left switches between them, and all five follow the directory the focused
   terminal is in. **Files** is the tree. **Search** finds text and file names
   under it as you type, honouring `.gitignore` inside a repository. **Git**
   shows that repository — stage, unstage, commit, read a file's diff, pull,
   push, and the recent history — and leaves anything with a decision in it to
-  the terminal beside it. **Agent** runs Claude Code, Codex or Gemini CLI there,
+  the terminal beside it. **GitHub** lists its open pull requests and issues.
+  **Agent** runs Claude Code, Codex or Gemini CLI there,
   whichever **Settings → Agent** names, and keeps it running while you switch
   tabs or close the sidebar.
 - **Reads a diff as a pane of its own.** From the Git tab, the diff icon on a
@@ -89,6 +90,21 @@ runs on your behalf.
   working tree is read again whenever you come back to the pane, so it shows
   the repository as it is now. A diff too long to read is cut at a few
   megabytes, and says so.
+- **Reads pull requests and issues as panes.** The sidebar's **GitHub** tool
+  lists the open pull requests — draft or not, and how their checks stand —
+  and issues of the repository you are in; a click opens one beside your work.
+  A pull request has **Conversation**, **Checks** and **Files**: the
+  discussion with a box to reply in, each check with a link to its log, and the
+  changes in the same diff view as above. **Check out** puts its branch in your
+  checkout, and **Merge** asks which way — merge commit, squash or rebase,
+  whichever the repository allows — and does nothing until you confirm; when
+  GitHub would refuse, the button is greyed and says why. An issue has its
+  conversation, a reply box and **Close issue**. All of it goes through your
+  own [`gh`](https://cli.github.com) — your login, your hosts, GitHub
+  Enterprise included — so jterm holds no token of its own; without gh, or
+  logged out, the pane says which, and what to type. Checks still running are
+  read again every thirty seconds while the pane is on screen, and nothing else
+  polls.
 - **Hands the agent the app, not just the files.** The sidebar's agent is always
   started connected to jterm's own MCP server, so it can list your tabs and
   panes, read what the build in the next pane just printed, type into a
@@ -604,6 +620,8 @@ to it, under the name `jterm`. Its tools act on the window the agent is in:
 | `open_file` | a file, in the pane that suits it |
 | `open_url` | an http(s) page in a browser pane |
 | `focus_pane` | bring a pane forward and give it the keyboard |
+| `open_github` | a GitHub pull request or issue in a pane, from a local checkout |
+| `open_diff` | a diff of the working tree, the index or a commit, in a pane |
 | `create_artifact` | show a document it wrote — HTML, markdown, SVG or Mermaid — in a pane of its own |
 | `update_artifact` | rewrite an artifact where it is, without opening another |
 | `read_artifact` | an artifact's title, format and source |
@@ -780,6 +798,7 @@ src-tauri/src/
   store.rs    durable snapshots, scrollback and settings
   files.rs    reading and saving edited files
   git.rs      the sidebar's Git tab, through your own git
+  github.rs   pull requests and issues, through your own gh
   search.rs   the sidebar's Search tab
   mcp.rs      jterm's MCP server, handing tool calls to the window they are for
   agent_cli.rs starting Claude Code, Codex or Gemini CLI connected to it
