@@ -23,14 +23,16 @@ The track, the frames and the encoded film are build products and are ignored.
 ## Where it is posted
 
 Published 2026-11-11, the day v1.0.0 went out, as "jterm 1.0 — the terminal
-that remembers". Both are the same 58-second 16:9 cut, public.
+that remembers". All of them are the same 58-second 16:9 cut, public.
 
 | Where | Link | Cover |
 | --- | --- | --- |
 | YouTube | https://youtu.be/RZH5tHWiZVA | the logo frame at 7.1 s (`render.py stills 7.1`), 1280×720 |
 | TikTok | https://www.tiktok.com/@jvboid/video/7707033743298514189 | the same frame, cropped to the lockup and centred on a black 1080×1920 |
+| Bluesky | https://bsky.app/profile/jvboid.bsky.social/post/3n22ws2f3ok2n | posted by hand |
+| The download page | https://jacobfv.github.io/jterm/ | the same frame (`docs/film.jpg`); the YouTube upload, embedded on click |
 
-The description on both is a one-line pitch and `jacobfv.github.io/jterm`.
+The description on YouTube and TikTok is a one-line pitch and `jacobfv.github.io/jterm`.
 YouTube will not make that link clickable until the channel has done its
 one-time verification. TikTok letterboxes the film; there is no 9:16 cut yet.
 

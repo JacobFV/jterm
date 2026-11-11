@@ -168,11 +168,13 @@
 
       header {
         position: relative;
-        min-height: min(92vh, 860px);
+        /* Short of the full viewport on purpose: the film below should show
+           its top edge without a scroll, so it is found. */
+        min-height: min(76vh, 720px);
         display: flex;
         flex-direction: column;
         justify-content: center;
-        padding: clamp(56px, 12vh, 130px) 0 clamp(40px, 8vh, 90px);
+        padding: clamp(56px, 10vh, 110px) 0 clamp(24px, 4vh, 48px);
       }
 
       .eyebrow {
@@ -335,6 +337,56 @@
       }
       figure.shot figcaption b { color: var(--ink-2); font-weight: 500; }
 
+      /* The film. A poster and a play button until it is asked for: an
+         embedded player loads a megabyte of someone else's script and sets
+         their cookies on every visit, which is a lot to charge the visitor
+         who came for a download link. The frame is swapped in on click. */
+      .film {
+        position: relative;
+        display: block;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: 2px;
+        background: #000 center / cover no-repeat;
+        cursor: pointer;
+        overflow: hidden;
+      }
+      .film iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+      .film .play {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 84px;
+        height: 84px;
+        margin: -42px 0 0 -42px;
+        border-radius: 50%;
+        background: var(--gold);
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+        transition: transform 120ms ease;
+      }
+      .film .play::after {
+        content: "";
+        position: absolute;
+        left: 34px;
+        top: 26px;
+        border-style: solid;
+        border-width: 16px 0 16px 26px;
+        border-color: transparent transparent transparent #0b0900;
+      }
+      .film:hover .play, .film:focus-visible .play { transform: scale(1.08); }
+      .film .len {
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        padding: 2px 7px;
+        font: 11px var(--mono);
+        color: #fff;
+        background: rgba(0, 0, 0, 0.75);
+        border-radius: 2px;
+      }
+
       /* ── Sections ────────────────────────────────────────────────── */
       section { padding: clamp(64px, 11vh, 128px) 0; border-top: 1px solid var(--line); }
 
@@ -488,6 +540,26 @@
           </details>
         </header>
 
+        <figure class="shot" style="margin-top: 28px">
+          <div class="shot-frame">
+            <button
+              class="film"
+              id="film"
+              type="button"
+              style="background-image: url(film.jpg)"
+              aria-label="Play the jterm 1.0 film, 58 seconds, with sound"
+            >
+              <span class="play" aria-hidden="true"></span>
+              <span class="len" aria-hidden="true">0:58</span>
+            </button>
+          </div>
+          <figcaption>
+            <b>jterm 1.0 in 58 seconds</b> — splits, panes that float, the sidebar, diffs,
+            pull requests, artifacts, and what happens when the machine dies. Fast cuts and
+            flashing; it plays from YouTube when you press it.
+          </figcaption>
+        </figure>
+
         <figure class="shot">
           <div class="shot-frame">
             <img
@@ -591,6 +663,21 @@
     </div>
 
     <script>
+      // The film is a button until pressed; then it is YouTube's player, from
+      // the domain that does not set cookies before playback.
+      document.getElementById("film").addEventListener("click", function () {
+        const frame = document.createElement("iframe");
+        frame.src = "https://www.youtube-nocookie.com/embed/RZH5tHWiZVA?autoplay=1&rel=0";
+        frame.title = "jterm 1.0 — the terminal that remembers";
+        frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+        frame.allowFullscreen = true;
+        const box = document.createElement("div");
+        box.className = "film";
+        box.style.cursor = "default";
+        box.appendChild(frame);
+        this.replaceWith(box);
+      });
+
       /* ── Animated ASCII fractals, at three grains ────────────────────
          Escape-time Julia sets, `z ← z² + c`, drawn as characters into <pre>
          elements — a single text assignment per frame, which is far cheaper
