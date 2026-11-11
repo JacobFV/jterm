@@ -374,6 +374,10 @@ body,
   max-width: 100%;
   height: auto;
 }
+/* A comment on GitHub sits in a card, whose padding is its margin. */
+.gh-markdown > :last-child {
+  margin-bottom: 0;
+}
 .markdown-mermaid {
   margin: 1em 0;
   overflow-x: auto;

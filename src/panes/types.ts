@@ -1,5 +1,5 @@
 import type { ThemeChoice } from "@/state/settings";
-import type { PaneState } from "@/state/workspace";
+import type { PaneKind, PaneState } from "@/state/workspace";
 
 /**
  * What every pane kind is handed.
@@ -7,6 +7,11 @@ import type { PaneState } from "@/state/workspace";
  * Deliberately small. A pane gets its own state, whether it is the focused one,
  * and two ways to talk back — that is the whole contract, and adding a kind
  * means implementing this and adding a line to `registry.tsx`.
+ *
+ * `onOpenPane` is the one way out to the rest of the window, for a pane whose
+ * content points at other things worth a pane — a pull request's checks, its
+ * page on GitHub. It is the app's `openPane`, so what it opens goes wherever
+ * the user has asked opened things to go, the same as from the sidebar.
  */
 export interface PaneProps<T extends PaneState = PaneState> {
   pane: T;
@@ -31,4 +36,6 @@ export interface PaneProps<T extends PaneState = PaneState> {
   onMeta: (patch: Partial<T>) => void;
   /** Ask to become the focused pane, e.g. because it was clicked. */
   onFocus: () => void;
+  /** Open another pane, wherever opened files go. */
+  onOpenPane: (kind: PaneKind, seed: Partial<PaneState>) => void;
 }

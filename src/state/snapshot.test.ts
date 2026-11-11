@@ -500,7 +500,8 @@ describe("pull request and issue panes", () => {
 
   it("are dropped without a repository or a whole positive number", () => {
     for (const kind of ["pr", "issue"] as const) {
-      expect(roundTrip(kind, { root: "/repo", number: 3 }, (raw) => delete raw.root)).toBeUndefined();
+      const rootless = roundTrip(kind, { root: "/repo", number: 3 }, (raw) => delete raw.root);
+      expect(rootless).toBeUndefined();
       for (const number of [0, -4, 1.5, "12", null, Number.MAX_SAFE_INTEGER, NaN]) {
         const pane = roundTrip(kind, { root: "/repo", number: 3 }, (raw) => (raw.number = number));
         expect(pane, `${kind} ${String(number)}`).toBeUndefined();

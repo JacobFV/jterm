@@ -10,14 +10,17 @@
  * The menu is a separate list because it is not the same thing as the set of
  * kinds. `Open file…` is one entry that can produce any of four kinds, and the
  * viewers have no menu entry at all: there is no such thing as an empty image
- * pane to create. Nor an empty diff — those come from the sidebar's Git tab.
+ * pane to create. Nor an empty diff — those come from the sidebar's Git tab —
+ * nor an empty pull request or issue, which come from its GitHub tool.
  */
 
 import type { ComponentType } from "react";
 import {
+  CircleDot,
   FileText,
   FolderOpen,
   GitCompare,
+  GitPullRequest,
   Globe,
   Image as ImageIcon,
   Box,
@@ -39,9 +42,11 @@ import { ArtifactPane } from "./ArtifactPane";
 import { BrowserPane } from "./BrowserPane";
 import { DiffPane } from "./DiffPane";
 import { ImagePane } from "./ImagePane";
+import { IssuePane } from "./IssuePane";
 import { MediaPane } from "./MediaPane";
 import { ModelPane } from "./ModelPane";
 import { NotepadPane } from "./NotepadPane";
+import { PullRequestPane } from "./PullRequestPane";
 import { RdpPane } from "./RdpPane";
 import { TerminalPane } from "./TerminalPane";
 import { VncPane } from "./VncPane";
@@ -131,6 +136,10 @@ export const PANE_KINDS: PaneKindDef[] = [
   // No menu entry either — an artifact is something the agent hands over, and
   // an empty one is nothing anyone could want to create.
   { kind: "artifact", label: "Artifact", icon: ScrollText, Component: ArtifactPane },
+  // From the sidebar's GitHub tool or the agent, never the menu, for the same
+  // reason as a diff. Nothing to dispose: what they show lives on GitHub.
+  { kind: "pr", label: "Pull request", icon: GitPullRequest, Component: PullRequestPane },
+  { kind: "issue", label: "Issue", icon: CircleDot, Component: IssuePane },
 ];
 
 const BY_KIND = new Map(PANE_KINDS.map((definition) => [definition.kind, definition]));

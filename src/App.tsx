@@ -1692,6 +1692,7 @@ export function App() {
                 dispatch={dispatch}
                 onClosePane={(paneId) => void closePane(paneId)}
                 paneMenu={paneMenu}
+                onOpenPane={openPane}
                 tabDrag={tabDrag}
                 onTabDropTarget={noteTabDropTarget}
               />

@@ -71,7 +71,10 @@ const check = (name: string, bucket: GhCheck["bucket"]): GhCheck => ({
 
 describe("ghFailure", () => {
   it("reads the backend's kind and message, and calls anything else a failure", () => {
-    expect(ghFailure({ kind: "auth", message: "log in" })).toEqual({ kind: "auth", message: "log in" });
+    expect(ghFailure({ kind: "auth", message: "log in" })).toEqual({
+      kind: "auth",
+      message: "log in",
+    });
     expect(ghFailure({ kind: "nonsense", message: "x" }).kind).toBe("failed");
     expect(ghFailure(new Error("boom"))).toEqual({ kind: "failed", message: "boom" });
     expect(ghFailure("Error: plain")).toEqual({ kind: "failed", message: "plain" });
@@ -123,7 +126,9 @@ describe("mergeBlocker", () => {
     expect(mergeBlocker({ ...PULL, state: "merged" }, REPO)).toMatch(/Already merged/);
     expect(mergeBlocker({ ...PULL, state: "closed" }, REPO)).toMatch(/closed/);
     expect(mergeBlocker({ ...PULL, draft: true }, REPO)).toMatch(/draft/i);
-    expect(mergeBlocker({ ...PULL, mergeable: "conflicting" }, REPO)).toMatch(/conflicts with main/);
+    expect(mergeBlocker({ ...PULL, mergeable: "conflicting" }, REPO)).toMatch(
+      /conflicts with main/,
+    );
     expect(mergeBlocker({ ...PULL, mergeState: "behind" }, REPO)).toMatch(/behind main/);
     expect(
       mergeBlocker({ ...PULL, mergeState: "blocked", reviewDecision: "review_required" }, REPO),

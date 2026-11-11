@@ -65,7 +65,9 @@ export function advice(kind: GhErrorKind, what: "pr" | "issue" | "list" = "list"
     case "missing":
       return {
         title: "The GitHub CLI is not installed",
-        hint: "jterm reads GitHub through gh. Install it from cli.github.com, run `gh auth login`, then refresh.",
+        hint:
+          "jterm reads GitHub through gh. Install it from cli.github.com, " +
+          "run `gh auth login`, then refresh.",
       };
     case "auth":
       return {
@@ -80,11 +82,15 @@ export function advice(kind: GhErrorKind, what: "pr" | "issue" | "list" = "list"
     case "notGithub":
       return {
         title: "No GitHub remote",
-        hint: "None of this repository's remotes is on a GitHub host gh knows. Add one with `git remote add`, or sign in to an Enterprise host with `gh auth login --hostname <host>`.",
+        hint:
+          "None of this repository's remotes is on a GitHub host gh knows. Add one with " +
+          "`git remote add`, or sign in to an Enterprise host with " +
+          "`gh auth login --hostname <host>`.",
       };
     case "notFound":
       return {
-        title: what === "pr" ? "No such pull request" : what === "issue" ? "No such issue" : "Not found",
+        title:
+          what === "pr" ? "No such pull request" : what === "issue" ? "No such issue" : "Not found",
         hint: "It is not in this repository, or this account cannot see it.",
       };
     case "offline":
@@ -172,7 +178,9 @@ export function sortChecks(checks: GhCheck[]): GhCheck[] {
     neutral: 4,
     skipped: 5,
   };
-  return [...checks].sort((a, b) => rank[a.bucket] - rank[b.bucket] || a.name.localeCompare(b.name));
+  return [...checks].sort(
+    (a, b) => rank[a.bucket] - rank[b.bucket] || a.name.localeCompare(b.name),
+  );
 }
 
 /** A check summary in a few words, for the sidebar and the Checks tab. */
@@ -208,7 +216,11 @@ export type TimelineEntry =
  */
 export function timeline(pull: Pick<GhPull, "comments" | "reviews">): TimelineEntry[] {
   const entries: TimelineEntry[] = [
-    ...pull.comments.map((comment) => ({ type: "comment" as const, at: comment.createdAt, comment })),
+    ...pull.comments.map((comment) => ({
+      type: "comment" as const,
+      at: comment.createdAt,
+      comment,
+    })),
     ...pull.reviews
       .filter((review) => review.body.trim() !== "" || reviewVerdict(review.state) !== null)
       .map((review) => ({ type: "review" as const, at: review.submittedAt, review })),
@@ -284,7 +296,9 @@ export function paneTitle(number: number, title: string): string {
 
 /** A pull request's head as GitHub writes it: `branch`, or `owner:branch` from a fork. */
 export function headLabel(pull: Pick<GhPull, "headRef" | "headOwner" | "crossRepository">): string {
-  return pull.crossRepository && pull.headOwner ? `${pull.headOwner}:${pull.headRef}` : pull.headRef;
+  return pull.crossRepository && pull.headOwner
+    ? `${pull.headOwner}:${pull.headRef}`
+    : pull.headRef;
 }
 
 /** "N commits", "1 commit". */

@@ -46,7 +46,15 @@ import { resolveTheme, themeStyle } from "@/lib/appearance";
 import { useSettings, useSystemScheme } from "@/lib/useSettings";
 import { cn } from "@/lib/utils";
 import { paneIcon, paneKind } from "@/panes/registry";
-import { type Action, type Popup, type Tab, paneLabel, themeOf } from "@/state/workspace";
+import {
+  type Action,
+  type PaneKind,
+  type PaneState,
+  type Popup,
+  type Tab,
+  paneLabel,
+  themeOf,
+} from "@/state/workspace";
 import { type DropEdge, type Layout, type Rect, countPanes, layout } from "@/state/tree";
 import { AmbientBackdrop } from "./AmbientBackdrop";
 import {
@@ -114,6 +122,8 @@ interface WorkspaceProps {
   /** What a pane's kind icon offers. Replacing a pane closes the old one, which
    *  is the app's business for the same reason closing is. */
   paneMenu: PaneMenuActions;
+  /** Handed to every pane as `onOpenPane`; see `PaneProps`. */
+  onOpenPane: (kind: PaneKind, seed: Partial<PaneState>) => void;
   tabDrag: TabDrag | null;
   /** Reported upwards because the release happens in the tab strip, which
    *  cannot work out where in here the pointer was. */
@@ -133,6 +143,7 @@ export function Workspace({
   dispatch,
   onClosePane,
   paneMenu,
+  onOpenPane,
   tabDrag,
   onTabDropTarget,
 }: WorkspaceProps) {
@@ -703,6 +714,7 @@ export function Workspace({
                       )
                     }
                     onMeta={(patch) => dispatch({ type: "pane/meta", paneId, patch })}
+                    onOpenPane={onOpenPane}
                   />
                 </ErrorBoundary>
               </div>
