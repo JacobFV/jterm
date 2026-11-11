@@ -74,6 +74,8 @@ describe("the MCP tools", () => {
       "open_file",
       "open_url",
       "focus_pane",
+      "open_github",
+      "open_diff",
       "create_artifact",
       "update_artifact",
       "read_artifact",
@@ -255,5 +257,100 @@ describe("the MCP tools", () => {
     const { context } = harness();
     expect((await callTool("rm_rf", {}, context)).isError).toBe(true);
     expect((await callTool("read_terminal", { pane_id: 5 }, context)).isError).toBe(true);
+  });
+
+  it("opens a pull request or an issue where it was asked, and list_panes says which", async () => {
+    const { context, get } = harness();
+    const args = { kind: "pr", number: 214, root: "/src/jterm" };
+    const pr = await callTool("open_github", args, context);
+    expect(pr.isError).toBeUndefined();
+    expect(body(pr)).toContain("new1");
+    expect(get().tabs[1].panes.new1).toMatchObject({ kind: "pr", root: "/src/jterm", number: 214 });
+
+    await callTool(
+      "open_github",
+      { kind: "issue", number: 7, root: "C:\\src\\jterm", where: "pane" },
+      context,
+    );
+    // Split beside the focused pane, in the tab that was active.
+    expect(Object.keys(get().tabs[1].panes)).toHaveLength(2);
+    expect(get().tabs[1].panes.new2).toMatchObject({ kind: "issue", number: 7 });
+
+    const described = JSON.parse(body(await callTool("list_panes", {}, context)));
+    const panes = described.tabs[1].panes;
+    expect(panes.find((pane: { id: string }) => pane.id === "new1")).toMatchObject({
+      kind: "pr",
+      title: "Pull request #214",
+      github: { root: "/src/jterm", number: 214 },
+    });
+    expect(panes.find((pane: { id: string }) => pane.id === "new2")).toMatchObject({
+      kind: "issue",
+      github: { number: 7 },
+    });
+  });
+
+  it("refuses a pull request or issue it could not open, and opens nothing", async () => {
+    const { context, get } = harness();
+    const attempts = [
+      { kind: "discussion", number: 1, root: "/r" },
+      { kind: "pr", number: 0, root: "/r" },
+      { kind: "pr", number: 1.5, root: "/r" },
+      { kind: "pr", number: "12", root: "/r" },
+      { kind: "issue", number: 3, root: "relative/dir" },
+      { kind: "issue", number: 3 },
+    ];
+    for (const args of attempts) {
+      const result = await callTool("open_github", args, context);
+      expect(result.isError, JSON.stringify(args)).toBe(true);
+    }
+    expect(get().tabs).toHaveLength(1);
+  });
+
+  it("opens a diff of the working tree, the index or a commit, narrowed or not", async () => {
+    const { context, get } = harness();
+    await callTool("open_diff", { root: "/repo" }, context);
+    expect(get().tabs[1].panes.new1).toMatchObject({
+      kind: "diff",
+      root: "/repo",
+      source: "worktree",
+    });
+
+    await callTool(
+      "open_diff",
+      { root: "/repo", source: "commit", rev: "HEAD~2", path: "src/main.rs", where: "popup" },
+      context,
+    );
+    expect(get().popups[0].pane).toMatchObject({
+      kind: "diff",
+      source: "commit",
+      rev: "HEAD~2",
+      path: "src/main.rs",
+    });
+
+    const described = JSON.parse(body(await callTool("list_panes", {}, context)));
+    expect(described.popups[0].diff).toEqual({
+      root: "/repo",
+      source: "commit",
+      rev: "HEAD~2",
+      path: "src/main.rs",
+    });
+  });
+
+  it("refuses a diff git could be tricked by, and opens nothing", async () => {
+    const { context, get } = harness();
+    const attempts = [
+      { root: "repo" },
+      { root: "/repo", source: "stash" },
+      { root: "/repo", source: "commit", rev: "--output=/tmp/x" },
+      { root: "/repo", source: "staged", rev: "HEAD" },
+      { root: "/repo", path: "../../etc/passwd" },
+      { root: "/repo", path: "/etc/passwd" },
+    ];
+    for (const args of attempts) {
+      const result = await callTool("open_diff", args, context);
+      expect(result.isError, JSON.stringify(args)).toBe(true);
+    }
+    expect(get().tabs).toHaveLength(1);
+    expect(get().popups).toHaveLength(0);
   });
 });

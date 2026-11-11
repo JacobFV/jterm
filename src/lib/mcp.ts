@@ -26,6 +26,7 @@ import {
   tabLabel,
   type Action,
   type ArtifactPaneState,
+  type DiffSource,
   type PaneKind,
   type PaneState,
   type Workspace,
@@ -37,6 +38,7 @@ import {
   MAX_ARTIFACT_TITLE,
   type ArtifactFormat,
 } from "./artifacts";
+import { isGithubNumber, isRepoPath, isSafeRev } from "@/state/snapshot";
 import type { TerminalHandle } from "./terminals";
 
 export interface ToolContext {
@@ -183,6 +185,67 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "open_github",
+    title: "Open a pull request or issue",
+    description:
+      "Show the user a GitHub pull request or issue in a pane of its own, read through their own gh CLI, and return its pane id. A pull request pane has the conversation, the checks with their state, and the files changed as a diff, with Merge (behind a confirmation the user clicks), Check out and Open on GitHub; an issue pane has the conversation and close/reopen. root is a directory in a local checkout of the repository — gh works out which GitHub repository from its remotes — so use the working directory of the terminal the user is in, or the repository you are working in. The pane needs gh installed and logged in, and says so if it is not.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: {
+          type: "string",
+          enum: ["pr", "issue"],
+          description: "pr for a pull request, issue for an issue.",
+        },
+        number: {
+          type: "integer",
+          minimum: 1,
+          description: "The pull request's or issue's number.",
+        },
+        root: {
+          type: "string",
+          description: "Absolute path of a directory inside a local checkout of the repository.",
+        },
+        where: WHERE,
+      },
+      required: ["kind", "number", "root"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "open_diff",
+    title: "Open a diff",
+    description:
+      "Show the user a git diff in a pane of its own, and return its pane id: the working tree's unstaged changes and untracked files (worktree), what is staged (staged), or one commit against its parent (commit) — the whole repository's, or narrowed to one path. Use it to show what you changed rather than describing it. The pane reads git again whenever it is shown, so a worktree diff stays current as you keep working.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        root: {
+          type: "string",
+          description: "Absolute path of the repository, or any directory inside it.",
+        },
+        source: {
+          type: "string",
+          enum: ["worktree", "staged", "commit"],
+          description: "What to compare. Defaults to worktree.",
+        },
+        rev: {
+          type: "string",
+          description:
+            "For source commit: the commit — a hash, a branch, HEAD~2. Defaults to HEAD.",
+        },
+        path: {
+          type: "string",
+          description:
+            "Narrow it to one file or directory, relative to the repository's top level.",
+        },
+        where: WHERE,
+      },
+      required: ["root"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "create_artifact",
     title: "Show a document",
     description:
@@ -284,6 +347,10 @@ export async function callTool(
         return openUrl(args, context);
       case "focus_pane":
         return focusPane(args, context);
+      case "open_github":
+        return openGithub(args, context);
+      case "open_diff":
+        return openDiff(args, context);
       case "create_artifact":
         return createArtifact(args, context);
       case "update_artifact":
@@ -432,6 +499,65 @@ function focusPane(args: Record<string, unknown>, context: ToolContext): ToolRes
     context.dispatch({ type: "pane/focus", tabId: found.tabId, paneId });
   }
   return text(`Focused ${paneLabel(found.pane)} (${paneId}).`);
+}
+
+/**
+ * A pull request or issue, in a pane. Nothing is fetched here: the pane reads
+ * it through gh when it mounts and says for itself when gh is missing or
+ * logged out. So the reply says what was opened, not that it was found.
+ */
+function openGithub(args: Record<string, unknown>, context: ToolContext): ToolResult {
+  const kind = args.kind;
+  if (kind !== "pr" && kind !== "issue") throw new Error("kind must be pr or issue");
+  const number = args.number;
+  if (!isGithubNumber(number)) throw new Error("number must be a whole number, 1 or more");
+  const root = absoluteDirectory(requireString(args, "root"), "root");
+  const id = context.newId();
+  place(context, kind, { id, root, number } as Partial<PaneState>, where(args));
+  const what = kind === "pr" ? "pull request" : "issue";
+  return text(`Opened ${what} #${number} from ${root} in pane ${id}.`);
+}
+
+/**
+ * A git diff, in a pane. The revision and path are checked here the way the
+ * snapshot checks them, so a value git would read as an option never reaches
+ * a pane — the backend checks again, but a pane that opens only to refuse is
+ * worse than a tool error the agent can correct.
+ */
+function openDiff(args: Record<string, unknown>, context: ToolContext): ToolResult {
+  const root = absoluteDirectory(requireString(args, "root"), "root");
+  const source = args.source ?? "worktree";
+  if (source !== "worktree" && source !== "staged" && source !== "commit") {
+    throw new Error("source must be worktree, staged or commit");
+  }
+  const rev = optionalString(args, "rev");
+  if (rev !== undefined && source !== "commit") {
+    throw new Error("rev is only for source commit");
+  }
+  if (rev !== undefined && !isSafeRev(rev)) throw new Error(`not a revision: ${rev}`);
+  const path = optionalString(args, "path");
+  if (path !== undefined && !isRepoPath(path)) {
+    throw new Error(`path must be relative to the repository and stay inside it, not ${path}`);
+  }
+  const id = context.newId();
+  const seed = {
+    id,
+    root,
+    source: source as DiffSource,
+    ...(rev !== undefined ? { rev } : {}),
+    ...(path !== undefined ? { path } : {}),
+  };
+  place(context, "diff", seed as Partial<PaneState>, where(args));
+  const what = source === "commit" ? `commit ${rev ?? "HEAD"}` : source;
+  return text(`Opened the ${what} diff of ${root}${path ? `, ${path}` : ""}, in pane ${id}.`);
+}
+
+/** The same rule `open_file` has, for the same reason. */
+function absoluteDirectory(path: string, key: string): string {
+  if (!/^(\/|[A-Za-z]:[\\/]|\\\\)/.test(path)) {
+    throw new Error(`${key} must be an absolute path, not ${path || "(empty)"}`);
+  }
+  return path;
 }
 
 /**
