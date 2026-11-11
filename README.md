@@ -80,6 +80,15 @@ runs on your behalf.
   the terminal beside it. **Agent** runs Claude Code, Codex or Gemini CLI there,
   whichever **Settings → Agent** names, and keeps it running while you switch
   tabs or close the sidebar.
+- **Reads a diff as a pane of its own.** From the Git tab, the diff icon on a
+  changed file, on the Staged or Changes heading, or a click on a commit in the
+  history opens that diff as a pane — split it, drag it, float it, and it comes
+  back after a restart like any other. Files collapse, hunks have line numbers
+  on both sides, and **Split** puts old and new side by side, in your theme's
+  own green and red. What is kept is *what* is compared, never the diff: the
+  working tree is read again whenever you come back to the pane, so it shows
+  the repository as it is now. A diff too long to read is cut at a few
+  megabytes, and says so.
 - **Hands the agent the app, not just the files.** The sidebar's agent is always
   started connected to jterm's own MCP server, so it can list your tabs and
   panes, read what the build in the next pane just printed, type into a
