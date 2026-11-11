@@ -244,6 +244,7 @@ pub fn run() {
             git::git_unstage,
             git::git_commit,
             git::git_diff,
+            git::git_diff_view,
             git::git_log,
             git::git_action,
             search::search_files,

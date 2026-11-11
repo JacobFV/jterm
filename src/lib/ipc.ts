@@ -650,6 +650,39 @@ export interface GitCommit {
 
 export type GitAction = "push" | "pull" | "fetch" | "init";
 
+/**
+ * What a diff pane compares: the worktree against the index (with untracked
+ * files), the index against `HEAD`, or one commit against its first parent.
+ */
+export type GitDiffSource = "worktree" | "staged" | "commit";
+
+/** A commit's particulars, for the header of a diff pane showing it. */
+export interface GitCommitDetail {
+  hash: string;
+  short: string;
+  author: string;
+  email: string;
+  /** ISO 8601. */
+  date: string;
+  /** "3 hours ago", as git words it. */
+  when: string;
+  subject: string;
+  body: string;
+}
+
+/** A diff for a pane. See `git_diff_view` in `src-tauri/src/git.rs`. */
+export interface GitDiffView {
+  /** The repository's top level — possibly above the directory asked about. */
+  root: string;
+  /** Unified diff text; read it with `parseDiff` from `lib/diff`. */
+  text: string;
+  /** The text was cut at the size cap (a few MB) and stops short of the whole. */
+  truncated: boolean;
+  /** Untracked files that exist but were left out of a worktree diff. */
+  untrackedOmitted: number;
+  commit: GitCommitDetail | null;
+}
+
 export const git = {
   /** `null` for a directory that is in no repository. */
   status: (cwd: string): Promise<GitStatus | null> => call("git_status", { cwd }, null),
@@ -660,6 +693,19 @@ export const git = {
   diff: (root: string, path: string, staged: boolean, untracked: boolean): Promise<string> =>
     call("git_diff", { root, path, staged, untracked }, ""),
   log: (root: string, limit?: number): Promise<GitCommit[]> => call("git_log", { root, limit }, []),
+  /**
+   * A whole diff for a pane to read. `cwd` may be anywhere in the repository.
+   * Resolves to `null` for a directory in no repository; rejects with git's
+   * words — or "git is not installed" — when it could not be asked.
+   */
+  diffView: (args: {
+    cwd: string;
+    source: GitDiffSource;
+    /** For `commit`: any revision git understands. Defaults to `HEAD`. */
+    rev?: string;
+    /** Narrow to one path, relative to the repository root. */
+    path?: string;
+  }): Promise<GitDiffView | null> => call("git_diff_view", args, null),
   /** Resolves to what git said; rejects with what git said when it failed. */
   action: (cwd: string, action: GitAction): Promise<string> =>
     call("git_action", { cwd, action }, ""),

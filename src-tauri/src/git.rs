@@ -24,10 +24,11 @@
 //! a slow network is seconds, and a synchronous Tauri command runs on the main
 //! thread — the one drawing the window.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// What a status poll is willing to report. A repository with a hundred
 /// thousand untracked files has no useful list to draw, and serialising it
@@ -36,6 +37,15 @@ const MAX_FILES: usize = 5000;
 /// A diff drawn in a 220-pixel sidebar is for glancing at. Past this it is cut,
 /// and says so.
 const MAX_DIFF_BYTES: usize = 512 * 1024;
+/// A diff *pane* is for reading, so it gets far more — but not without limit.
+/// The text crosses IPC as one string and is parsed in one go, and a
+/// regenerated lockfile or a vendored directory can be hundreds of megabytes.
+/// Four is a few hundred thousand lines, more than anyone reads, and still
+/// arrives in well under a second.
+const MAX_VIEW_BYTES: usize = 4 * 1024 * 1024;
+/// Untracked files are diffed one `git` process each, so a directory of build
+/// output nobody ignored would otherwise be thousands of processes.
+const MAX_UNTRACKED: usize = 200;
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct GitFile {
@@ -73,6 +83,51 @@ pub struct GitCommit {
     pub when: String,
 }
 
+/// What a diff pane compares. See `DiffPaneState` in `src/state/workspace.ts`.
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DiffSource {
+    /// The worktree against the index — the sidebar's "Changes" — plus
+    /// untracked files, which are changes too as far as anyone reading is
+    /// concerned.
+    Worktree,
+    /// The index against `HEAD` — the sidebar's "Staged".
+    Staged,
+    /// One commit against its first parent.
+    Commit,
+}
+
+/// A diff for a pane: the raw text, and enough around it to say what it is.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitDiffView {
+    /// The repository's top level, which may be above the directory asked about.
+    pub root: String,
+    /// Unified diff text, cut at a line boundary when it was too long.
+    pub text: String,
+    /// True when `text` stops short of the whole diff.
+    pub truncated: bool,
+    /// Untracked files that exist but were not diffed, past `MAX_UNTRACKED` or
+    /// past the size cap.
+    pub untracked_omitted: usize,
+    /// For a commit, who and when and why.
+    pub commit: Option<GitCommitDetail>,
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct GitCommitDetail {
+    pub hash: String,
+    pub short: String,
+    pub author: String,
+    pub email: String,
+    /// ISO 8601, for a tooltip.
+    pub date: String,
+    /// "3 hours ago", as git words it.
+    pub when: String,
+    pub subject: String,
+    pub body: String,
+}
+
 /* ── Running git ─────────────────────────────────────────────────────────── */
 
 struct Output {
@@ -82,7 +137,7 @@ struct Output {
     stderr: String,
 }
 
-fn git(cwd: &Path, args: &[&str]) -> Result<Output, String> {
+fn command(cwd: &Path, args: &[&str]) -> Command {
     let mut cmd = Command::new("git");
     cmd.arg("-C")
         .arg(cwd)
@@ -98,16 +153,76 @@ fn git(cwd: &Path, args: &[&str]) -> Result<Output, String> {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let out = cmd.output().map_err(|err| match err.kind() {
+    cmd
+}
+
+fn spawn_error(err: std::io::Error) -> String {
+    match err.kind() {
         std::io::ErrorKind::NotFound => "git is not installed, or not on the PATH".to_string(),
         _ => format!("could not run git: {err}"),
-    })?;
+    }
+}
+
+fn git(cwd: &Path, args: &[&str]) -> Result<Output, String> {
+    let out = command(cwd, args).output().map_err(spawn_error)?;
     Ok(Output {
         ok: out.status.success(),
         code: out.status.code(),
         stdout: out.stdout,
         stderr: String::from_utf8_lossy(&out.stderr).trim().to_string(),
     })
+}
+
+/// Run git, keeping at most `limit` bytes of what it prints, and say whether
+/// that was all of it.
+///
+/// `output()` would read everything first and cap afterwards, which for a diff
+/// of a 2 GB log file is 2 GB of memory to keep 4 MB of it. This stops reading
+/// at the limit and kills git, so the cap bounds the memory as well as the
+/// answer. Stderr is drained on a thread of its own: a git that filled that
+/// pipe while only stdout was being read would block, and so would this.
+///
+/// A killed git does not exit successfully, so `ok` is true for a cut-off read
+/// — the cut was this function's doing, not git's.
+fn git_capped(cwd: &Path, args: &[&str], limit: usize) -> Result<(Output, bool), String> {
+    let mut child = command(cwd, args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(spawn_error)?;
+    let mut stderr = child.stderr.take();
+    let errors = std::thread::spawn(move || {
+        let mut text = Vec::new();
+        if let Some(pipe) = stderr.as_mut() {
+            let _ = pipe.read_to_end(&mut text);
+        }
+        text
+    });
+    let mut stdout = Vec::new();
+    if let Some(pipe) = child.stdout.take() {
+        // One byte past the limit is how "exactly the limit" and "more" differ.
+        pipe.take(limit as u64 + 1)
+            .read_to_end(&mut stdout)
+            .map_err(|err| format!("could not read git's output: {err}"))?;
+    }
+    let truncated = stdout.len() > limit;
+    if truncated {
+        let _ = child.kill();
+        stdout.truncate(limit);
+    }
+    let status = child
+        .wait()
+        .map_err(|err| format!("git did not finish: {err}"))?;
+    let stderr = errors.join().unwrap_or_default();
+    Ok((
+        Output {
+            ok: truncated || status.success(),
+            code: status.code(),
+            stdout,
+            stderr: String::from_utf8_lossy(&stderr).trim().to_string(),
+        },
+        truncated,
+    ))
 }
 
 /// Run git and hand back stdout, or git's own words for why it did not work.
@@ -421,6 +536,233 @@ pub async fn git_diff(
     .await
 }
 
+/// Options every diff a pane reads is produced with, whatever the user's config.
+///
+/// Each one is there because a setting someone is entitled to have would
+/// otherwise change the text into something the parser cannot read:
+/// `diff.external` hands the diff to another program, `diff.noprefix` and
+/// `diff.mnemonicPrefix` change the `a/`/`b/` that names are read by, `color.ui
+/// = always` puts escape codes in it, and `diff.renames = false` turns a rename
+/// into a deletion and an addition.
+const DIFF_FLAGS: [&str; 5] = [
+    "--no-color",
+    "--no-ext-diff",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+    "-M",
+];
+
+/// A revision from the frontend, about to be an argument to git.
+///
+/// Refused rather than cleaned when it begins with `-`, which git would read as
+/// an option — `--output=…` writes a file. Everything else is git's to judge,
+/// and `rev-parse` says so in its own words when it does not like it.
+fn checked_rev(rev: &str) -> Result<&str, String> {
+    let bad = rev.is_empty()
+        || rev.len() > 256
+        || rev.starts_with('-')
+        || rev.chars().any(|c| c == '\0' || c.is_whitespace());
+    if bad {
+        Err(format!("refusing an unexpected revision: {rev}"))
+    } else {
+        Ok(rev)
+    }
+}
+
+/// The repository `cwd` is in, `None` when it is in none, and an error when the
+/// question could not be asked — no git, or no such directory. The sidebar can
+/// treat those alike; a pane that says "not a repository" when the truth is
+/// "git is not installed" sends someone looking in the wrong place.
+fn repository(cwd: &Path) -> Result<Option<PathBuf>, String> {
+    if !cwd.is_dir() {
+        return Err(format!("{} is not a directory", cwd.display()));
+    }
+    let out = git(cwd, &["rev-parse", "--show-toplevel"])?;
+    if !out.ok {
+        return Ok(None);
+    }
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    Ok((!text.is_empty()).then(|| PathBuf::from(text)))
+}
+
+/// Where a capped read is cut: the last whole line inside `limit`, so the
+/// parser is never handed half of one.
+fn cut_at_line(mut bytes: Vec<u8>, truncated: bool) -> String {
+    if truncated {
+        if let Some(end) = bytes.iter().rposition(|&b| b == b'\n') {
+            bytes.truncate(end + 1);
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// Run one diff into what is left of `budget`, appending to `text`. Returns
+/// whether it was cut. `allow_one` is for `--no-index`, which exits 1 to mean
+/// "the files differ" — the answer it was asked for, not a failure.
+fn diff_into(
+    root: &Path,
+    args: &[&str],
+    budget: &mut usize,
+    text: &mut String,
+    allow_one: bool,
+) -> Result<bool, String> {
+    let (out, truncated) = git_capped(root, args, *budget)?;
+    if !out.ok && !(allow_one && out.code == Some(1)) {
+        return Err(if out.stderr.is_empty() {
+            "git diff failed".into()
+        } else {
+            out.stderr
+        });
+    }
+    let chunk = cut_at_line(out.stdout, truncated);
+    *budget = budget.saturating_sub(chunk.len());
+    text.push_str(&chunk);
+    Ok(truncated)
+}
+
+/// The body of `git_diff_view`, synchronous and with the cap as a parameter so
+/// the tests can make it small.
+fn diff_view(
+    cwd: &Path,
+    source: DiffSource,
+    rev: Option<&str>,
+    path: Option<&str>,
+    limit: usize,
+) -> Result<Option<GitDiffView>, String> {
+    let Some(root) = repository(cwd)? else {
+        return Ok(None);
+    };
+    let path = match path {
+        Some(path) => Some(checked_paths(&[path.to_string()])?[0].to_string()),
+        None => None,
+    };
+    let mut budget = limit;
+    let mut text = String::new();
+    let mut untracked_omitted = 0;
+    let mut commit = None;
+
+    let mut args: Vec<&str> = Vec::new();
+    let mut truncated = match source {
+        DiffSource::Worktree | DiffSource::Staged => {
+            args.push("diff");
+            args.extend(DIFF_FLAGS);
+            if source == DiffSource::Staged {
+                args.push("--cached");
+            }
+            args.push("--");
+            if let Some(path) = &path {
+                args.push(path);
+            }
+            diff_into(&root, &args, &mut budget, &mut text, false)?
+        }
+        DiffSource::Commit => {
+            let rev = checked_rev(rev.unwrap_or("HEAD"))?;
+            // Peeled, so a tag names the commit it points at, and so a
+            // revision that happens to share a name with a file is read as the
+            // revision.
+            let peeled = format!("{rev}^{{commit}}");
+            let meta = git_ok(
+                &root,
+                &[
+                    "show",
+                    "-s",
+                    "--no-color",
+                    "--format=%H%x1f%h%x1f%an%x1f%ae%x1f%aI%x1f%ar%x1f%s%x1f%b",
+                    &peeled,
+                    "--",
+                ],
+            )?;
+            commit = parse_commit_detail(&meta);
+            // `-m --first-parent` shows a merge as what it brought in, against
+            // the branch it was merged into. Without it a merge shows a
+            // combined diff of only its conflict resolutions, which is rarely
+            // what was meant and which the parser does not read.
+            args.extend(["show", "--format="]);
+            args.extend(DIFF_FLAGS);
+            args.extend(["-m", "--first-parent", &peeled, "--"]);
+            if let Some(path) = &path {
+                args.push(path);
+            }
+            diff_into(&root, &args, &mut budget, &mut text, false)?
+        }
+    };
+
+    if source == DiffSource::Worktree {
+        let mut list = vec!["ls-files", "--others", "--exclude-standard", "-z", "--"];
+        if let Some(path) = &path {
+            list.push(path);
+        }
+        let raw = git_ok_bytes(&root, &list)?;
+        let untracked: Vec<String> = String::from_utf8_lossy(&raw)
+            .split('\0')
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect();
+        let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
+        for (index, name) in untracked.iter().enumerate() {
+            if truncated || index >= MAX_UNTRACKED {
+                untracked_omitted = untracked.len() - index;
+                break;
+            }
+            let mut args = vec!["diff"];
+            args.extend(DIFF_FLAGS);
+            args.extend(["--no-index", "--", null, name]);
+            truncated = diff_into(&root, &args, &mut budget, &mut text, true)?;
+        }
+    }
+
+    Ok(Some(GitDiffView {
+        root: root.to_string_lossy().into_owned(),
+        text,
+        truncated,
+        untracked_omitted,
+        commit,
+    }))
+}
+
+fn parse_commit_detail(raw: &str) -> Option<GitCommitDetail> {
+    let mut parts = raw.splitn(8, '\x1f');
+    let hash = parts.next()?.trim().to_string();
+    if hash.is_empty() {
+        return None;
+    }
+    Some(GitCommitDetail {
+        hash,
+        short: parts.next()?.to_string(),
+        author: parts.next()?.to_string(),
+        email: parts.next()?.to_string(),
+        date: parts.next()?.to_string(),
+        when: parts.next()?.to_string(),
+        subject: parts.next()?.to_string(),
+        body: parts.next().unwrap_or("").trim_end().to_string(),
+    })
+}
+
+/// A diff to read in a pane: the working tree, the index, or a commit,
+/// optionally narrowed to one path, cut at `MAX_VIEW_BYTES`.
+///
+/// `cwd` may be anywhere inside the repository; the top level is found and
+/// handed back. `None` means it is in no repository, which a pane says plainly,
+/// as opposed to git being missing, which is an error and says that instead.
+#[tauri::command]
+pub async fn git_diff_view(
+    cwd: String,
+    source: DiffSource,
+    rev: Option<String>,
+    path: Option<String>,
+) -> Result<Option<GitDiffView>, String> {
+    blocking(move || {
+        diff_view(
+            Path::new(&cwd),
+            source,
+            rev.as_deref(),
+            path.as_deref(),
+            MAX_VIEW_BYTES,
+        )
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn git_log(root: String, limit: Option<u32>) -> Result<Vec<GitCommit>, String> {
     blocking(move || {
@@ -563,6 +905,125 @@ mod tests {
         assert_eq!(status.files.len(), 1);
         assert!(status.files[0].untracked);
         assert_eq!(status.files[0].path, "a file.txt");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn refuses_revisions_that_git_would_read_as_options() {
+        assert!(checked_rev("HEAD~2").is_ok());
+        assert!(checked_rev("v1.0^{commit}").is_ok());
+        assert!(checked_rev("--output=/tmp/x").is_err());
+        assert!(checked_rev("").is_err());
+        assert!(checked_rev("a b").is_err());
+    }
+
+    #[test]
+    fn cuts_a_capped_read_at_the_last_whole_line() {
+        assert_eq!(cut_at_line(b"one\ntwo\nthr".to_vec(), true), "one\ntwo\n");
+        assert_eq!(cut_at_line(b"one\ntwo".to_vec(), false), "one\ntwo");
+    }
+
+    #[test]
+    fn diffs_the_worktree_the_index_and_a_commit() {
+        let dir = std::env::temp_dir().join(format!("jterm-git-view-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        if git_ok(&dir, &["init", "-q"]).is_err() {
+            return;
+        }
+        let commit = |message: &str| {
+            git_ok(
+                &dir,
+                &[
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@example.com",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "-qm",
+                    message,
+                ],
+            )
+            .unwrap();
+        };
+        std::fs::write(dir.join("tracked.txt"), "one\ntwo\n").unwrap();
+        git_ok(&dir, &["add", "."]).unwrap();
+        commit("first");
+
+        std::fs::write(dir.join("tracked.txt"), "one\nTWO\n").unwrap();
+        std::fs::write(dir.join("staged.txt"), "staged\n").unwrap();
+        git_ok(&dir, &["add", "staged.txt"]).unwrap();
+        std::fs::write(dir.join("sub/new.txt"), "brand new\n").unwrap();
+
+        // Asked from a subdirectory: the root is still the top level.
+        let worktree = diff_view(&dir.join("sub"), DiffSource::Worktree, None, None, 1 << 20)
+            .unwrap()
+            .unwrap();
+        assert!(Path::new(&worktree.root).ends_with(dir.file_name().unwrap()));
+        assert!(worktree.text.contains("+TWO"));
+        assert!(
+            worktree.text.contains("+brand new"),
+            "untracked files are included"
+        );
+        assert!(!worktree.text.contains("+staged"));
+        assert!(!worktree.truncated);
+
+        let staged = diff_view(&dir, DiffSource::Staged, None, None, 1 << 20)
+            .unwrap()
+            .unwrap();
+        assert!(staged.text.contains("+staged"));
+        assert!(!staged.text.contains("+TWO"));
+
+        let one = diff_view(
+            &dir,
+            DiffSource::Worktree,
+            None,
+            Some("tracked.txt"),
+            1 << 20,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(one.text.contains("+TWO") && !one.text.contains("brand new"));
+
+        commit("second");
+        let shown = diff_view(&dir, DiffSource::Commit, Some("HEAD"), None, 1 << 20)
+            .unwrap()
+            .unwrap();
+        let detail = shown.commit.expect("commit detail");
+        assert_eq!(detail.subject, "second");
+        assert_eq!(detail.author, "t");
+        // Only what was staged went into it; the unstaged edit is not part of it.
+        assert!(shown.text.contains("+staged") && !shown.text.contains("+TWO"));
+        assert!(shown.text.trim_start().starts_with("diff --git"));
+
+        // A cap smaller than the diff cuts it at a line and says so.
+        let cut = diff_view(&dir, DiffSource::Commit, Some("HEAD"), None, 40)
+            .unwrap()
+            .unwrap();
+        assert!(cut.truncated);
+        assert!(cut.text.len() <= 40);
+        assert!(cut.text.is_empty() || cut.text.ends_with('\n'));
+
+        assert!(diff_view(&dir, DiffSource::Commit, Some("--help"), None, 1 << 20).is_err());
+        assert!(diff_view(&dir, DiffSource::Worktree, None, Some("../x"), 1 << 20).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn calls_a_directory_outside_any_repository_none() {
+        let dir = std::env::temp_dir().join(format!("jterm-git-none-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // The temp directory might itself be inside a repository on some
+        // machine; only assert when it is not.
+        if toplevel(&dir).is_none() {
+            assert_eq!(
+                diff_view(&dir, DiffSource::Worktree, None, None, 1024).unwrap(),
+                None
+            );
+        }
+        assert!(diff_view(&dir.join("missing"), DiffSource::Worktree, None, None, 1024).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 }
