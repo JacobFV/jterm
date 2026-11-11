@@ -24,6 +24,7 @@ import {
   MonitorCog,
   MonitorSmartphone,
   PlayCircle,
+  ScrollText,
   TerminalSquare,
   type LucideIcon,
 } from "lucide-react";
@@ -34,6 +35,7 @@ import { dropContent } from "@/state/content";
 import { programById, programForCommand, type ProgramIcon } from "@/lib/programs";
 import type { PaneKind, PaneState, Tab, TerminalPaneState } from "@/state/workspace";
 import { focusedPane } from "@/state/workspace";
+import { ArtifactPane } from "./ArtifactPane";
 import { BrowserPane } from "./BrowserPane";
 import { DiffPane } from "./DiffPane";
 import { ImagePane } from "./ImagePane";
@@ -124,6 +126,11 @@ export const PANE_KINDS: PaneKindDef[] = [
     // does: the session ends here, and the server decides what to keep.
     dispose: (pane) => rdp.close(pane.id),
   },
+  // No `dispose`: an artifact owns nothing outside React but its source, which
+  // is in the content store and is dropped by `disposePane` for every kind.
+  // No menu entry either — an artifact is something the agent hands over, and
+  // an empty one is nothing anyone could want to create.
+  { kind: "artifact", label: "Artifact", icon: ScrollText, Component: ArtifactPane },
 ];
 
 const BY_KIND = new Map(PANE_KINDS.map((definition) => [definition.kind, definition]));
