@@ -176,14 +176,23 @@ function mashShot(i, lt, b, o = {}) {
 }
 
 // ── scenes ────────────────────────────────────────────────────────────────
+const HOOK = [["TERMINALS", "#000", "#f2cd6b"], ["FORGET.", "#f2cd6b", "#0b0900"], ["YOUR COMMAND.", "#0b0900", "#fff"], ["YOUR SCREEN.", "#fff", "#0b0900"], ["YOUR AGENT.", "#2a1466", "#f2cd6b"], ["40 MINUTES IN.", "#f2cd6b", "#0b0900"], ["ALL OF IT.", "#000", "#fff"], ["GONE.", "#e3342f", "#fff"]];
 function intro(F, b) {
   if (b < 8) {
-    const l1 = "terminals forget.", l2 = "the command you were halfway through.", l3 = "the screen. the agent, forty minutes in.";
-    const n1 = Math.floor(seg(b, 0.6, 2.6) * l1.length), n2 = Math.floor(seg(b, 4, 5.4) * l2.length), n3 = Math.floor(seg(b, 5.6, 7) * l3.length);
-    const cur = `<b style="display:inline-block;width:.55em;height:1em;background:var(--gold);vertical-align:-.12em;${frac(b * 1.25) > 0.55 && (b < 0.6 || (b > 2.6 && b < 4)) ? "opacity:0" : ""}"></b>`;
-    F.over += `<div style="position:absolute;left:110px;top:250px;font:700 62px/1.2 var(--mono);color:#fff;letter-spacing:-.04em;white-space:pre"><i style="color:var(--gold)">❯ </i>${l1.slice(0, n1)}${b < 4 ? cur : ""}</div>`;
-    if (b >= 4) F.over += `<div style="position:absolute;left:110px;top:350px;font:400 30px/1.6 var(--mono);color:#8a8a8a;letter-spacing:-.03em;white-space:pre">${l2.slice(0, n2)}${b < 5.6 ? cur : ""}<br>${l3.slice(0, n3)}${b >= 5.6 ? cur : ""}</div>`;
-    if (b >= 7.25) { F.over += `<div style="position:absolute;left:110px;top:475px;font:700 62px/1 var(--mono);color:#e35a5a;letter-spacing:-.04em">gone.</div>`; F.fx.rgb = 10 * Math.exp(-(b - 7.25) * 5); F.fx.glitch = b < 7.5 ? 50 : 0; }
+    // The hook: a word a beat, each on its own colour, over a product shot
+    // that changes twice a beat. Nothing in the first three seconds holds still.
+    const i = Math.floor(b), lt = frac(b), [text, bg, fg] = HOOK[i], flick = lt > 0.5 && lt < 0.62;
+    F.bg = `<div style="position:absolute;inset:0;background:${flick ? fg : bg}"></div><div style="position:absolute;inset:-50%;background:repeating-conic-gradient(from ${b * 40}deg,${fg} 0 4deg,transparent 4deg 15deg);opacity:${0.16 * Math.exp(-lt * 3)}"></div>`;
+    const s = mashShot(i * 2 + Math.floor(lt * 2) + 300, frac(lt * 2) / 2, b * 2);
+    s.framed = 1; s.o = i === 7 ? 1 - lt : 1;
+    F.wins = [s]; F.amb = null; if (THEMES[s.theme].amb) s.theme = "dark";
+    F.cam.s = 0.74 + 0.05 * lt + 0.12 * Math.exp(-lt * 9); F.cam.ry = (i % 2 ? -1 : 1) * (16 - 8 * lt); F.cam.rx = 5; F.cam.rz = (i % 2 ? 1 : -1) * 2.5;
+    if (i === 7) { F.cam.sy = 1 - 0.9 * eout(lt * 1.6); F.fx.glitch = 70 * (1 - lt); }
+    const size = Math.min(250, 1560 / text.length), slam = 1 + 1.6 * Math.pow(1 - eout(lt * 4), 2);
+    F.over += `<div style="position:absolute;left:640px;top:${i === 7 ? 360 : 380}px;transform:translate(-50%,-50%) rotate(${i % 2 ? 3 : -3}deg) scale(${slam})"><div style="font:800 ${size}px/0.95 var(--disp);letter-spacing:-.045em;white-space:nowrap;color:${flick ? bg : fg};background:${flick ? fg : bg};padding:.04em .16em .1em;box-shadow:${14 * (i % 2 ? -1 : 1)}px 14px 0 ${fg}">${text}</div></div>`;
+    F.over += `<div style="position:absolute;left:34px;top:26px;font:700 20px var(--mono);color:${fg};background:${bg};padding:2px 10px;letter-spacing:.08em">${String(i + 1).padStart(2, "0")}/08</div>`;
+    F.fx.shake = 14 * Math.exp(-lt * 7); F.fx.rgb = 9 * Math.exp(-lt * 6);
+    if (lt < 0.06) F.fx.glitch = 60;
     return;
   }
   // Glimpses of what is coming, more of them as the roll tightens.
@@ -540,6 +549,12 @@ function mashScene(F, b) {
   }
 }
 
+// Pictograms for the three platforms, on a 24-unit square.
+const OS_ICONS = {
+  linux: '<path d="M12 1.500c-2.700 0-4.300 2.100-4.300 4.900 0 1.600.3 2.700-.6 4.200-1.300 2.100-3 4.400-3 7.300 0 1 .2 1.900.6 2.600h14.600c.4-.7.6-1.600.6-2.600 0-2.900-1.700-5.200-3-7.300-.9-1.500-.6-2.600-.6-4.200 0-2.800-1.600-4.900-4.300-4.900Z"/><ellipse cx="12" cy="15.200" rx="3.900" ry="5.300" fill="#0d0b05"/><circle cx="10.300" cy="6.200" r="1.050" fill="#0d0b05"/><circle cx="13.700" cy="6.200" r="1.050" fill="#0d0b05"/><path d="M10.200 8.300h3.600L12 10.300Z" fill="#f2cd6b"/><path d="M3.500 22.500c0-1.500 1.600-2.600 3.600-2.600s3.300 1.100 3.300 2.600ZM13.600 22.500c0-1.500 1.300-2.600 3.300-2.600s3.600 1.100 3.600 2.600Z" fill="#f2cd6b"/>',
+  mac: '<path d="M12.152 6.896c-.948 0-2.415-1.078-3.960-1.040-2.040.027-3.910 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.090 1.013 1.454 2.208 3.090 3.792 3.039 1.520-.065 2.090-.987 3.935-.987 1.831 0 2.350.987 3.960.948 1.637-.026 2.676-1.480 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.220-4.857-.026-3.040 2.480-4.494 2.597-4.559-1.429-2.090-3.623-2.324-4.390-2.376-2-.156-3.675 1.090-4.610 1.090zM15.530 3.830c.843-1.012 1.400-2.427 1.245-3.830-1.207.052-2.662.805-3.532 1.818-.780.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/>',
+  win: '<path d="M2 3.600 10.800 2.400V11.400H2ZM12 2.200 22 .8V11.400H12ZM2 12.600h8.800v9L2 20.400ZM12 12.600h10v10.600l-10-1.400Z"/>',
+};
 const FEATURES = ["remembers what you were typing", "splits like tmux · panes that float", "files · search · git · agent", "pull requests · issues · diffs", "artifacts from your agent", "thirty themes, ten alive", "ssh · vnc · rdp · a browser", "survives the crash"];
 function outro(F, b) {
   const lt = b - 112;
@@ -560,7 +575,8 @@ function outro(F, b) {
     F.over += lockup(0.62 * (1 + 0.03 * Math.exp(-frac(b) * 6)), 190);
     F.over += `<div class="tag" style="left:640px;top:300px;font-size:64px;transform:translate(-50%,0) rotate(-2deg) scale(${lerp(2.4, 1, eback(seg(b, 120, 120.35)))})">Out now</div>`;
     F.over += `<div style="position:absolute;left:0;right:0;top:436px;text-align:center;font:700 54px var(--mono);color:#fff;letter-spacing:-.05em;white-space:pre"><i style="color:var(--gold)">❯ </i>${url.slice(0, n)}<b style="display:inline-block;width:.55em;height:1em;background:var(--gold);vertical-align:-.12em"></b></div>`;
-    if (b >= 122.2) F.over += `<div style="position:absolute;left:0;right:0;top:540px;text-align:center;font:600 24px var(--mono);color:#9a9a9a;letter-spacing:.14em;opacity:${eout(seg(b, 122.2, 122.6))}">LINUX  ·  MACOS  ·  WINDOWS  ·  FREE</div>`;
+    const os = (k, label, b0) => { const p = eback(seg(b, b0, b0 + 0.3)); return b < b0 ? "" : `<div style="display:flex;flex-direction:column;align-items:center;gap:10px;transform:scale(${lerp(0.2, 1, p) * (1 + 0.05 * Math.exp(-frac(b) * 6))});color:#fff"><svg viewBox="0 0 24 24" width="62" height="62" fill="currentColor">${OS_ICONS[k]}</svg><i style="font:700 17px var(--mono);letter-spacing:.16em;color:#c9c9c9">${label}</i></div>`; };
+    F.over += `<div style="position:absolute;left:0;right:0;top:522px;display:flex;justify-content:center;align-items:center;gap:74px;height:110px">${os("linux", "LINUX", 122.2)}${os("mac", "MACOS", 122.5)}${os("win", "WINDOWS", 122.8)}${b >= 123.1 ? `<div style="background:var(--gold);color:#0b0900;font:800 44px/1 var(--disp);padding:8px 18px 12px;transform:rotate(-7deg) scale(${lerp(2.6, 1, eback(seg(b, 123.1, 123.4)))})">FREE</div>` : ""}</div>`;
     return;
   }
   const fade = 1 - ease(seg(b, 126.5, 129.5));
@@ -590,13 +606,49 @@ function frame(t) {
   else if (b < 112) mashScene(F, b);
   else outro(F, b);
   // What the kick does to the picture.
-  let flash = 0, hit = 0;
-  for (const [fb, amt] of FLASH) if (b >= fb) { flash = Math.max(flash, amt * Math.exp(-(b - fb) * 5)); if (amt >= 0.6) hit = Math.max(hit, amt * Math.exp(-(b - fb) * 3.5)); }
+  let flash = 0, hit = 0, hitAge = 99;
+  for (const [fb, amt] of FLASH) if (b >= fb) { flash = Math.max(flash, amt * Math.exp(-(b - fb) * 5)); if (amt >= 0.6) { hit = Math.max(hit, amt * Math.exp(-(b - fb) * 3.5)); hitAge = Math.min(hitAge, b - fb); } }
+  // Not over the power cut, where the point is that everything stops.
+  if ((bench || !(b >= 70 && b < 72)) && real < 144.5) F.spray = spray(F, real, hitAge);
   F.fx.flash = flash;
   F.fx.rgb = Math.max(F.fx.rgb || 0, hit * 16, (bench || grooving(b)) ? 1.6 * Math.exp(-frac(b) * 7) : 0);
   F.fx.shake = Math.max(F.fx.shake || 0, hit * 12);
   if (bench || grooving(b)) F.cam.s = (F.cam.s || 1) * (1 + 0.022 * Math.exp(-frac(b) * 6));
   return F;
+}
+
+// ── the layer on top of everything: stickers, confetti, speed lines, a HUD ──
+const BURST = (n = 18, r0 = 0.72) => Array.from({ length: n * 2 }, (_, i) => { const a = (i / (n * 2)) * 6.2832, r = i % 2 ? r0 : 1; return `${(50 + 50 * r * Math.cos(a)).toFixed(1)},${(50 + 50 * r * Math.sin(a)).toFixed(1)}`; }).join(" ");
+const STAR = BURST();
+// [real beat, text, x, y, size, colours]
+const STICKERS = [[20, "NEW!", 1130, 120, 150], [24, "⌘D", 1140, 130, 130, 1], [28, "DRAG<br>IT", 1140, 560, 150], [36, "WOW", 150, 150, 140, 1], [40, "POP!", 1130, 130, 150], [48, "4 TOOLS", 1120, 130, 150, 1], [56, "git it?", 1130, 130, 140],
+  [64, "NEW<br>IN 1.0", 1140, 130, 170], [68, "NEW<br>IN 1.0", 1140, 130, 170, 1], [72, "NEW<br>IN 1.0", 150, 150, 170], [76, "NEW<br>IN 1.0", 150, 160, 170, 1], [88, "PHEW", 1130, 560, 150], [92, "✓✓✓✓", 1130, 140, 150, 1],
+  [96, "×30", 1130, 130, 170], [104, "ANY<br>THING", 1140, 130, 160, 1], [108, "SIXEL!", 150, 140, 150], [112, "REMOTE", 1130, 130, 150, 1], [116, "AGENTS", 150, 140, 150], [120, "MORE", 1130, 130, 150, 1], [124, "1.0", 150, 140, 160]];
+function spray(F, real, hitAge) {
+  let h = "";
+  const lt = frac(real), kick = Math.exp(-lt * 6);
+  // The frame itself takes the kick.
+  h += `<div style="position:absolute;inset:0;box-shadow:inset 0 0 0 ${(5 + 9 * kick).toFixed(1)}px var(--gold);opacity:${(0.25 + 0.75 * kick).toFixed(3)}"></div>`;
+  // Sixteen blocks, one for each beat of the phrase, and the clock.
+  const k = Math.floor(real) % 16;
+  h += `<div style="position:absolute;right:26px;bottom:20px;display:flex;gap:4px">${Array.from({ length: 16 }, (_, i) => `<i style="width:13px;height:${i === k ? 22 : 9}px;align-self:flex-end;background:${i <= k ? "var(--gold)" : "#ffffff33"}"></i>`).join("")}</div>`;
+  h += `<div style="position:absolute;right:26px;top:${F.top ?? 44}px;font:700 12px var(--mono);letter-spacing:.14em;color:#fff;background:#000c;padding:3px 8px"><i style="color:#e3342f;opacity:${lt < 0.5 ? 1 : 0.2}">●</i> JTERM 1.0 · ${String(Math.floor(F.t / 60)).padStart(2, "0")}:${String(Math.floor(F.t % 60)).padStart(2, "0")}:${String(Math.floor((F.t % 1) * 60)).padStart(2, "0")} · 150 BPM</div>`;
+  for (const [b0, text, x, y, size, alt] of STICKERS) {
+    const a = real - b0;
+    if (a < 0 || a >= 3) continue;
+    const p = eback(seg(a, 0, 0.3)) * (1 - ease(seg(a, 2.6, 3))), [bg, fg] = alt ? ["#fff", "#0b0900"] : ["var(--gold)", "#0b0900"];
+    h += `<div style="position:absolute;left:${x}px;top:${y}px;width:${size}px;height:${size}px;transform:translate(-50%,-50%) scale(${(p * (1 + 0.08 * kick)).toFixed(3)}) rotate(${(a * 22 - 12).toFixed(1)}deg)"><svg viewBox="0 0 100 100" style="position:absolute;inset:0;filter:drop-shadow(5px 6px 0 #000)"><polygon points="${STAR}" fill="${bg}"/></svg><div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;font:800 ${Math.round(size * (text.length > 9 ? 0.17 : text.length > 5 ? 0.2 : 0.3))}px/0.95 var(--disp);letter-spacing:-.03em;color:${fg};transform:rotate(${(12 - a * 22).toFixed(1)}deg) rotate(-8deg);text-transform:uppercase">${text}</div></div>`;
+  }
+  if (hitAge < 2.2) {
+    // A big hit throws confetti and a ring of speed lines.
+    const seed = Math.floor(real - hitAge + 0.5), g = hitAge * 0.4;
+    for (let i = 0; i < 46; i++) {
+      const a = rnd(seed * 3.1 + i) * 6.2832, v = 420 + 900 * rnd(seed + i * 7.7), x = 640 + Math.cos(a) * v * g * (1 - 0.25 * g), y = 380 + Math.sin(a) * v * g - 300 * g + 900 * g * g;
+      h += `<i style="position:absolute;left:${x.toFixed(1)}px;top:${y.toFixed(1)}px;width:${10 + 12 * rnd(i)}px;height:${6 + 8 * rnd(i + 9)}px;background:${["#f2cd6b", "#fff", "#e3342f", "#4c8dff", "#28c840"][i % 5]};transform:rotate(${(hitAge * 600 * (rnd(i + 3) - 0.5)).toFixed(0)}deg);opacity:${clamp(2.2 - hitAge).toFixed(2)}"></i>`;
+    }
+    if (hitAge < 0.8) h += `<div style="position:absolute;inset:-60%;background:repeating-conic-gradient(from ${real * 30}deg,#fff 0 1.2deg,transparent 1.2deg 9deg);-webkit-mask:radial-gradient(circle,transparent 24%,#000 60%);opacity:${(0.5 * (1 - hitAge / 0.8)).toFixed(3)}"></div>`;
+  }
+  return h;
 }
 
 const $ = (id) => document.getElementById(id);
@@ -632,7 +684,7 @@ function renderAt(t) {
   }
   if (F.fx.invert) filters.push("invert(1) hue-rotate(180deg)");
   stage.style.filter = filters.join(" ") || "none";
-  $("post").innerHTML = `<div class="scan"></div><div class="vig"></div>` + (F.fx.flash > 0.01 ? `<div style="position:absolute;inset:0;background:#fff;opacity:${(F.fx.flash * 0.85).toFixed(3)}"></div>` : "");
+  $("post").innerHTML = (F.spray || "") + `<div class="scan"></div><div class="vig"></div>` + (F.fx.flash > 0.01 ? `<div style="position:absolute;inset:0;background:#fff;opacity:${(F.fx.flash * 0.85).toFixed(3)}"></div>` : "");
 }
 window.renderAt = renderAt;
 if (location.hash) renderAt(parseFloat(location.hash.slice(1)));

@@ -212,9 +212,16 @@ for slot in range(BARS):
         if bar in (11, 27):
             for s in (1, 2, 3):
                 kick(at(slot, 3, s), 0.75)
-    elif bar in (2, 3):
+    elif bar < 4:
+        # The film opens on a hook, not a fade-in: the kick is there from frame one.
         for beat in range(4):
-            kick(at(slot, beat), 0.8 + 0.1 * bar / 3, soft=bar == 2)
+            kick(at(slot, beat), 0.8 + 0.07 * bar)
+        if bar < 2:
+            for beat in (1, 3):
+                add(drums, CLAP, at(slot, beat), 0.4 + 0.15 * bar)
+            for beat in range(4):
+                add(music, make_bass(hz(0, 55.0)), at(slot, beat, 2), 0.6)
+                add(music, make_stab([hz(c + 12) for c in CHORDS[0]], 0.3), at(slot, beat), 0.38)
     elif bar == 18:
         kick(at(slot, 0), 0.8, soft=True)
         kick(at(slot, 2), 0.8, soft=True)
@@ -317,6 +324,64 @@ for slot in range(BARS):
             add(wet, sig, at(slot, 0, s), 0.25)
 
 
+# ── ear candy ─────────────────────────────────────────────────────────────
+
+
+def make_zap(top=5200.0, length=0.13):
+    t = t_of(int(SR * length))
+    f = 140 + (top - 140) * np.exp(-t * 34)
+    return np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t * 16) * np.minimum(t * 2000, 1)
+
+
+def make_crash():
+    t = t_of(int(SR * 1.3))
+    return fft_filter(rng.standard_normal(len(t)) * np.exp(-t * 3.6), lo=5200)
+
+
+def make_lead(freq, length):
+    # A hoover of a lead: five detuned saws, the pitch falling into the note.
+    t = t_of(int(length))
+    bend = 1 + 0.06 * np.exp(-t * 40)
+    out = np.zeros_like(t)
+    for det in (0.985, 0.994, 1.0, 1.006, 1.015):
+        phase = np.cumsum(freq * det * bend) / SR
+        out += 2 * (phase % 1) - 1
+    env = np.minimum(t * 500, 1) * np.exp(-t * 5)
+    out = fft_filter(np.tanh(out * 0.5) * env, lo=250, hi=5200, slope=2)
+    out[-200:] *= np.linspace(1, 0, 200)
+    return out
+
+
+ZAP, ZAP_LOW, CRASH = make_zap(), make_zap(2600.0, 0.2), make_crash()
+LEAD = {0: 12, 3: 12, 6: 15, 8: 19, 11: 17, 14: 15}  # step -> semitones over the root
+LEAD_B = {0: 24, 2: 19, 4: 22, 6: 19, 8: 17, 11: 15, 12: 12, 14: 15}
+for slot in range(BARS):
+    bar = ROLE[slot]
+    if bar in GROOVE:
+        # A crash on the one of every phrase, a zap answering the clap.
+        if slot % 4 == 0:
+            add(drums, CRASH, at(slot), 0.3, pan=-0.2)
+            add(wet, CRASH, at(slot), 0.15)
+        add(drums, ZAP if slot % 2 else ZAP_LOW, at(slot, 3, 2), 0.22, pan=0.5 if slot % 2 else -0.5)
+        if slot >= 24:
+            for s in (6, 14):
+                add(drums, ZAP, at(slot, 0, s), 0.13, pan=(-0.6, 0.6)[(s // 8 + slot) % 2])
+    # The lead: answering phrases in the first drop's last bars, the whole second drop.
+    if 12 <= slot <= 18 or 20 <= bar <= 30:
+        riff = LEAD_B if slot % 4 == 3 else LEAD
+        for s, semi in riff.items():
+            if bar == 15 and s >= 12:
+                continue
+            sig = make_lead(hz(semi + ROOTS[slot % 4]), STEP * (3 if s in (0, 8) else 1.8))
+            g = 0.2 if slot < 20 else 0.26
+            add(music, sig, at(slot, 0, s), g, pan=0.25 * np.sin(s + slot))
+            add(wet, sig, at(slot, 0, s), g * 0.45)
+    # Thirty-second-note hats under the mash-up's fastest bar.
+    if slot == 31:
+        for s in range(32):
+            add(drums, HAT, at(slot) + s * STEP // 2, 0.16 + 0.1 * (s / 32), pan=0.4 * np.sin(s))
+
+
 def roll(bar, pattern):
     """A snare roll: (beat, subdivisions) pairs, getting louder."""
     total = sum(n for _, n in pattern)
@@ -332,11 +397,14 @@ roll(23, [(0, 2), (1, 4), (2, 4), (3, 8)])
 roll(31, [(3, 4)])
 roll(11, [(3, 4)])
 roll(15, [(3, 4)])
+roll(7, [(3, 4)])
+roll(27, [(3, 4)])
+roll(1, [(2, 2), (3, 4)])
 
 for bar, beats in ((3, 4), (23, 4), (15, 2), (19, 2), (31, 2), (34, 4)):
     length = beats * BEAT
     add(music, make_riser(length), at(bar + 1) - length, 0.5)
-for beat, gain in ((16, 1.0), (48, 0.6), (64, 0.7), (80, 0.8), (96, 1.0), (112, 0.6), (128, 1.0), (140, 1.1)):
+for beat, gain in ((0, 0.9), (16, 1.0), (48, 0.6), (64, 0.7), (80, 0.8), (96, 1.0), (112, 0.6), (128, 1.0), (140, 1.1)):
     add(drums, IMPACT, beat * BEAT, gain * 0.6)
     add(wet, IMPACT, beat * BEAT, gain * 0.25)
 
@@ -370,6 +438,24 @@ for ch in range(2):
 mix[:, cut - BEAT // 2 + n : 88 * BEAT] = 0
 fade = int(SR * 0.004)
 mix[:, 88 * BEAT : 88 * BEAT + fade] *= np.linspace(0, 1, fade)
+
+# Stutter edits: the last beat of a phrase caught in a loop, tightening.
+def stutter(slot, beat=3):
+    p = at(slot, beat)
+    grain = mix[:, p : p + STEP].copy()
+    ramp = int(SR * 0.003)
+    grain[:, :ramp] *= np.linspace(0, 1, ramp)
+    q = p
+    for length in (STEP, STEP, STEP // 2, STEP // 2, STEP // 4, STEP // 4, STEP // 4, STEP // 4):
+        piece = grain[:, :length].copy()
+        piece[:, -ramp:] *= np.linspace(1, 0, ramp)
+        mix[:, q : q + length] = piece
+        q += length
+    mix[:, q : p + BEAT] *= 0.0
+
+
+for slot in (9, 17, 25, 29, 33):
+    stutter(slot)
 
 # Fade the tail out.
 mix[:, -TAIL:] *= np.linspace(1, 0, TAIL) ** 1.5
