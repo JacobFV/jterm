@@ -168,14 +168,23 @@
 
       header {
         position: relative;
-        /* Short of the full viewport on purpose: the film below should show
-           its top edge without a scroll, so it is found. */
-        min-height: min(76vh, 720px);
+        /* Centred, and built around the film: a line of headline, the
+           download, then the film as large as the first screen has room for.
+           Everything that explains comes after it. */
         display: flex;
         flex-direction: column;
-        justify-content: center;
-        padding: clamp(56px, 10vh, 110px) 0 clamp(24px, 4vh, 48px);
+        align-items: center;
+        text-align: center;
+        padding: clamp(28px, 5vh, 60px) 0 clamp(24px, 4vh, 48px);
       }
+      header .lede { margin-left: auto; margin-right: auto; }
+      header details.all { width: 100%; text-align: left; margin-left: auto; margin-right: auto; }
+      header figure.shot {
+        /* As wide as leaves the headline and the button on screen above it. */
+        width: min(100%, 1040px, max(300px, calc((100vh - 330px) * 1.7778)));
+        margin: clamp(28px, 4vh, 44px) auto 0;
+      }
+      header figure.shot figcaption { max-width: none; text-align: center; }
 
       .eyebrow {
         font-family: var(--mono);
@@ -183,16 +192,16 @@
         letter-spacing: 0.28em;
         text-transform: uppercase;
         color: var(--gold-dim);
-        margin-bottom: 26px;
+        margin-bottom: 20px;
       }
 
       h1 {
         font-family: var(--display);
         font-weight: 400;
-        font-size: clamp(44px, 8.2vw, 108px);
+        font-size: clamp(38px, 5.6vw, 76px);
         line-height: 0.98;
         letter-spacing: -0.025em;
-        max-width: 15ch;
+        max-width: 22ch;
         text-wrap: balance;
       }
       h1 em {
@@ -376,15 +385,37 @@
         border-color: transparent transparent transparent #0b0900;
       }
       .film:hover .play, .film:focus-visible .play { transform: scale(1.08); }
-      .film .len {
+      .film-wrap { position: relative; }
+      .film-cta {
         position: absolute;
-        right: 10px;
-        bottom: 10px;
-        padding: 2px 7px;
-        font: 11px var(--mono);
-        color: #fff;
-        background: rgba(0, 0, 0, 0.75);
-        border-radius: 2px;
+        left: 9px;
+        right: 9px;
+        bottom: 9px;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 12px 14px;
+        padding: 64px 16px 26px;
+        /* Something for the buttons to stand on, whatever the poster is. */
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0));
+        pointer-events: none;
+        border-radius: 0 0 2px 2px;
+      }
+      .film-cta > * { pointer-events: auto; }
+      .btn-ghost { background: rgba(8, 8, 10, 0.82); color: var(--ink-1); border-color: var(--gold); cursor: pointer; }
+      .btn-ghost:hover { background: #1a1608; }
+      .btn-ghost .tri {
+        border-style: solid;
+        border-width: 6px 0 6px 10px;
+        border-color: transparent transparent transparent var(--gold);
+      }
+      .film-wrap.playing .film-cta { position: static; padding: 14px 0 6px; background: none; }
+      .film-wrap.playing #watch { display: none; }
+      figure.shot figcaption .alt-note { display: block; margin-top: 6px; }
+      @media (max-width: 700px) {
+        /* A phone's film is too small to carry two buttons; they go under it. */
+        .film-cta { position: static; padding: 12px 0 4px; background: none; }
+        .film-cta .btn { flex: 1 1 100%; justify-content: center; }
       }
 
       /* ── Sections ────────────────────────────────────────────────── */
@@ -511,26 +542,50 @@
         <header>
           <p class="eyebrow">Terminal · macOS · Windows · Linux</p>
           <h1>The command you didn't run is <em>still there.</em></h1>
+
+          <figure class="shot">
+            <div class="shot-frame film-wrap" id="film-wrap">
+              <button
+                class="film"
+                id="film"
+                type="button"
+                style="background-image: url(film.jpg)"
+                aria-label="Play the jterm 1.0 film, 58 seconds, with sound"
+              >
+                <span class="play" aria-hidden="true"></span>
+              </button>
+              <!-- The two things a visitor came to do, on the film itself. Once
+                   it is playing they step down beneath it, out of the picture. -->
+              <div class="film-cta">
+                <button class="btn btn-ghost" id="watch" type="button">
+                  <span class="tri" aria-hidden="true"></span>Watch the film <span class="sz">0:58</span>
+                </button>
+                <a class="btn" id="primary-dl" href="https://github.com/JacobFV/jterm/releases/latest">
+                  <!-- Filled in by `guess()` once the platform is known, and empty
+                       until then: a placeholder mark would have to be some other
+                       platform's, which is worse than none for the half-second it
+                       shows. `aria-hidden` because the label beside it already
+                       names the platform, and a screen reader saying "Apple
+                       Download for macOS" is one Apple too many. -->
+                  <span class="os-mark" id="primary-icon" aria-hidden="true"></span>
+                  <span id="primary-label">Download</span>
+                  <span class="sz" id="primary-size"></span>
+                </a>
+              </div>
+            </div>
+            <figcaption>
+              <b>jterm 1.0 in 58 seconds</b> — splits, panes that float, the sidebar, diffs,
+              pull requests, artifacts, and what happens when the machine dies. Fast cuts and
+              flashing; it plays from YouTube when you press it.
+              <span class="alt-note" id="alt-note"></span>
+            </figcaption>
+          </figure>
+
           <p class="lede">
             A tabbed terminal with tmux-style splits, where a pane can also be a notepad, a
             browser, or a viewer. It records what you have typed but not submitted, so a
             crash costs you a keystroke instead of a train of thought.
           </p>
-
-          <div class="cta">
-            <a class="btn" id="primary-dl" href="https://github.com/JacobFV/jterm/releases/latest">
-              <!-- Filled in by `guess()` once the platform is known, and empty
-                   until then: a placeholder mark would have to be some other
-                   platform's, which is worse than none for the half-second it
-                   shows. `aria-hidden` because the label beside it already
-                   names the platform, and a screen reader saying "Apple
-                   Download for macOS" is one Apple too many. -->
-              <span class="os-mark" id="primary-icon" aria-hidden="true"></span>
-              <span id="primary-label">Download</span>
-              <span class="sz" id="primary-size"></span>
-            </a>
-            <span class="alt-note" id="alt-note"></span>
-          </div>
 
           <details class="all">
             <summary>All platforms and formats</summary>
@@ -539,26 +594,6 @@
             </div>
           </details>
         </header>
-
-        <figure class="shot" style="margin-top: 28px">
-          <div class="shot-frame">
-            <button
-              class="film"
-              id="film"
-              type="button"
-              style="background-image: url(film.jpg)"
-              aria-label="Play the jterm 1.0 film, 58 seconds, with sound"
-            >
-              <span class="play" aria-hidden="true"></span>
-              <span class="len" aria-hidden="true">0:58</span>
-            </button>
-          </div>
-          <figcaption>
-            <b>jterm 1.0 in 58 seconds</b> — splits, panes that float, the sidebar, diffs,
-            pull requests, artifacts, and what happens when the machine dies. Fast cuts and
-            flashing; it plays from YouTube when you press it.
-          </figcaption>
-        </figure>
 
         <figure class="shot">
           <div class="shot-frame">
@@ -665,7 +700,7 @@
     <script>
       // The film is a button until pressed; then it is YouTube's player, from
       // the domain that does not set cookies before playback.
-      document.getElementById("film").addEventListener("click", function () {
+      function playFilm() {
         const frame = document.createElement("iframe");
         frame.src = "https://www.youtube-nocookie.com/embed/RZH5tHWiZVA?autoplay=1&rel=0";
         frame.title = "jterm 1.0 — the terminal that remembers";
@@ -675,8 +710,11 @@
         box.className = "film";
         box.style.cursor = "default";
         box.appendChild(frame);
-        this.replaceWith(box);
-      });
+        document.getElementById("film").replaceWith(box);
+        document.getElementById("film-wrap").classList.add("playing");
+      }
+      document.getElementById("film").addEventListener("click", playFilm);
+      document.getElementById("watch").addEventListener("click", playFilm);
 
       /* ── Animated ASCII fractals, at three grains ────────────────────
          Escape-time Julia sets, `z ← z² + c`, drawn as characters into <pre>
