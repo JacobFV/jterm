@@ -449,3 +449,82 @@ describe("artifacts", () => {
     expect(restored.content[paneId]).toBeUndefined();
   });
 });
+
+describe("pull request and issue panes", () => {
+  function roundTrip(
+    kind: "pr" | "issue",
+    seed: Record<string, unknown>,
+    edit?: (pane: Record<string, unknown>) => void,
+  ) {
+    const state = reduce(emptyWorkspace(), {
+      type: "tab/open",
+      kind,
+      seed: seed as Partial<PaneState>,
+    });
+    const paneId = state.tabs[state.tabs.length - 1].focusedPaneId;
+    const json = JSON.parse(encode(state, {}));
+    const tab = json.workspace.tabs[json.workspace.tabs.length - 1];
+    edit?.(tab.panes[paneId]);
+    const restored = decode(JSON.stringify(json))!.workspace;
+    return restored.tabs.flatMap((t) => Object.values(t.panes)).find((p) => p.id === paneId);
+  }
+
+  it("come back as the same repository and number, with the cached title and view", () => {
+    const pr = roundTrip("pr", {
+      root: "/repo",
+      number: 42,
+      title: "#42 Fix the thing",
+      view: "checks",
+      layout: "split",
+    });
+    expect(pr).toMatchObject({
+      kind: "pr",
+      root: "/repo",
+      number: 42,
+      title: "#42 Fix the thing",
+      view: "checks",
+      layout: "split",
+    });
+    const issue = roundTrip("issue", { root: "/repo", number: 7, title: "#7 It broke" });
+    expect(issue).toMatchObject({ kind: "issue", root: "/repo", number: 7, title: "#7 It broke" });
+  });
+
+  it("keep nothing fetched from GitHub, even if a hand-edited file offers it", () => {
+    const pr = roundTrip("pr", { root: "/repo", number: 1 }, (raw) => {
+      raw.body = "<script>alert(1)</script>";
+      raw.comments = [{ body: "stale" }];
+    });
+    expect(Object.keys(pr!)).not.toContain("body");
+    expect(Object.keys(pr!)).not.toContain("comments");
+  });
+
+  it("are dropped without a repository or a whole positive number", () => {
+    for (const kind of ["pr", "issue"] as const) {
+      expect(roundTrip(kind, { root: "/repo", number: 3 }, (raw) => delete raw.root)).toBeUndefined();
+      for (const number of [0, -4, 1.5, "12", null, Number.MAX_SAFE_INTEGER, NaN]) {
+        const pane = roundTrip(kind, { root: "/repo", number: 3 }, (raw) => (raw.number = number));
+        expect(pane, `${kind} ${String(number)}`).toBeUndefined();
+      }
+    }
+  });
+
+  it("lose a view or layout this build does not have, and keep the pane", () => {
+    const pane = roundTrip("pr", { root: "/repo", number: 3 }, (raw) => {
+      raw.view = "commits";
+      raw.layout = "sideways";
+    });
+    expect(pane).toMatchObject({ kind: "pr", number: 3 });
+    expect((pane as { view?: string }).view).toBeUndefined();
+    expect((pane as { layout?: string }).layout).toBeUndefined();
+  });
+});
+
+describe("the sidebar's tool", () => {
+  it("comes back as GitHub when that was the one showing, and as Files when unknown", () => {
+    const state = reduce(emptyWorkspace(), { type: "ui/sidebarTab", tab: "github" });
+    const json = JSON.parse(encode(state, {}));
+    expect(decode(JSON.stringify(json))!.workspace.sidebarTab).toBe("github");
+    json.workspace.sidebarTab = "gitlab";
+    expect(decode(JSON.stringify(json))!.workspace.sidebarTab).toBe("files");
+  });
+});

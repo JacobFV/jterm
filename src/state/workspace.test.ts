@@ -985,3 +985,14 @@ describe("a diff pane's name", () => {
     expect(diff({ source: "commit" })).toBe("HEAD · repo");
   });
 });
+
+describe("a pull request or issue pane's name", () => {
+  it("is the number until GitHub has given it a title", () => {
+    expect(paneLabel({ id: "p", kind: "pr", root: "/r", number: 12 })).toBe("Pull request #12");
+    expect(paneLabel({ id: "i", kind: "issue", root: "/r", number: 7 })).toBe("Issue #7");
+    expect(paneLabel({ id: "i", kind: "issue", root: "/r", number: 7, title: "#7 Broken" })).toBe(
+      "#7 Broken",
+    );
+    expect(paneLabel({ id: "p", kind: "pr", root: "", number: 0 })).toBe("Pull request");
+  });
+});

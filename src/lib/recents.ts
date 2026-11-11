@@ -120,6 +120,11 @@ export function rememberPane(pane: PaneState): void {
     // back to by name; the sidebar's Git tab is the way back in.
     case "diff":
       return;
+    // The same for a pull request or an issue: it lives on GitHub, and the
+    // sidebar's GitHub tool lists the open ones.
+    case "pr":
+    case "issue":
+      return;
     default: {
       // The file-backed panes. A note with no path exists only in the snapshot
       // that is about to stop mentioning it, so there is nothing to point at.

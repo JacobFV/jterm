@@ -91,7 +91,7 @@ export const TOOLS: ToolDef[] = [
     name: "list_panes",
     title: "List tabs and panes",
     description:
-      "Every tab and pop-up in this jterm window, and the panes in each: id, kind (terminal, notepad, browser, image, media, model, vnc, rdp, diff, artifact), title, and for terminals the working directory, the last command started and whether the shell has exited. A diff pane shows a git diff and says what it compares under `diff`: the repository root, the source (worktree for unstaged changes and untracked files, staged, or commit), the revision for a commit, and the path when narrowed to one file. An artifact says its format. `focused` marks the pane the user is typing into.",
+      "Every tab and pop-up in this jterm window, and the panes in each: id, kind (terminal, notepad, browser, image, media, model, vnc, rdp, diff, artifact, pr, issue), title, and for terminals the working directory, the last command started and whether the shell has exited. A diff pane shows a git diff and says what it compares under `diff`: the repository root, the source (worktree for unstaged changes and untracked files, staged, or commit), the revision for a commit, and the path when narrowed to one file. An artifact says its format. A pr pane shows a GitHub pull request and an issue pane a GitHub issue; each says which under `github`: the repository checkout it was opened from (root) and the number. `focused` marks the pane the user is typing into.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -353,6 +353,9 @@ function describePane(pane: PaneState): Record<string, unknown> {
   }
   if (pane.kind === "browser") described.url = pane.url;
   if (pane.kind === "artifact") described.format = pane.format;
+  if (pane.kind === "pr" || pane.kind === "issue") {
+    described.github = { root: pane.root, number: pane.number };
+  }
   return described;
 }
 

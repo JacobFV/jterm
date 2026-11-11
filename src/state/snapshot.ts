@@ -324,6 +324,8 @@ const KINDS: PaneKind[] = [
   "rdp",
   "diff",
   "artifact",
+  "pr",
+  "issue",
 ];
 
 /**
@@ -532,11 +534,47 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         // source view is one click away from there.
         format: isArtifactFormat(raw.format) ? raw.format : "markdown",
       };
+    case "pr":
+    case "issue": {
+      // A repository and a number, or nothing. Without the directory there is
+      // no checkout for gh to read the remotes of; without a number — or with
+      // one that is not a whole positive number — the pane would be asking
+      // GitHub for something else, or for nothing, under this one's name. Both
+      // end up as arguments to gh, and the backend checks them again.
+      if (typeof raw.root !== "string" || !raw.root || raw.root.length > MAX_PATH) return null;
+      if (!isGithubNumber(raw.number)) return null;
+      const common = {
+        id,
+        title,
+        name,
+        theme,
+        profile,
+        fontSize,
+        root: raw.root,
+        number: raw.number,
+      };
+      if (kind === "issue") return { ...common, kind: "issue" };
+      return {
+        ...common,
+        kind: "pr",
+        // A view or layout this build does not have costs the preference, not
+        // the pane: it opens on the conversation, in one column.
+        view: raw.view === "checks" || raw.view === "files" ? raw.view : undefined,
+        layout: raw.layout === "split" ? "split" : undefined,
+      };
+    }
   }
 }
 
+/** A pull request or issue number: whole, positive, and no bigger than GitHub's. */
+export function isGithubNumber(value: unknown): value is number {
+  return (
+    typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 1_000_000_000
+  );
+}
+
 /** A revision git will not mistake for an option. Mirrors `checked_rev` in git.rs. */
-function isSafeRev(value: unknown): value is string {
+export function isSafeRev(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length > 0 &&
@@ -547,7 +585,7 @@ function isSafeRev(value: unknown): value is string {
 }
 
 /** A path inside a repository, as git names it. Mirrors `checked_paths` in git.rs. */
-function isRepoPath(value: unknown): value is string {
+export function isRepoPath(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.length > 0 &&

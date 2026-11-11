@@ -60,11 +60,13 @@ export type PaneKind =
   | "vnc"
   | "rdp"
   | "diff"
-  | "artifact";
+  | "artifact"
+  | "pr"
+  | "issue";
 
 /** The sidebar's tools, in the order its menu lists them. */
-export type SidebarTab = "files" | "search" | "git" | "agent";
-export const SIDEBAR_TABS: SidebarTab[] = ["files", "search", "git", "agent"];
+export type SidebarTab = "files" | "search" | "git" | "github" | "agent";
+export const SIDEBAR_TABS: SidebarTab[] = ["files", "search", "git", "github", "agent"];
 
 interface PaneCommon {
   id: string;
@@ -272,6 +274,41 @@ export interface ArtifactPaneState extends PaneCommon {
   format: ArtifactFormat;
 }
 
+/**
+ * A GitHub pull request or issue, read in a pane. See `panes/PullRequestPane.tsx`
+ * and `panes/IssuePane.tsx`, and `src-tauri/src/github.rs` for how it is read.
+ *
+ * Kept the way a diff pane is: a description — which repository, which number
+ * — and never the content, which is fetched from GitHub again whenever the pane
+ * is shown. The one thing cached is the title, in the ordinary `title` field,
+ * so that a pane restored with no network still has a name on its tab.
+ *
+ * The repository is a directory rather than `owner/name` on purpose. gh works
+ * out the repository from a checkout's remotes, with the user's own
+ * `gh repo set-default` and enterprise hosts, and a checkout is also where
+ * `Check out` has to happen.
+ */
+export interface GithubPaneCommon extends PaneCommon {
+  /** A directory in the repository's checkout. */
+  root: string;
+  /** The pull request's or issue's number. */
+  number: number;
+}
+
+export interface PullRequestPaneState extends GithubPaneCommon {
+  kind: "pr";
+  /** Which of the pane's three views is showing. Absent is the conversation. */
+  view?: PullRequestView;
+  /** The Files view side by side. A view preference, kept per pane. */
+  layout?: "split";
+}
+
+export type PullRequestView = "conversation" | "checks" | "files";
+
+export interface IssuePaneState extends GithubPaneCommon {
+  kind: "issue";
+}
+
 export type PaneState =
   | TerminalPaneState
   | NotepadPaneState
@@ -282,7 +319,9 @@ export type PaneState =
   | VncPaneState
   | RdpPaneState
   | DiffPaneState
-  | ArtifactPaneState;
+  | ArtifactPaneState
+  | PullRequestPaneState
+  | IssuePaneState;
 
 export interface Tab {
   id: string;
@@ -415,6 +454,11 @@ export function newPane(kind: PaneKind, seed?: Partial<PaneState>): PaneState {
       return { id, kind: "diff", root: "", source: "worktree", ...(seed as object) } as PaneState;
     case "artifact":
       return { id, kind: "artifact", format: "markdown", ...(seed as object) } as PaneState;
+    // Like a diff, only ever made with a seed — from the sidebar's GitHub tool
+    // or the agent. Without one the pane says it has nothing to show.
+    case "pr":
+    case "issue":
+      return { id, kind, root: "", number: 0, ...(seed as object) } as PaneState;
     // The viewers cannot exist without a file, and `newPane` is only reached
     // for them by way of `openFile`, which always supplies one.
     case "image":
@@ -559,6 +603,9 @@ export function paneLabel(pane: PaneState): string {
       return baseName(pane.path) || "File";
     case "diff":
       return diffLabel(pane);
+    case "pr":
+    case "issue":
+      return githubLabel(pane);
     case "terminal":
       return "Terminal";
   }
@@ -581,6 +628,15 @@ export function diffLabel(pane: DiffPaneState): string {
         : "Changes";
   const where = pane.path ? baseName(pane.path) : baseName(pane.root.replace(/[\\/]+$/, ""));
   return where ? `${what} · ${where}` : what;
+}
+
+/**
+ * What a pull request or issue pane is called before GitHub has answered — and
+ * so what a restored pane with no cached title is called until it does.
+ */
+export function githubLabel(pane: PullRequestPaneState | IssuePaneState): string {
+  const what = pane.kind === "pr" ? "Pull request" : "Issue";
+  return pane.number > 0 ? `${what} #${pane.number}` : what;
 }
 
 function baseName(path: string): string {
