@@ -1,0 +1,182 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>jterm 1.0</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1280px; height: 720px; overflow: hidden; background: #000; }
+  i, u, b { font-style: normal; font-weight: inherit; text-decoration: none; }
+  :root {
+    --mono: "JetBrains Mono", "DejaVu Sans Mono", monospace;
+    --sans: "Inter", "Ubuntu Sans", "Ubuntu", "DejaVu Sans", sans-serif;
+    --disp: "Ubuntu Sans", "Ubuntu", "DejaVu Sans", sans-serif;
+    --gold: #f2cd6b;
+  }
+  #stage { position: absolute; inset: 0; overflow: hidden; background: #000; perspective: 1400px; }
+  #bg, #over, #post { position: absolute; inset: 0; overflow: hidden; }
+  #over, #post { pointer-events: none; }
+  #cam { position: absolute; left: 0; top: 0; width: 1280px; height: 720px; transform-origin: 50% 50%; transform-style: preserve-3d; }
+  #amb { position: absolute; left: 0; top: 0; width: 1280px; height: 720px; display: none; }
+  #ui { position: absolute; inset: 0; }
+
+  /* ── the jterm window ─────────────────────────────────────────────── */
+  .jt { position: absolute; overflow: hidden; background: var(--ground); color: var(--t1);
+        font: 12.5px/1.45 var(--sans); transform-origin: 0 0; }
+  .jt.framed { outline: 1px solid var(--b2); box-shadow: 0 30px 80px rgba(0,0,0,.7); }
+  .jt svg.ic { width: 13px; height: 13px; flex: none; fill: none; stroke: currentColor; stroke-width: 2;
+               stroke-linecap: round; stroke-linejoin: round; }
+  .tabs { position: absolute; left: 0; top: 0; right: 0; height: 34px; display: flex; background: var(--bg1);
+          border-bottom: 1px solid var(--b1); }
+  .tab { height: 34px; width: 208px; display: flex; align-items: center; gap: 7px; padding: 0 10px;
+         border-right: 1px solid var(--b1); color: var(--t3); font-size: 12px; white-space: nowrap; overflow: hidden; }
+  .tab span { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .tab .x { color: var(--t4); }
+  .tab.on { background: var(--bg0); color: var(--t1); box-shadow: inset 0 -2px 0 var(--brand); }
+  .tab.gone { opacity: .25; }
+  .tabplus { width: 34px; display: flex; align-items: center; justify-content: center; color: var(--t3); }
+  .wc { margin-left: auto; display: flex; border-left: 1px solid var(--b1); }
+  .wc div { width: 44px; display: flex; align-items: center; justify-content: center; color: var(--t2); }
+
+  .side { position: absolute; left: 0; top: 34px; bottom: 0; overflow: hidden; background: var(--bg1);
+          border-right: 1px solid var(--b1); }
+  .side > div { width: 240px; height: 100%; position: relative; }
+  .sh { height: 28px; display: flex; align-items: center; gap: 5px; padding: 0 7px; border-bottom: 1px solid var(--b1);
+        font: 10px var(--mono); color: var(--t2); }
+  .sh .sw { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 2px; color: var(--t2); }
+  .sh .sw.on { background: var(--bg3); color: var(--t1); }
+  .sh span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .sh .hb { color: var(--t4); display: flex; gap: 6px; }
+  .row { height: 22px; display: flex; align-items: center; gap: 5px; font: 11px var(--mono); color: var(--t2);
+         white-space: nowrap; padding-right: 8px; }
+  .row.sel { background: var(--bg3); color: var(--t1); }
+  .row.hot { background: color-mix(in srgb, var(--brand) 16%, transparent); color: var(--t1); }
+  .row .dir { color: var(--t3); }
+  .row svg.ic { width: 12px; height: 12px; color: var(--t3); }
+  .row .badge { margin-left: auto; font-size: 10px; }
+  .sec { padding: 8px 8px 3px; font: 9px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--t4); }
+  .field { margin: 7px; border: 1px solid var(--b2); background: var(--bg0); padding: 5px 7px; font: 11px var(--mono);
+           color: var(--t1); min-height: 27px; display: flex; align-items: center; gap: 6px; white-space: pre; }
+  .field.focus { border-color: var(--brand); }
+  .field svg.ic { color: var(--t3); }
+  .btn { margin: 0 7px 7px; height: 26px; display: flex; align-items: center; justify-content: center; gap: 6px;
+         background: var(--brand); color: var(--brandfg); font: 600 11px var(--sans); border-radius: 2px; }
+  .btn.ghost { background: transparent; color: var(--t2); border: 1px solid var(--b2); }
+  .btn.press { filter: brightness(1.5); transform: scale(.97); }
+  .hit { font: 10.5px var(--mono); color: var(--t3); padding: 2px 8px 2px 26px; white-space: nowrap; overflow: hidden; }
+  .hit em { font-style: normal; background: color-mix(in srgb, var(--brand) 30%, transparent); color: var(--t1); }
+  .hit u { color: var(--t4); margin-right: 8px; }
+
+  .ws { position: absolute; overflow: hidden; }
+  .pane { position: absolute; overflow: hidden; background: var(--bg0); border-right: 1px solid var(--b1);
+          border-bottom: 1px solid var(--b1); color: var(--t1); }
+  .ph { height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 7px; background: var(--bg1);
+        border-bottom: 1px solid var(--b1); font: 10.5px var(--mono); letter-spacing: .02em; color: var(--t3);
+        white-space: nowrap; }
+  .ph span { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .ph .grip { color: var(--t4); width: 9px; }
+  .pane.f .ph { color: var(--t1); }
+  .pane.f .ph .kind { color: var(--brand); }
+  .pane.grab .ph .grip { color: var(--brand); }
+  .pb { position: absolute; left: 0; right: 0; top: 22px; bottom: 0; overflow: hidden; background: var(--termbg); }
+  .pane.pop { border: 1px solid var(--b2); box-shadow: 0 0 0 1px rgba(0,0,0,.6), 0 18px 50px rgba(0,0,0,.75); }
+  .pane.pop .ph { background: var(--bg3); color: var(--t1); }
+  .sub { height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-bottom: 1px solid var(--b1);
+         font: 10px var(--mono); color: var(--t3); white-space: nowrap; overflow: hidden; }
+  .sub .chip { margin-left: auto; border: 1px solid var(--b2); padding: 1px 6px; color: var(--t1); border-radius: 2px; }
+
+  .term { position: absolute; inset: 4px 8px; font: 13px/17px var(--mono); white-space: pre; color: var(--fg); }
+  .term > div { height: 17px; }
+  .cur { display: inline-block; width: 8px; height: 15px; vertical-align: -3px; background: var(--cursor); }
+  .cur.off { background: transparent; box-shadow: inset 0 0 0 1px var(--cursor); }
+  .r { color: var(--r); } .g { color: var(--g); } .y { color: var(--y); } .b { color: var(--b); }
+  .m { color: var(--m); } .c { color: var(--c); } .d { color: var(--d); } .a { color: var(--brand); }
+  .w { color: var(--t1); font-weight: 700; } .A { color: var(--brand); font-weight: 700; }
+  .R { color: var(--r); font-weight: 700; } .G { color: var(--g); font-weight: 700; }
+  .Y { color: var(--y); font-weight: 700; } .B { color: var(--b); font-weight: 700; }
+  .M { color: var(--m); font-weight: 700; } .C { color: var(--c); font-weight: 700; }
+  .inv { background: var(--fg); color: var(--bg); }
+  .gbg { background: var(--g); color: var(--bg); } .rbg { background: var(--r); color: var(--bg); }
+  .abg { background: var(--brand); color: var(--brandfg); } .bbg { background: var(--b); color: var(--bg); }
+  .sel { background: color-mix(in srgb, var(--brand) 26%, transparent); }
+  .glow { background: color-mix(in srgb, var(--brand) 22%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 22%, transparent); }
+
+  .ed { position: absolute; inset: 0; padding-top: 6px; font: 13px/19px var(--mono); white-space: pre; color: var(--fg); }
+  .ed > div { height: 19px; }
+  .ed u { display: inline-block; width: 30px; text-align: right; margin-right: 10px; color: var(--t4); }
+  .ed .hl { background: color-mix(in srgb, var(--brand) 14%, transparent); }
+  .md { position: absolute; inset: 0; padding: 14px 20px; font: 12.5px/1.6 var(--sans); color: var(--t2); }
+  .md h1 { font: 700 22px var(--sans); color: var(--t1); margin-bottom: 8px; border-bottom: 1px solid var(--b1); padding-bottom: 6px; }
+  .md h2 { font: 600 14px var(--sans); color: var(--t1); margin: 10px 0 4px; }
+  .md code { font: 11px var(--mono); background: var(--bg3); padding: 1px 4px; color: var(--y); }
+  .md table { border-collapse: collapse; margin: 6px 0; font-size: 11.5px; }
+  .md td, .md th { border: 1px solid var(--b2); padding: 3px 10px; text-align: left; }
+  .md th { color: var(--t1); background: var(--bg2); }
+  .web { position: absolute; inset: 0; background: #f4f4f1; color: #151515; font: 12px var(--sans); }
+  .card { position: absolute; left: 12px; right: 12px; bottom: 12px; border: 1px solid var(--b2); background: var(--bg2);
+          padding: 10px 12px; font: 11px var(--mono); color: var(--t2); }
+  .card .btns { display: flex; gap: 8px; margin-top: 8px; }
+  .card .btns div { padding: 4px 12px; border-radius: 2px; font: 600 11px var(--sans); }
+
+  .menu { position: absolute; background: var(--bg2); border: 1px solid var(--b2); padding: 4px 0; z-index: 60;
+          box-shadow: 0 12px 30px rgba(0,0,0,.6); font: 12px var(--sans); color: var(--t2); }
+  .menu div { height: 24px; padding: 0 12px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .menu div.hi { background: var(--bg3); color: var(--t1); box-shadow: inset 2px 0 0 var(--brand); }
+  .menu div.sep { height: 1px; margin: 4px 0; background: var(--b1); padding: 0; }
+  .menu div.head { font: 9px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--t4); height: 20px; }
+  .menu kbd { margin-left: auto; padding-left: 18px; font: 10px var(--mono); color: var(--t4); }
+  .menu .sw3 { width: 26px; height: 12px; display: flex; border: 1px solid var(--b2); }
+  .menu .sw3 b { flex: 1; }
+  .drop { position: absolute; border: 2px solid var(--brand); background: color-mix(in srgb, var(--brand) 14%, transparent); z-index: 40; }
+  .ghost { position: absolute; z-index: 70; height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 9px;
+           background: var(--bg3); border: 1px solid var(--brand); color: var(--t1); font: 10.5px var(--mono);
+           box-shadow: 0 10px 24px rgba(0,0,0,.6); white-space: nowrap; }
+
+  /* ── things that are not the app ──────────────────────────────────── */
+  #cursor { position: absolute; left: 0; top: 0; z-index: 90; display: none; will-change: transform; }
+  #cursor svg { position: absolute; left: -3px; top: -2px; width: 30px; height: 30px; filter: drop-shadow(0 2px 3px rgba(0,0,0,.6)); }
+  #cursor .ring { position: absolute; border: 2px solid var(--gold); border-radius: 50%; }
+  .big { position: absolute; font: 800 150px/0.86 var(--disp); letter-spacing: -0.045em; text-transform: uppercase;
+         color: var(--gold); white-space: nowrap; }
+  .monoB { font-family: var(--mono); font-weight: 700; letter-spacing: -0.06em; }
+  .stroke { color: transparent; -webkit-text-stroke: 2px var(--gold); }
+  .tag { position: absolute; background: var(--gold); color: #0b0900; font: 800 30px/1 var(--disp); letter-spacing: -0.01em;
+         padding: 9px 16px 10px; text-transform: uppercase; white-space: nowrap; }
+  .tag.dark { background: #000; color: var(--gold); outline: 2px solid var(--gold); }
+  .note { position: absolute; font: 700 15px var(--mono); color: #fff; background: rgba(0,0,0,.82); padding: 6px 12px;
+          white-space: nowrap; border-left: 3px solid var(--gold); }
+  .tape { position: absolute; left: -200px; width: 1700px; height: 44px; background: var(--gold); color: #0b0900;
+          font: 800 24px/44px var(--disp); white-space: nowrap; overflow: hidden; letter-spacing: .04em; }
+  .tape.k { background: #0b0900; color: var(--gold); outline: 2px solid var(--gold); }
+  .key { position: absolute; display: flex; gap: 8px; }
+  .key b { font: 700 22px var(--mono); color: #111; background: linear-gradient(#fff, #cfcfcf); border-radius: 7px;
+           padding: 8px 15px; box-shadow: 0 5px 0 #777, 0 9px 18px rgba(0,0,0,.6); }
+  .scan { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0,0,0,.10) 0 1px, transparent 1px 3px); mix-blend-mode: multiply; }
+  .vig { position: absolute; inset: 0; background: radial-gradient(ellipse at center, transparent 62%, rgba(0,0,0,.28) 100%); }
+</style>
+<body>
+  <div id="stage">
+    <div id="bg"></div>
+    <div id="cam">
+      <canvas id="amb" width="640" height="360"></canvas>
+      <div id="ui"></div>
+      <div id="cursor"></div>
+    </div>
+    <div id="over"></div>
+  </div>
+  <div id="post"></div>
+  <svg width="0" height="0" style="position: absolute">
+    <filter id="fx" x="-5%" y="-5%" width="110%" height="110%" color-interpolation-filters="sRGB">
+      <feTurbulence id="fxNoise" type="fractalNoise" baseFrequency="0.0001 0.09" numOctaves="1" seed="1" result="n" />
+      <feDisplacementMap id="fxDisp" in="SourceGraphic" in2="n" scale="0" xChannelSelector="R" yChannelSelector="A" result="d" />
+      <feColorMatrix in="d" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="r" />
+      <feOffset id="fxR" in="r" dx="0" result="ro" />
+      <feColorMatrix in="d" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="g" />
+      <feColorMatrix in="d" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="bl" />
+      <feOffset id="fxB" in="bl" dx="0" result="bo" />
+      <feBlend in="ro" in2="g" mode="screen" result="rg" />
+      <feBlend in="rg" in2="bo" mode="screen" />
+    </filter>
+  </svg>
+  <script src="content.js"></script>
+  <script src="ui.js"></script>
+  <script src="timeline.js"></script>
+</body>
