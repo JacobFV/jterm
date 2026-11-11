@@ -14,7 +14,14 @@
 export interface PaneContent {
   /** A terminal's typed-but-not-yet-submitted line. */
   draft?: string;
-  /** A notepad's full text. */
+  /**
+   * A notepad's full text, or an artifact's source.
+   *
+   * An artifact changes only when the agent rewrites it, not per keystroke, but
+   * it is kept here all the same: being here is what writes it into the
+   * snapshot, carries it to another window with its pane, and drops it when the
+   * pane is closed, and an artifact needs every one of those.
+   */
   text?: string;
   /** A notepad's caret, so a restored note reopens where you left it. */
   caret?: number;

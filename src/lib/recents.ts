@@ -114,6 +114,7 @@ export function rememberPane(pane: PaneState): void {
     // can stay the file-backed panes.
     case "vnc":
     case "rdp":
+    case "artifact":
       return;
     // A diff is a view of a repository at a moment, not something anyone goes
     // back to by name; the sidebar's Git tab is the way back in.

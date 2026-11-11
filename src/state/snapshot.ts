@@ -13,6 +13,7 @@
  */
 
 import { decodeAgent } from "@/lib/agents";
+import { isArtifactFormat } from "@/lib/artifacts";
 import { splitKey, validHost } from "@/lib/remote";
 import { isPeerTabId } from "@/lib/tmuxControl";
 import { formatRdpAddress, isFingerprint, parseRdpAddress, RDP_PORT } from "@/lib/rdp";
@@ -322,6 +323,7 @@ const KINDS: PaneKind[] = [
   "vnc",
   "rdp",
   "diff",
+  "artifact",
 ];
 
 /**
@@ -514,6 +516,22 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         layout: raw.layout === "split" ? "split" : undefined,
       };
     }
+    case "artifact":
+      return {
+        id,
+        kind: "artifact",
+        title,
+        name,
+        theme,
+        profile,
+        fontSize,
+        // A format this build cannot draw falls back to markdown rather than
+        // costing the pane: the source is in `content` and is what the user
+        // would miss, and markdown is the renderer that sanitises whatever it is
+        // given — so it is the one that is safe to hand text of any kind. The
+        // source view is one click away from there.
+        format: isArtifactFormat(raw.format) ? raw.format : "markdown",
+      };
   }
 }
 

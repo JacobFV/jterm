@@ -13,6 +13,7 @@
  */
 
 import type { AgentRecord } from "@/lib/agents";
+import type { ArtifactFormat } from "@/lib/artifacts";
 import { newId } from "@/lib/utils";
 import type { ThemeChoice } from "@/state/settings";
 import {
@@ -58,7 +59,8 @@ export type PaneKind =
   | "model"
   | "vnc"
   | "rdp"
-  | "diff";
+  | "diff"
+  | "artifact";
 
 /** The sidebar's tools, in the order its menu lists them. */
 export type SidebarTab = "files" | "search" | "git" | "agent";
@@ -258,6 +260,18 @@ export interface DiffPaneState extends PaneCommon {
 
 export type DiffSource = "worktree" | "staged" | "commit";
 
+/**
+ * A document the agent made to be looked at — see `lib/artifacts.ts`.
+ *
+ * Its title is the ordinary `title`, which the agent sets and can change. The
+ * source is not here: it lives in `state/content.ts` under the pane's id, like
+ * a notepad's text, so the pane id is also the artifact's id.
+ */
+export interface ArtifactPaneState extends PaneCommon {
+  kind: "artifact";
+  format: ArtifactFormat;
+}
+
 export type PaneState =
   | TerminalPaneState
   | NotepadPaneState
@@ -267,7 +281,8 @@ export type PaneState =
   | ModelPaneState
   | VncPaneState
   | RdpPaneState
-  | DiffPaneState;
+  | DiffPaneState
+  | ArtifactPaneState;
 
 export interface Tab {
   id: string;
@@ -398,6 +413,8 @@ export function newPane(kind: PaneKind, seed?: Partial<PaneState>): PaneState {
     // Git tab. An empty root is a pane that says it has nothing to compare.
     case "diff":
       return { id, kind: "diff", root: "", source: "worktree", ...(seed as object) } as PaneState;
+    case "artifact":
+      return { id, kind: "artifact", format: "markdown", ...(seed as object) } as PaneState;
     // The viewers cannot exist without a file, and `newPane` is only reached
     // for them by way of `openFile`, which always supplies one.
     case "image":
@@ -534,6 +551,8 @@ export function paneLabel(pane: PaneState): string {
       return pane.host ? formatVncAddress({ host: pane.host, port: pane.port ?? VNC_PORT }) : "Remote desktop";
     case "rdp":
       return pane.host ? formatRdpAddress({ host: pane.host, port: pane.port ?? RDP_PORT }) : "Remote Desktop";
+    case "artifact":
+      return "Artifact";
     case "image":
     case "media":
     case "model":

@@ -405,3 +405,47 @@ describe("diff panes", () => {
     expect((pane as { layout?: string }).layout).toBeUndefined();
   });
 });
+
+describe("artifacts", () => {
+  /** A workspace with one artifact tab open beside the starting terminal. */
+  function withArtifact() {
+    const state = reduce(emptyWorkspace(), {
+      type: "tab/open",
+      kind: "artifact",
+      seed: { title: "Build times", format: "html" } as Partial<PaneState>,
+    });
+    return { state, paneId: state.tabs[1].focusedPaneId };
+  }
+
+  it("come back with their title, format and source", () => {
+    const { state, paneId } = withArtifact();
+    const restored = decode(encode(state, { [paneId]: { text: "<h1>Slow</h1>" } }))!;
+    expect(restored.workspace.tabs[1].panes[paneId]).toMatchObject({
+      kind: "artifact",
+      title: "Build times",
+      format: "html",
+    });
+    expect(restored.content[paneId]?.text).toBe("<h1>Slow</h1>");
+  });
+
+  it("cost the format, not the pane, when the file names one this build cannot draw", () => {
+    const { state, paneId } = withArtifact();
+    for (const junk of ["pdf", undefined, 7, { evil: true }]) {
+      const parsed = JSON.parse(encode(state, { [paneId]: { text: "kept" } }));
+      parsed.workspace.tabs[1].panes[paneId].format = junk;
+      const restored = decode(JSON.stringify(parsed))!;
+      // Markdown is the renderer that sanitises, so it is the safe one to fall to.
+      expect(restored.workspace.tabs[1].panes[paneId]).toMatchObject({ format: "markdown" });
+      expect(restored.content[paneId]?.text).toBe("kept");
+    }
+  });
+
+  it("drop a source that is not text, and keep the pane", () => {
+    const { state, paneId } = withArtifact();
+    const parsed = JSON.parse(encode(state, {}));
+    parsed.content = { [paneId]: { text: { html: "<script>" } } };
+    const restored = decode(JSON.stringify(parsed))!;
+    expect(restored.workspace.tabs[1].panes[paneId]).toBeDefined();
+    expect(restored.content[paneId]).toBeUndefined();
+  });
+});
