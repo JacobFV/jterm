@@ -146,14 +146,22 @@ fn command(cwd: &Path, args: &[&str]) -> Command {
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("LC_ALL", "C")
         .stdin(Stdio::null());
-    // A console window flashing up for every poll, on a GUI app, on Windows.
+    hide_console(&mut cmd);
+    cmd
+}
+
+/// A console window flashing up for every poll, on a GUI app, on Windows.
+/// Shared with `github.rs`, whose `gh` is a console program for the same
+/// reason `git` is.
+pub(crate) fn hide_console(cmd: &mut Command) {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    cmd
+    #[cfg(not(windows))]
+    let _ = cmd;
 }
 
 fn spawn_error(err: std::io::Error) -> String {

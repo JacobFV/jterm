@@ -23,6 +23,7 @@ pub mod agents;
 pub mod control;
 pub mod files;
 pub mod git;
+pub mod github;
 pub mod history;
 pub mod isolation;
 pub mod mcp;
@@ -247,6 +248,14 @@ pub fn run() {
             git::git_diff_view,
             git::git_log,
             git::git_action,
+            github::github_lists,
+            github::github_pull,
+            github::github_pull_diff,
+            github::github_issue,
+            github::github_comment,
+            github::github_checkout,
+            github::github_merge,
+            github::github_set_issue_state,
             search::search_files,
             pty::pty_spawn,
             pty::pty_write,

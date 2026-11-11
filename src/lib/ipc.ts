@@ -711,6 +711,213 @@ export const git = {
     call("git_action", { cwd, action }, ""),
 };
 
+/* ── GitHub, through the user's own gh. See `src-tauri/src/github.rs`. ──── */
+
+/**
+ * Why gh could not answer, sorted by what the user has to do about it. Every
+ * `github` call rejects with one of these (or, outside Tauri, never runs) —
+ * read a rejection with `ghFailure` from `lib/github`.
+ */
+export type GhErrorKind =
+  | "missing"
+  | "auth"
+  | "notRepo"
+  | "notGithub"
+  | "notFound"
+  | "offline"
+  | "invalid"
+  | "failed";
+
+export interface GhError {
+  kind: GhErrorKind;
+  /** gh's own words, usually. */
+  message: string;
+}
+
+export interface GhPerson {
+  login: string;
+  name: string | null;
+  bot: boolean;
+}
+
+export interface GhLabel {
+  name: string;
+  /** Six hex digits without the `#`, checked to be exactly that. */
+  color: string | null;
+  description: string | null;
+}
+
+export type GhMergeMethod = "merge" | "squash" | "rebase";
+
+export interface GhRepo {
+  nameWithOwner: string;
+  url: string;
+  /** Whichever methods the repository allows, in this order. */
+  mergeMethods: GhMergeMethod[];
+  /** `admin`, `maintain`, `write`, `triage`, `read`; `null` when unknown. */
+  permission: string | null;
+  defaultBranch: string | null;
+  issuesEnabled: boolean;
+}
+
+export type GhCheckBucket = "pass" | "fail" | "pending" | "skipped" | "cancelled" | "neutral";
+
+export interface GhCheck {
+  name: string;
+  workflow: string | null;
+  bucket: GhCheckBucket;
+  /** GitHub's own word, lower-cased: `in_progress`, `timed_out`… */
+  detail: string | null;
+  url: string | null;
+  description: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export interface GhCheckSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  pending: number;
+}
+
+export interface GhComment {
+  id: string;
+  author: GhPerson;
+  association: string | null;
+  body: string;
+  createdAt: string | null;
+  url: string | null;
+  minimized: boolean;
+}
+
+export interface GhReview {
+  id: string;
+  author: GhPerson;
+  association: string | null;
+  body: string;
+  /** `approved`, `changes_requested`, `commented`, `dismissed`, `pending`. */
+  state: string | null;
+  submittedAt: string | null;
+}
+
+export interface GhPullSummary {
+  number: number;
+  title: string;
+  author: GhPerson;
+  draft: boolean;
+  headRef: string;
+  baseRef: string;
+  labels: GhLabel[];
+  checks: GhCheckSummary;
+  reviewDecision: string | null;
+  updatedAt: string | null;
+  url: string | null;
+}
+
+export interface GhIssueSummary {
+  number: number;
+  title: string;
+  author: GhPerson;
+  labels: GhLabel[];
+  updatedAt: string | null;
+  url: string | null;
+}
+
+export interface GhPull {
+  number: number;
+  title: string;
+  state: "open" | "closed" | "merged";
+  draft: boolean;
+  author: GhPerson;
+  baseRef: string;
+  headRef: string;
+  headOwner: string | null;
+  crossRepository: boolean;
+  body: string;
+  labels: GhLabel[];
+  assignees: GhPerson[];
+  reviewRequests: string[];
+  /** `approved`, `changes_requested`, `review_required`. */
+  reviewDecision: string | null;
+  /** `mergeable`, `conflicting`, `unknown`. */
+  mergeable: string | null;
+  /** `clean`, `blocked`, `behind`, `dirty`, `unstable`, `draft`, `has_hooks`, `unknown`. */
+  mergeState: string | null;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  commits: number;
+  comments: GhComment[];
+  reviews: GhReview[];
+  checks: GhCheck[];
+  url: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  mergedAt: string | null;
+  closedAt: string | null;
+}
+
+export interface GhIssue {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  /** `completed`, `not_planned`, `duplicate`, `reopened`. */
+  stateReason: string | null;
+  author: GhPerson;
+  labels: GhLabel[];
+  assignees: GhPerson[];
+  body: string;
+  comments: GhComment[];
+  url: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+  closedAt: string | null;
+}
+
+export interface GhLists {
+  repo: GhRepo;
+  pulls: GhPullSummary[];
+  issues: GhIssueSummary[];
+}
+
+export interface GhPullDiff {
+  /** Unified diff text; read it with `parseDiff`. */
+  text: string;
+  /** Cut at a few MB, at a line boundary. */
+  truncated: boolean;
+}
+
+/**
+ * Not running under Tauri there is no gh to ask. Rather than resolve with an
+ * empty answer that a pane would draw as "no pull requests", every call says
+ * so as a failure the panes already know how to show.
+ */
+const NO_GH: GhError = { kind: "missing", message: "gh can only be reached from the jterm app" };
+
+async function gh<T>(command: string, args: Record<string, unknown>): Promise<T> {
+  if (!isTauri()) throw NO_GH;
+  return call<T>(command, args, undefined as T);
+}
+
+export const github = {
+  /** The repository `cwd` is in, with its open pull requests and issues. */
+  lists: (cwd: string) => gh<GhLists>("github_lists", { cwd }),
+  pull: (cwd: string, number: number) =>
+    gh<{ repo: GhRepo; pull: GhPull }>("github_pull", { cwd, number }),
+  pullDiff: (cwd: string, number: number) => gh<GhPullDiff>("github_pull_diff", { cwd, number }),
+  issue: (cwd: string, number: number) =>
+    gh<{ repo: GhRepo; issue: GhIssue }>("github_issue", { cwd, number }),
+  /** The body goes to gh on stdin; it is never part of a command line. */
+  comment: (cwd: string, target: "pull" | "issue", number: number, body: string) =>
+    gh<string>("github_comment", { cwd, target, number, body }),
+  checkout: (cwd: string, number: number) => gh<string>("github_checkout", { cwd, number }),
+  merge: (cwd: string, number: number, method: GhMergeMethod) =>
+    gh<string>("github_merge", { cwd, number, method }),
+  setIssueState: (cwd: string, number: number, state: "open" | "closed") =>
+    gh<string>("github_set_issue_state", { cwd, number, state }),
+};
+
 /** A matching line, already cut around the match. See `src-tauri/src/search.rs`. */
 export interface SearchHit {
   line: number;
