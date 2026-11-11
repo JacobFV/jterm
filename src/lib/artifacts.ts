@@ -189,7 +189,8 @@ function svgDocument(svg: string, head: string): string {
   return (
     `<!doctype html><html><head><meta charset="utf-8">${head}` +
     `<style>html,body{height:100%;margin:0}` +
-    `body{display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:12px}` +
+    `body{display:flex;align-items:center;justify-content:center;` +
+    `box-sizing:border-box;padding:12px}` +
     `body>svg{max-width:100%;max-height:100%;height:auto}</style>` +
     `</head><body>${body}</body></html>`
   );

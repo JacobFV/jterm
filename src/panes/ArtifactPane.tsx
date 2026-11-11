@@ -139,7 +139,9 @@ export function ArtifactPane({ pane, focused, theme, onFocus }: PaneProps<Artifa
   return (
     <div className="flex h-full w-full flex-col bg-surface-0" onMouseDown={onFocus}>
       <div className="flex h-7 shrink-0 items-center gap-2 border-b border-border bg-surface-1 px-2">
-        <span className="min-w-0 flex-1 truncate text-[length:var(--fs-11)] text-ink-2">{label}</span>
+        <span className="min-w-0 flex-1 truncate text-[length:var(--fs-11)] text-ink-2">
+          {label}
+        </span>
         <span className="shrink-0 font-mono text-[length:var(--fs-9)] uppercase tracking-[0.14em] text-ink-3">
           {FORMAT_LABEL[pane.format]}
         </span>
@@ -346,7 +348,10 @@ function MermaidView({ source, theme }: { source: string; theme: PaneProps["them
 
   return (
     <div className="min-h-0 flex-1 overflow-auto">
-      <div ref={hostRef} className="markdown flex min-h-full items-center justify-center px-4 py-3" />
+      <div
+        ref={hostRef}
+        className="markdown flex min-h-full items-center justify-center px-4 py-3"
+      />
     </div>
   );
 }
