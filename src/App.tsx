@@ -1252,6 +1252,8 @@ export function App() {
       terminal: terminalHandle,
       newId,
       setDraft: (paneId, text) => updateContent(paneId, { draft: text }),
+      readText: (paneId) => getContent(paneId).text ?? "",
+      writeText: (paneId, text) => updateContent(paneId, { text }),
       splitDirection: () => getSettings().openPaneDirection,
       sleep: (ms) => new Promise((resolve) => window.setTimeout(resolve, ms)),
     }),

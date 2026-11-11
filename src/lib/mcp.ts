@@ -25,10 +25,18 @@ import {
   paneLabel,
   tabLabel,
   type Action,
+  type ArtifactPaneState,
   type PaneKind,
   type PaneState,
   type Workspace,
 } from "@/state/workspace";
+import {
+  ARTIFACT_FORMATS,
+  isArtifactFormat,
+  MAX_ARTIFACT,
+  MAX_ARTIFACT_TITLE,
+  type ArtifactFormat,
+} from "./artifacts";
 import type { TerminalHandle } from "./terminals";
 
 export interface ToolContext {
@@ -39,6 +47,10 @@ export interface ToolContext {
   newId(): string;
   /** Put a line at a new terminal's prompt, typed but not run. */
   setDraft(paneId: string, text: string): void;
+  /** An artifact's source, from the content store. Empty when there is none. */
+  readText(paneId: string): string;
+  /** Replace an artifact's source; an open pane redraws from it. */
+  writeText(paneId: string, text: string): void;
   splitDirection(): Direction;
   sleep(ms: number): Promise<void>;
 }
@@ -79,7 +91,7 @@ export const TOOLS: ToolDef[] = [
     name: "list_panes",
     title: "List tabs and panes",
     description:
-      "Every tab and pop-up in this jterm window, and the panes in each: id, kind (terminal, notepad, browser, image, media, model, vnc, rdp, diff), title, and for terminals the working directory, the last command started and whether the shell has exited. A diff pane shows a git diff and says what it compares under `diff`: the repository root, the source (worktree for unstaged changes and untracked files, staged, or commit), the revision for a commit, and the path when narrowed to one file. `focused` marks the pane the user is typing into.",
+      "Every tab and pop-up in this jterm window, and the panes in each: id, kind (terminal, notepad, browser, image, media, model, vnc, rdp, diff, artifact), title, and for terminals the working directory, the last command started and whether the shell has exited. A diff pane shows a git diff and says what it compares under `diff`: the repository root, the source (worktree for unstaged changes and untracked files, staged, or commit), the revision for a commit, and the path when narrowed to one file. An artifact says its format. `focused` marks the pane the user is typing into.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -170,6 +182,59 @@ export const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "create_artifact",
+    title: "Show a document",
+    description:
+      "Show the user a document you wrote, in a pane of its own, and return its pane id: an HTML page, a markdown write-up, an SVG, or a Mermaid diagram. Use it for anything better looked at than read in this column — a report, a comparison table, a chart, an architecture diagram. HTML and SVG run sandboxed: scripts work and can load libraries from the network, but cannot reach jterm or the user's files, and links open in the user's browser. A page without its own styles gets the theme's colours. It survives a restart. Up to 1 MB; for anything bigger write a file and use open_file. To change it later use update_artifact rather than making another.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "What the pane is called." },
+        format: { type: "string", enum: ARTIFACT_FORMATS },
+        content: {
+          type: "string",
+          description:
+            "The whole document: a full HTML page or a fragment, markdown (with ```mermaid blocks if wanted), an <svg> element, or Mermaid source without fences.",
+        },
+        where: WHERE,
+      },
+      required: ["title", "format", "content"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "update_artifact",
+    title: "Change a document",
+    description:
+      "Replace an artifact's content, and optionally its title or format, in place. The pane redraws where it is; no new pane opens. content is the whole new document, not a diff.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pane_id: {
+          type: "string",
+          description: "The artifact's id, from create_artifact or list_panes.",
+        },
+        content: { type: "string" },
+        title: { type: "string" },
+        format: { type: "string", enum: ARTIFACT_FORMATS },
+      },
+      required: ["pane_id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "read_artifact",
+    title: "Read a document",
+    description:
+      "An artifact's title, format and full source — to change one made before a restart, or by another conversation.",
+    inputSchema: {
+      type: "object",
+      properties: { pane_id: { type: "string" } },
+      required: ["pane_id"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 /* ── Answering the backend ───────────────────────────────────────────────── */
@@ -219,6 +284,12 @@ export async function callTool(
         return openUrl(args, context);
       case "focus_pane":
         return focusPane(args, context);
+      case "create_artifact":
+        return createArtifact(args, context);
+      case "update_artifact":
+        return updateArtifact(args, context);
+      case "read_artifact":
+        return readArtifact(args, context);
       default:
         return failure(`jterm has no tool called ${name || "(none)"}`);
     }
@@ -281,6 +352,7 @@ function describePane(pane: PaneState): Record<string, unknown> {
     described.path = pane.path;
   }
   if (pane.kind === "browser") described.url = pane.url;
+  if (pane.kind === "artifact") described.format = pane.format;
   return described;
 }
 
@@ -357,6 +429,93 @@ function focusPane(args: Record<string, unknown>, context: ToolContext): ToolRes
     context.dispatch({ type: "pane/focus", tabId: found.tabId, paneId });
   }
   return text(`Focused ${paneLabel(found.pane)} (${paneId}).`);
+}
+
+/**
+ * A new artifact, placed the way every other pane these tools open is placed.
+ *
+ * The source is written before the pane exists, under the id minted for it, so
+ * the pane's first render already has something to draw — the same order
+ * `open_terminal` uses for a draft.
+ */
+function createArtifact(args: Record<string, unknown>, context: ToolContext): ToolResult {
+  const title = artifactTitle(requireString(args, "title"));
+  const format = artifactFormat(args.format);
+  const content = artifactContent(requireString(args, "content"));
+  const id = context.newId();
+  context.writeText(id, content);
+  place(context, "artifact", { id, title, format } as Partial<PaneState>, where(args));
+  return text(`Opened artifact ${id}, "${title}" (${format}).`);
+}
+
+/**
+ * The same artifact, changed where it is.
+ *
+ * Nothing is focused or raised: an agent revising a document as the
+ * conversation goes should not pull the user away from whatever they turned to
+ * meanwhile. `focus_pane` is there for when it should.
+ */
+function updateArtifact(args: Record<string, unknown>, context: ToolContext): ToolResult {
+  const pane = artifactPane(args, context);
+  const fields = ["content", "title", "format"] as const;
+  const changed = fields.filter((key) => args[key] !== undefined);
+  if (changed.length === 0) throw new Error("update_artifact needs content, title or format");
+
+  // Every argument is checked before anything is changed, so a bad format does
+  // not leave the content replaced and the call reported as a failure.
+  const content = args.content === undefined ? undefined : requireString(args, "content");
+  if (content !== undefined) artifactContent(content);
+  const patch: Partial<ArtifactPaneState> = {};
+  if (args.title !== undefined) patch.title = artifactTitle(requireString(args, "title"));
+  if (args.format !== undefined) patch.format = artifactFormat(args.format);
+
+  if (content !== undefined) context.writeText(pane.id, content);
+  if (patch.title !== undefined || patch.format !== undefined) {
+    context.dispatch({ type: "pane/meta", paneId: pane.id, patch });
+  }
+  return text(`Updated the ${changed.join(", ")} of artifact ${pane.id}.`);
+}
+
+function readArtifact(args: Record<string, unknown>, context: ToolContext): ToolResult {
+  const pane = artifactPane(args, context);
+  const label = pane.title ?? paneLabel(pane);
+  return text(`${label} (${pane.id}), ${pane.format}\n\n${context.readText(pane.id)}`);
+}
+
+function artifactPane(args: Record<string, unknown>, context: ToolContext): ArtifactPaneState {
+  const paneId = requireString(args, "pane_id");
+  const found = locatePane(context.getWorkspace(), paneId);
+  if (found === null) {
+    throw new Error(`no pane ${paneId} in this window — if it was closed, make a new one`);
+  }
+  if (found.pane.kind !== "artifact") {
+    throw new Error(`${paneId} is a ${found.pane.kind} pane, not an artifact`);
+  }
+  return found.pane;
+}
+
+function artifactTitle(raw: string): string {
+  const title = raw.trim().slice(0, MAX_ARTIFACT_TITLE);
+  if (!title) throw new Error("title must not be empty");
+  return title;
+}
+
+function artifactFormat(raw: unknown): ArtifactFormat {
+  if (!isArtifactFormat(raw)) {
+    throw new Error(`format must be one of ${ARTIFACT_FORMATS.join(", ")}`);
+  }
+  return raw;
+}
+
+/** Refused rather than cut short — see `MAX_ARTIFACT`. */
+function artifactContent(raw: string): string {
+  if (raw.length > MAX_ARTIFACT) {
+    throw new Error(
+      `content is ${raw.length} characters, over the ${MAX_ARTIFACT} an artifact may hold — ` +
+        "write it to a file and use open_file",
+    );
+  }
+  return raw;
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */

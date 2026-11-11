@@ -9,6 +9,7 @@ function harness() {
   const sent: string[] = [];
   const pasted: string[] = [];
   const drafts: Record<string, string> = {};
+  const texts: Record<string, string> = {};
   const opened: [string, string][] = [];
   const live = new Set<string>();
   const handle = (paneId: string): TerminalHandle => ({
@@ -30,6 +31,10 @@ function harness() {
     setDraft: (paneId, text) => {
       drafts[paneId] = text;
     },
+    readText: (paneId) => texts[paneId] ?? "",
+    writeText: (paneId, text) => {
+      texts[paneId] = text;
+    },
     splitDirection: () => "right",
     // Time passing is where a real terminal mounts; the fake one mounts on the
     // first wait, which is enough to exercise the wait.
@@ -39,10 +44,23 @@ function harness() {
   };
   const first = () => workspace.tabs[0];
   const firstPane = () => first().focusedPaneId;
-  return { context, sent, pasted, drafts, opened, live, first, firstPane, get: () => workspace };
+  return {
+    context,
+    sent,
+    pasted,
+    drafts,
+    texts,
+    opened,
+    live,
+    first,
+    firstPane,
+    get: () => workspace,
+  };
 }
 
 const body = (result: { content: { text: string }[] }) => result.content[0].text;
+
+const NOTES = { title: "Notes", format: "markdown", content: "# a" };
 
 describe("the MCP tools", () => {
   it("lists every tool with a schema", async () => {
@@ -56,6 +74,9 @@ describe("the MCP tools", () => {
       "open_file",
       "open_url",
       "focus_pane",
+      "create_artifact",
+      "update_artifact",
+      "read_artifact",
     ]);
     for (const tool of listed.tools) expect(tool.inputSchema.type).toBe("object");
     await expect(handleRequest("resources/list", {}, context)).rejects.toThrow();
@@ -140,6 +161,94 @@ describe("the MCP tools", () => {
     await callTool("focus_pane", { pane_id: original.focusedPaneId }, context);
     expect(get().activeTabId).toBe(original.id);
     expect((await callTool("focus_pane", { pane_id: "nope" }, context)).isError).toBe(true);
+  });
+
+  it("shows an artifact in a new pane, with its source ready before the pane is", async () => {
+    const { context, texts, get } = harness();
+    const result = await callTool(
+      "create_artifact",
+      { title: "  Build times  ", format: "html", content: "<h1>Slow</h1>" },
+      context,
+    );
+    expect(result.isError).toBeUndefined();
+    expect(body(result)).toContain("new1");
+    expect(get().tabs).toHaveLength(2);
+    expect(get().tabs[1].panes.new1).toMatchObject({
+      kind: "artifact",
+      title: "Build times",
+      format: "html",
+    });
+    expect(texts.new1).toBe("<h1>Slow</h1>");
+
+    await callTool(
+      "create_artifact",
+      { title: "Flow", format: "mermaid", content: "graph TD; a-->b", where: "popup" },
+      context,
+    );
+    expect(get().popups[0].pane).toMatchObject({ id: "new2", kind: "artifact", format: "mermaid" });
+
+    const described = JSON.parse(body(await callTool("list_panes", {}, context)));
+    expect(described.tabs[1].panes[0]).toMatchObject({
+      id: "new1",
+      kind: "artifact",
+      title: "Build times",
+      format: "html",
+    });
+    expect(described.popups[0]).toMatchObject({ id: "new2", format: "mermaid" });
+  });
+
+  it("refuses an artifact it could not show, and opens nothing", async () => {
+    const { context, texts, get } = harness();
+    const attempts = [
+      { title: "x", format: "pdf", content: "x" },
+      { title: "   ", format: "html", content: "x" },
+      { title: "x", format: "html" },
+      { title: "x", format: "html", content: "x".repeat(1024 * 1024 + 1) },
+    ];
+    for (const args of attempts) {
+      expect((await callTool("create_artifact", args, context)).isError).toBe(true);
+    }
+    expect(get().tabs).toHaveLength(1);
+    expect(texts).toEqual({});
+  });
+
+  it("changes an artifact in place, and reads it back", async () => {
+    const { context, texts, get } = harness();
+    await callTool("create_artifact", NOTES, context);
+    const tabs = get().tabs.length;
+
+    await callTool("update_artifact", { pane_id: "new1", content: "# b" }, context);
+    expect(texts.new1).toBe("# b");
+    expect(get().tabs).toHaveLength(tabs);
+
+    await callTool("update_artifact", { pane_id: "new1", title: "Plan", format: "svg" }, context);
+    expect(get().tabs[1].panes.new1).toMatchObject({ title: "Plan", format: "svg" });
+    expect(texts.new1).toBe("# b");
+
+    const read = body(await callTool("read_artifact", { pane_id: "new1" }, context));
+    expect(read).toBe("Plan (new1), svg\n\n# b");
+  });
+
+  it("changes nothing when any part of an update is wrong", async () => {
+    const { context, texts, get, firstPane } = harness();
+    await callTool("create_artifact", NOTES, context);
+
+    const bad = await callTool(
+      "update_artifact",
+      { pane_id: "new1", content: "# b", format: "pdf" },
+      context,
+    );
+    expect(bad.isError).toBe(true);
+    expect(texts.new1).toBe("# a");
+    expect(get().tabs[1].panes.new1).toMatchObject({ format: "markdown" });
+
+    expect((await callTool("update_artifact", { pane_id: "new1" }, context)).isError).toBe(true);
+    const gone = await callTool("update_artifact", { pane_id: "gone", content: "x" }, context);
+    expect(gone.isError).toBe(true);
+    // A terminal is not an artifact, and its content store entry is its draft's.
+    const terminal = await callTool("read_artifact", { pane_id: firstPane() }, context);
+    expect(terminal.isError).toBe(true);
+    expect(body(terminal)).toContain("not an artifact");
   });
 
   it("answers an unknown tool or bad arguments as a tool error", async () => {
