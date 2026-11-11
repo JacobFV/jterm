@@ -900,55 +900,72 @@ export function App() {
   /* ── Opening a file ───────────────────────────────────────────────── */
 
   /**
-   * Open a file in whichever pane suits it, wherever the user asked files to go.
+   * Put a new pane wherever the user asked opened things to go.
    *
-   * Two decisions, kept apart. *What* opens it is the extension's business, in
-   * `kindForPath`, so "what opens a `.stl`" is answered in one place for every
-   * route a file can arrive by. *Where* it opens is the user's, in settings: a
-   * a pop-up over the workspace, a tab of its own, or a split beside whatever
-   * is focused, on the side they chose. `target` overrides that for the one
-   * caller that means something specific — the tab strip's `Open file…`, which
-   * says "tab" on the label.
+   * The *where* half of opening a file, on its own, for the things that open
+   * as a pane without being a file — a diff from the Git tab. The setting is
+   * still called "open files in", and what it means is "things I open from
+   * the sidebar": a diff popping up where a file would is what someone who
+   * chose pop-ups for files expects, and a different rule for each would be a
+   * second setting nobody asked for. `target` overrides it for a caller that
+   * means something specific.
    *
    * Settings are read at the moment of the click rather than closed over, so
    * this callback survives a preference change without being rebuilt.
    */
-  const openPath = useCallback((path: string, target?: FileOpenTarget) => {
-    const settings = getSettings();
-    const kind = kindForPath(path);
-    const seed = { path } as Partial<PaneState>;
-    const tab = activeTab(workspaceRef.current);
-    const where = target ?? settings.openFilesIn;
+  const openPane = useCallback(
+    (kind: PaneKind, seed: Partial<PaneState>, target?: FileOpenTarget) => {
+      const settings = getSettings();
+      const tab = activeTab(workspaceRef.current);
+      const where = target ?? settings.openFilesIn;
 
-    // Remembered before it is opened, so the list is right even if opening it
-    // fails: what the menu offers is "files you have opened", not "files that
-    // still exist", and a path that has gone is better shown and refused than
-    // quietly missing.
-    rememberFile(path);
+      // The default, and the reason it is: a file picked out of the tree is
+      // usually something to look at *while* carrying on, not something to
+      // rearrange the window for.
+      if (where === "popup") {
+        dispatch({ type: "popup/open", kind, seed });
+        return;
+      }
 
-    // The default, and the reason it is: a file picked out of the tree is
-    // usually something to look at *while* carrying on, not something to
-    // rearrange the window for.
-    if (where === "popup") {
-      dispatch({ type: "popup/open", kind, seed });
-      return;
-    }
+      if (where === "pane" && tab) {
+        const { axis, before } = splitPlacement(settings.openPaneDirection);
+        dispatch({
+          type: "pane/split",
+          tabId: tab.id,
+          paneId: tab.focusedPaneId,
+          axis,
+          before,
+          kind,
+          seed,
+        });
+        return;
+      }
+      dispatch({ type: "tab/open", kind, seed });
+    },
+    [],
+  );
 
-    if (where === "pane" && tab) {
-      const { axis, before } = splitPlacement(settings.openPaneDirection);
-      dispatch({
-        type: "pane/split",
-        tabId: tab.id,
-        paneId: tab.focusedPaneId,
-        axis,
-        before,
-        kind,
-        seed,
-      });
-      return;
-    }
-    dispatch({ type: "tab/open", kind, seed });
-  }, []);
+  /**
+   * Open a file in whichever pane suits it, wherever the user asked files to go.
+   *
+   * Two decisions, kept apart. *What* opens it is the extension's business, in
+   * `kindForPath`, so "what opens a `.stl`" is answered in one place for every
+   * route a file can arrive by. *Where* it opens is the user's, in settings —
+   * see `openPane` — and `target` overrides that for the one caller that means
+   * something specific: the tab strip's `Open file…`, which says "tab" on the
+   * label.
+   */
+  const openPath = useCallback(
+    (path: string, target?: FileOpenTarget) => {
+      // Remembered before it is opened, so the list is right even if opening
+      // it fails: what the menu offers is "files you have opened", not "files
+      // that still exist", and a path that has gone is better shown and
+      // refused than quietly missing.
+      rememberFile(path);
+      openPane(kindForPath(path), { path } as Partial<PaneState>, target);
+    },
+    [openPane],
+  );
 
   /**
    * Put back something that was open before.
@@ -1654,6 +1671,7 @@ export function App() {
               tab={workspace.sidebarTab ?? "files"}
               onTab={(tab) => dispatch({ type: "ui/sidebarTab", tab })}
               onOpen={openPath}
+              onOpenPane={openPane}
               theme={windowTheme}
             />
           </div>

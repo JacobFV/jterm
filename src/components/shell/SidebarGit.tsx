@@ -8,6 +8,11 @@
  * button either: throwing work away should take a command someone typed, not a
  * click someone slipped on.
  *
+ * Every changed file and every commit in the history can be opened as a diff
+ * pane — the row's diff icon, or a click on a commit — which goes wherever the
+ * user has asked opened files to go. The inline diff under a file row stays,
+ * for the glance that does not deserve a pane.
+ *
  * Status is polled while the tab is on screen, because git has no way to say
  * the repository changed and the terminal next door is changing it constantly.
  * The poll is cheap — see the lock note in `src-tauri/src/git.rs` for why it is
@@ -21,6 +26,7 @@ import {
   ChevronDown,
   ChevronRight,
   FileText,
+  GitCompare,
   History,
   Minus,
   Plus,
@@ -29,19 +35,26 @@ import {
 
 import { git, type GitAction, type GitCommit, type GitFile, type GitStatus } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
+import type { DiffPaneState } from "@/state/workspace";
 import { HeaderButton, SidebarHeader, SidebarNote, baseName, errorText } from "./SidebarChrome";
 
 const POLL_MS = 3000;
+
+/** What the Git tab asks a diff pane to show. See `DiffPaneState`. */
+export type DiffRequest = Pick<DiffPaneState, "root" | "source" | "rev" | "path">;
 
 export function SidebarGit({
   cwd,
   active,
   onOpen,
+  onOpenDiff,
   switcher,
 }: {
   cwd: string;
   active: boolean;
   onOpen: (path: string) => void;
+  /** Open a diff pane, wherever opened files go. */
+  onOpenDiff: (diff: DiffRequest) => void;
   switcher: ReactNode;
 }) {
   // `undefined` is "not asked yet", `null` is "asked: not a repository".
@@ -209,10 +222,16 @@ export function SidebarGit({
               <Section label="Recent commits">
                 {log.length === 0 ? <SidebarNote>no commits yet</SidebarNote> : null}
                 {log.map((entry) => (
-                  <div
+                  // The whole row opens the commit: there is nothing else to
+                  // do with a line of history here, so it needs no icon.
+                  <button
+                    type="button"
                     key={entry.hash}
-                    title={`${entry.hash}\n${entry.author}, ${entry.when}\n\n${entry.subject}`}
-                    className="flex items-baseline gap-1.5 px-2 py-[2px]"
+                    onClick={() =>
+                      onOpenDiff({ root: status.root, source: "commit", rev: entry.hash })
+                    }
+                    title={`${entry.hash}\n${entry.author}, ${entry.when}\n\n${entry.subject}\n\nClick to open this commit's diff`}
+                    className="flex w-full items-baseline gap-1.5 px-2 py-[2px] text-left hover:bg-surface-2"
                   >
                     <span className="shrink-0 font-mono text-[length:var(--fs-9)] text-ink-4">
                       {entry.short}
@@ -220,7 +239,7 @@ export function SidebarGit({
                     <span className="min-w-0 flex-1 truncate text-[length:var(--fs-10)] text-ink-2">
                       {entry.subject}
                     </span>
-                  </div>
+                  </button>
                 ))}
               </Section>
             ) : null}
@@ -263,13 +282,21 @@ export function SidebarGit({
               <Section
                 label={`Staged (${staged.length})`}
                 action={
-                  <HeaderButton
-                    label="Unstage everything"
-                    disabled={busy !== null}
-                    onClick={() => void run("unstage", () => git.unstage(status.root, staged.map((f) => f.path)))}
-                  >
-                    <Minus className="h-3 w-3" />
-                  </HeaderButton>
+                  <>
+                    <HeaderButton
+                      label="Open the staged changes as a diff"
+                      onClick={() => onOpenDiff({ root: status.root, source: "staged" })}
+                    >
+                      <GitCompare className="h-3 w-3" />
+                    </HeaderButton>
+                    <HeaderButton
+                      label="Unstage everything"
+                      disabled={busy !== null}
+                      onClick={() => void run("unstage", () => git.unstage(status.root, staged.map((f) => f.path)))}
+                    >
+                      <Minus className="h-3 w-3" />
+                    </HeaderButton>
+                  </>
                 }
               >
                 {staged.map((file) => (
@@ -279,6 +306,9 @@ export function SidebarGit({
                     letter={file.staged}
                     diff={open?.key === `s:${file.path}` ? open.text : null}
                     onDiff={() => void toggleDiff(file, true)}
+                    onOpenDiff={() =>
+                      onOpenDiff({ root: status.root, source: "staged", path: file.path })
+                    }
                     onOpen={() => onOpen(`${status.root}/${file.path}`)}
                     toggle={{
                       label: "Unstage",
@@ -295,13 +325,21 @@ export function SidebarGit({
               <Section
                 label={`Changes (${changes.length})`}
                 action={
-                  <HeaderButton
-                    label="Stage everything"
-                    disabled={busy !== null}
-                    onClick={() => void run("stage", () => git.stage(status.root, changes.map((f) => f.path)))}
-                  >
-                    <Plus className="h-3 w-3" />
-                  </HeaderButton>
+                  <>
+                    <HeaderButton
+                      label="Open the working tree's changes as a diff"
+                      onClick={() => onOpenDiff({ root: status.root, source: "worktree" })}
+                    >
+                      <GitCompare className="h-3 w-3" />
+                    </HeaderButton>
+                    <HeaderButton
+                      label="Stage everything"
+                      disabled={busy !== null}
+                      onClick={() => void run("stage", () => git.stage(status.root, changes.map((f) => f.path)))}
+                    >
+                      <Plus className="h-3 w-3" />
+                    </HeaderButton>
+                  </>
                 }
               >
                 {changes.map((file) => (
@@ -311,6 +349,9 @@ export function SidebarGit({
                     letter={file.untracked ? "U" : file.conflicted ? "!" : file.unstaged}
                     diff={open?.key === `u:${file.path}` ? open.text : null}
                     onDiff={() => void toggleDiff(file, false)}
+                    onOpenDiff={() =>
+                      onOpenDiff({ root: status.root, source: "worktree", path: file.path })
+                    }
                     onOpen={() => onOpen(`${status.root}/${file.path}`)}
                     toggle={{
                       label: "Stage",
@@ -358,6 +399,7 @@ function FileRow({
   letter,
   diff,
   onDiff,
+  onOpenDiff,
   onOpen,
   toggle,
   disabled,
@@ -366,6 +408,7 @@ function FileRow({
   letter: string;
   diff: string | null;
   onDiff: () => void;
+  onOpenDiff: () => void;
   onOpen: () => void;
   toggle: { label: string; icon: typeof Plus; run: () => void };
   disabled: boolean;
@@ -380,7 +423,10 @@ function FileRow({
         <button
           type="button"
           onClick={onDiff}
-          title={file.orig ? `${file.orig} → ${file.path}` : file.path}
+          // A click is the glance below the row; a double click is the same
+          // diff given a pane of its own.
+          onDoubleClick={onOpenDiff}
+          title={`${file.orig ? `${file.orig} → ${file.path}` : file.path}\nDouble-click to open the diff in a pane`}
           className="flex min-w-0 flex-1 items-center gap-1 py-[3px] pl-1.5 text-left"
         >
           {diff !== null ? (
@@ -400,6 +446,9 @@ function FileRow({
           ) : null}
         </button>
         <span className="flex shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+          <HeaderButton label="Open the diff in a pane" onClick={onOpenDiff}>
+            <GitCompare className="h-3 w-3" />
+          </HeaderButton>
           <HeaderButton label="Open file" onClick={onOpen}>
             <FileText className="h-3 w-3" />
           </HeaderButton>

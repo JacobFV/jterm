@@ -20,7 +20,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Bot, ChevronDown, Folder, GitBranch, Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import type { SidebarTab } from "@/state/workspace";
+import type { PaneKind, PaneState, SidebarTab } from "@/state/workspace";
 import { FileTree } from "./FileTree";
 import { Menu, MenuItem, useMenu, type MenuIcon } from "./Menu";
 import { SidebarAgent } from "./SidebarAgent";
@@ -43,11 +43,13 @@ interface SidebarProps {
   tab: SidebarTab;
   onTab: (tab: SidebarTab) => void;
   onOpen: (path: string) => void;
+  /** Open a pane that is not a file — a diff — wherever opened files go. */
+  onOpenPane: (kind: PaneKind, seed: Partial<PaneState>) => void;
   /** The window's theme; see `SidebarAgent`. */
   theme: string;
 }
 
-export function Sidebar({ root, visible, tab, onTab, onOpen, theme }: SidebarProps) {
+export function Sidebar({ root, visible, tab, onTab, onOpen, onOpenPane, theme }: SidebarProps) {
   const [shown, setShown] = useState<ReadonlySet<SidebarTab>>(() => new Set(["files"]));
   useEffect(() => {
     if (!visible || shown.has(tab)) return;
@@ -93,7 +95,13 @@ export function Sidebar({ root, visible, tab, onTab, onOpen, theme }: SidebarPro
       {slot(
         "git",
         shown.has("git") && root ? (
-          <SidebarGit cwd={root} active={visible && tab === "git"} onOpen={onOpen} switcher={switcher} />
+          <SidebarGit
+            cwd={root}
+            active={visible && tab === "git"}
+            onOpen={onOpen}
+            onOpenDiff={(diff) => onOpenPane("diff", diff)}
+            switcher={switcher}
+          />
         ) : null,
       )}
       {slot(
