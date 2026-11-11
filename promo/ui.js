@@ -251,7 +251,7 @@ const avatar = (name, hue) => `<i class="av" style="background:hsl(${hue} 55% 45
 const comment = (name, hue, when, html) => `<div class="ghc">${avatar(name, hue)}<div><div class="who"><b>${name}</b> ${when}</div>${html}</div></div>`;
 function issueBody(p) {
   return `<div class="gh"><div class="ght">Pop-up forgets its size after a restart <i>#212</i></div>
-  <div class="ghm">${pill(p.closed ? "closed" : "open")}<i><b>mara-k</b> opened this 2 days ago · 3 comments</i><i class="lab" style="--c:var(--r)">bug</i><i class="lab" style="--c:var(--b)">restore</i></div>
+  <div class="ghm">${pill(p.closed ? "closed" : "open")}<i><b>mara-k</b> opened this issue 2 days ago · 3 comments</i><i class="lab" style="--c:var(--r)">bug</i><i class="lab" style="--c:var(--b)">restore</i></div>
   ${comment("mara-k", 330, "2 days ago", "Resize a pop-up on the rail, quit, reopen. It comes back at <code>470×300</code> every time — the pane inside is restored, its box is not.")}
   ${comment("devon", 200, "yesterday", "Same on macOS. <code>snapshotRail</code> never writes <code>w</code>/<code>h</code>, so there is nothing to read back.")}
   ${comment("claude", 42, "just now", "On it — the snapshot drops the size and the decoder hard-codes it. Fix and a test coming as a PR.")}</div>`;
@@ -265,7 +265,7 @@ function prBody(p, w, h, t) {
   <div class="ghtabs"><b>Conversation</b><i>Checks <u>${done}/4</u></i><i>Files <u>2</u></i><span><i class="g">+9</i> <i class="r">−3</i></span></div>
   ${comment("claude", 42, "1 minute ago", "Fixes <b style='color:var(--b)'>#212</b>. The rail's snapshot now carries <code>w</code> and <code>h</code>; the decoder clamps what it reads and falls back per field.")}
   <div class="chks">${rows}</div>
-  <div class="ghb">${p.merged ? `<div class="btn" style="background:var(--m);color:#fff">${ic("merge")}Merged into main</div>` : `<div class="btn${p.press ? " press" : ""}"${done < 4 ? ' style="opacity:.45"' : ""}>${ic("merge")}Squash and merge</div>`}<div class="btn ghost">Check out</div><div class="btn ghost">${ic("globe")}Open</div></div></div>`;
+  ${p.merged ? "" : p.confirm ? `<div class="ghb" style="align-items:center"><i style="color:var(--t1);margin-right:4px">Merge #213 into main?</i><div class="btn ghost" style="border-color:var(--brand);color:var(--t1)">Squash and merge</div><div class="btn ghost">Cancel</div><div class="btn${p.press ? " press" : ""}">Confirm merge</div></div>` : `<div class="ghb"><div class="btn${p.press ? " press" : ""}"${done < 4 ? ' style="opacity:.45"' : ""}>${ic("merge")}Merge</div><div class="btn ghost">Check out</div><div class="btn ghost">${ic("globe")}Open on GitHub</div></div>`}</div>`;
 }
 function diffBody(p, w, h, t) {
   const split = p.split ?? (w > 560 && rnd((p.dt || 0) + 3) < 0.5), n = p.n ?? 99;
@@ -315,7 +315,7 @@ function paneHtml(p, r, o = {}) {
 }
 
 // ── sidebar ───────────────────────────────────────────────────────────────
-const TOOLS = { files: ["folder", "Files"], search: ["search", "Search"], git: ["git", "Git"], agent: ["bot", "Agent"], github: ["gh", "GitHub"] };
+const TOOLS = { files: ["folder", "Files"], search: ["search", "Search"], git: ["git", "Git"], github: ["gh", "GitHub"], agent: ["bot", "Agent"] };
 function sideHtml(sb, t) {
   const head = (title, extra = "") => `<div class="sh"><div class="sw${sb.menu ? " on" : ""}">${ic(TOOLS[sb.tool][0])}${ic("down")}</div><span>${title}</span><div class="hb">${extra}</div></div>`;
   let body = "";
@@ -355,8 +355,8 @@ function sideHtml(sb, t) {
   } else if (sb.tool === "github") {
     const row = (icn, col, [num, title], hot) => `<div class="row${hot ? " hot" : ""}" style="padding-left:10px"><i class="${col}" style="display:flex">${ic(icn)}</i><i class="d">#${num}</i><i style="overflow:hidden;text-overflow:ellipsis;font-family:var(--sans)">${esc(title)}</i></div>`;
     const prs = GH_PRS.slice(sb.prs ?? 0);
-    body = head("JacobFV/jterm", ic("plus")) + `<div class="sec">Pull requests · ${prs.length}</div>` + prs.map((r) => row("pr", "g", r, sb.hot === r[0])).join("") +
-      `<div class="sec">Issues · ${GH_ISSUES.length}</div>` + GH_ISSUES.map((r) => row("issue", "g", r, sb.hot === r[0])).join("");
+    body = head("JacobFV/jterm", ic("plus")) + `<div class="sec">Pull requests (${prs.length})</div>` + prs.map((r) => row("pr", "g", r, sb.hot === r[0])).join("") +
+      `<div class="sec">Issues (${GH_ISSUES.length})</div>` + GH_ISSUES.map((r) => row("issue", "g", r, sb.hot === r[0])).join("");
   } else {
     body = head("claude · ~/jterm", ic("plus")) + `<div style="position:absolute;inset:28px 0 0 0;background:var(--termbg)"><div style="transform:scale(.86);transform-origin:0 0;width:116%;height:116%;position:relative">${termBody({ c: AGENT, n: sb.n }, 270, 760, t)}</div></div>`;
   }

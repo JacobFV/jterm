@@ -334,7 +334,7 @@ function sidebarScene(F, b) {
   const a = { title: "cargo test", icon: "cpu", c: FAIL.concat(b >= 62.3 ? [P + typed.slice(0, Math.floor(seg(b, 62.3, 62.9) * typed.length))] : [P], b >= 63 ? PASS.slice(0, Math.floor((b - 63) * 14) + 1) : []), cur: b < 63 };
   const s = { tabs: TABS, side, focus: "a", panes: { a, b: mk("vite", b - 44), c: mk("gitlog") } };
   s.rects = rects(["h", [0.58, 0.42], "a", ["v", "b", "c"]], wsBox(s));
-  if (side.menu) s.menus = [{ x: 6, y: 62, w: 130, hi: frac(b) > 0.2 ? { 52: 1, 56: 2, 60: 3 }[Math.floor(b)] : { 52: 0, 56: 1, 60: 2 }[Math.floor(b)], items: Object.values(TOOLS).map(([icn, label]) => ic(icn) + label) }];
+  if (side.menu) s.menus = [{ x: 6, y: 62, w: 130, hi: frac(b) > 0.2 ? { 52: 1, 56: 2, 60: 4 }[Math.floor(b)] : { 52: 0, 56: 1, 60: 2 }[Math.floor(b)], items: Object.values(TOOLS).map(([icn, label]) => ic(icn) + label) }];
   const bounds = wsBox(s);
   if (b >= 51 && b < 60) {
     const p = eback(seg(b, 51, 51.45)), jump = b >= 55.3;
@@ -346,7 +346,7 @@ function sidebarScene(F, b) {
   F.cursor = { ...track(b, [[48, 500, 300], [48.9, 70, rowY("src", {})], [49.1, 70, rowY("src", {})], [49.5, 96, rowY("components", open)], [49.7, 96, rowY("components", { src: 1 })], [50.1, 108, rowY("shell", { src: 1, comp: 1 })], [50.3, 108, rowY("shell", { src: 1, comp: 1 })], [50.9, 130, rowY("Workspace.tsx", { src: 1, comp: 1, shell: 1 })], [51.5, 130, rowY("Workspace.tsx", { src: 1, comp: 1, shell: 1 })],
     [51.95, ...sw], [52.1, ...sw], [52.45, 50, 102], [52.6, 50, 102], [53, 120, 76], [54.6, 120, 76], [55.25, 150, 205], [55.7, 150, 205],
     [55.95, ...sw], [56.1, ...sw], [56.35, 50, 126], [56.5, 50, 126], [56.95, 218, gy(0)], [57.1, 218, gy(0)], [57.45, 218, gy(1)], [57.6, 218, gy(1)], [57.95, 218, gy(2)], [58.2, 218, gy(2)], [59.55, 120, 290], [59.9, 120, 290],
-    [59.97, ...sw], [60.1, ...sw], [60.35, 50, 150], [60.6, 50, 150], [62, 560, 250], [64, 600, 300]]),
+    [59.97, ...sw], [60.1, ...sw], [60.35, 50, 174], [60.6, 50, 174], [62, 560, 250], [64, 600, 300]]),
     click: since(b, [49, 49.6, 50.2, 51, 52, 52.5, 55.3, 56, 56.4, 57, 57.5, 58, 59.6, 60, 60.4]) };
   if (tool === "files") side.hot = b < 49 ? (b > 48.8 ? "src" : null) : b < 49.6 ? (b > 49.4 ? "components" : null) : b < 50.2 ? (b > 50 ? "shell" : null) : b < 51 && b > 50.8 ? "Workspace.tsx" : null;
   if (tool === "search" && b >= 55.1) side.hot = "src/components/shell/Workspace.tsx212";
@@ -382,7 +382,7 @@ function benchScene(F, b) {
       t: { title: "claude", icon: "spark", c: log, cur: b >= 65.4 && b < 66.6, blink: 1 },
       i: mk("issue", 0, { closed: merged }), a: mk("art", 0, { n: seg(b, 68.6, 70) }),
       d: mk("diffv", 0, { n: (b - 72.1) * 30, split: b >= 74, press: b >= 74 && b < 74.2 ? "Split" : null }),
-      p: mk("prv", 0, { checks: clamp(Math.floor((b - 76.2) * 2.4), 0, 4), merged, press: b >= 78.9 && b < 79 }),
+      p: mk("prv", 0, { checks: clamp(Math.floor((b - 76.2) * 2.4), 0, 4), merged, confirm: b >= 78.4, press: (b >= 78.3 && b < 78.4) || (b >= 78.9 && b < 79) }),
       w: mk("web"),
     },
   };
@@ -393,7 +393,7 @@ function benchScene(F, b) {
   const chip = { x: o.x + R3.d.x + R3.d.w - 30, y: o.y + R3.d.y + 22 + 13 };
   // The merge button: under the title, the meta line, the tabs, one comment and four checks.
   const btn = { x: o.x + R4.p.x + 80, y: o.y + R4.p.y + 22 + 300 };
-  F.cursor = { ...track(b, [[64, 600, 300], [64.8, 150, 143], [65.1, 150, 143], [65.5, 420, 250], [71.5, 430, 260], [73.8, chip.x, chip.y], [74.3, chip.x, chip.y], [76.4, 150, 97], [77.6, 150, 97], [78.8, btn.x, btn.y], [80, btn.x, btn.y]]), click: since(b, [65, 74, 79]) };
+  F.cursor = { ...track(b, [[64, 600, 300], [64.8, 150, 143], [65.1, 150, 143], [65.5, 420, 250], [71.5, 430, 260], [73.8, chip.x, chip.y], [74.3, chip.x, chip.y], [76.4, 150, 97], [77.6, 150, 97], [78.25, btn.x - 40, btn.y], [78.5, btn.x - 40, btn.y], [78.85, btn.x + 330, btn.y], [80, btn.x + 330, btn.y]]), click: since(b, [65, 74, 78.4, 79]) };
   F.wins = [s];
   // Lean toward whichever pane the bar is about.
   const part = Math.floor((b - 64) / 4), lt = b - 64 - part * 4, env = ease(seg(lt, 0.5, 1.3)) * (1 - ease(seg(lt, 3.5, 4)));
