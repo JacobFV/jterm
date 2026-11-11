@@ -10,13 +10,14 @@
  * The menu is a separate list because it is not the same thing as the set of
  * kinds. `Open file…` is one entry that can produce any of four kinds, and the
  * viewers have no menu entry at all: there is no such thing as an empty image
- * pane to create.
+ * pane to create. Nor an empty diff — those come from the sidebar's Git tab.
  */
 
 import type { ComponentType } from "react";
 import {
   FileText,
   FolderOpen,
+  GitCompare,
   Globe,
   Image as ImageIcon,
   Box,
@@ -34,6 +35,7 @@ import { programById, programForCommand, type ProgramIcon } from "@/lib/programs
 import type { PaneKind, PaneState, Tab, TerminalPaneState } from "@/state/workspace";
 import { focusedPane } from "@/state/workspace";
 import { BrowserPane } from "./BrowserPane";
+import { DiffPane } from "./DiffPane";
 import { ImagePane } from "./ImagePane";
 import { MediaPane } from "./MediaPane";
 import { ModelPane } from "./ModelPane";
@@ -101,6 +103,9 @@ export const PANE_KINDS: PaneKindDef[] = [
   { kind: "image", label: "Image", icon: ImageIcon, Component: ImagePane },
   { kind: "media", label: "Media", icon: PlayCircle, Component: MediaPane },
   { kind: "model", label: "3D model", icon: Box, Component: ModelPane },
+  // Opened from the sidebar's Git tab, never from the new-tab menu: a diff is
+  // of something, and the menu has nothing to say what.
+  { kind: "diff", label: "Diff", icon: GitCompare, Component: DiffPane },
   {
     kind: "vnc",
     label: "Remote desktop",
