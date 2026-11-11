@@ -36,11 +36,16 @@ one-time verification. TikTok letterboxes the film; there is no 9:16 cut yet.
 
 ## How it has been promoted
 
-Nothing paid has run. Keep this list current — one line per promotion, with
-what it cost and what it was aimed at, so the next one can be judged against it.
+Keep this list current — one line per promotion, with what it cost and what it
+was aimed at, so the next one can be judged against it.
 
-- 2026-11-11 — a YouTube Studio promotion was drafted and **not submitted**:
-  goal "Video views", Finland and the United States (YouTube's defaults), a cap
-  of $2.50 in total, billed to the channel's linked Google Ads account. It
-  stopped at the question every promotion asks, whether it is an EU political
-  ad, which is the account owner's declaration to make.
+- 2026-11-11 — YouTube Studio promotion of the YouTube upload, submitted by the
+  channel owner: https://studio.youtube.com/promotion/24462669520/edit
+  - goal "Video views"; Finland and the United States (YouTube's defaults)
+  - $2.50 in total, 2026-11-11 to 2026-11-25, postpaid through the channel's
+    linked Google Ads account
+  - headline "Introducing jterm 1.0: The Terminal That Remembers"
+  - status when submitted: Pending (YouTube's policy check, about a business
+    day); cost $0.00, 0 impressions, 0 views. Fill in the result when it ends.
+
+Nothing has been paid for on TikTok.
