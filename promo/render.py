@@ -14,7 +14,7 @@ from playwright.async_api import async_playwright
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 URL = "file://" + os.path.join(HERE, "index.html")
-FPS, TOTAL, WORKERS = 60, 52.0, 10
+FPS, TOTAL, WORKERS = 60, 58.4, 10
 CHROME = sorted(glob.glob(os.path.expanduser("~/.cache/ms-playwright/chromium-*/chrome-linux*/chrome")))[-1]
 
 

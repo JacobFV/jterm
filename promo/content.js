@@ -562,3 +562,33 @@ const AGENT = [
   "  row count. Fixed; the tests",
   "  in that pane pass now.",
 ];
+
+// ── GitHub: the sidebar's lists, and the one change the film follows ──────
+const GH_PRS = [[213, "Remember a pop-up's size", "fix/popup-size"], [208, "Sixel: answer DA1 before XTSMGRAPHICS", "sixel-da1"]];
+const GH_ISSUES = [[212, "Pop-up forgets its size after a restart", "bug"], [209, "Fold a tab into a pop-up, too", "idea"], [205, "RDP: map the Super key", "rdp"], [201, "Theme per pop-up", "idea"]];
+// [kind, old line, new line, text] — kind is " ", "+", "-", or "@" for a hunk header.
+const DIFF = [
+  ["@", 0, 0, "@@ -38,8 +38,12 @@ export function restoreRail(saved: unknown): Popup[] {"],
+  [" ", 38, 38, "  const out: Popup[] = [];"],
+  [" ", 39, 39, "  for (const raw of asArray(saved)) {"],
+  ["-", 40, 0, "    const pane = decodePane(raw.pane);"],
+  ["+", 0, 40, "    const pane = decodePane(raw?.pane);"],
+  [" ", 41, 41, "    if (pane === null) continue;"],
+  ["-", 42, 0, "    out.push({ pane, x: num(raw.x, 24), w: 470, h: 300 });"],
+  ["+", 0, 42, "    // A size off disk is a claim, not a fact: clamp it,"],
+  ["+", 0, 43, "    // and fall back one field at a time."],
+  ["+", 0, 44, "    const w = clamp(num(raw.w, 470), MIN_W, MAX_W);"],
+  ["+", 0, 45, "    const h = clamp(num(raw.h, 300), MIN_H, MAX_H);"],
+  ["+", 0, 46, "    out.push({ pane, x: num(raw.x, 24), w, h });"],
+  [" ", 43, 47, "  }"],
+  [" ", 44, 48, "  return out;"],
+  [" ", 45, 49, "}"],
+  ["@", 0, 0, "@@ -71,6 +75,8 @@ export function snapshotRail(popups: Popup[]) {"],
+  [" ", 71, 75, "  return popups.map((p) => ({"],
+  [" ", 72, 76, "    pane: p.pane.id,"],
+  [" ", 73, 77, "    x: Math.round(p.x),"],
+  ["+", 0, 78, "    w: Math.round(p.w),"],
+  ["+", 0, 79, "    h: Math.round(p.h),"],
+  [" ", 74, 80, "    min: p.min,"],
+  [" ", 75, 81, "  }));"],
+];

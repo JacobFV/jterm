@@ -80,6 +80,12 @@ const ICONS = {
   db: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5M3 12a9 3 0 0 0 18 0"/>',
   flask: '<path d="M10 2v7.5L4.7 19a2 2 0 0 0 1.8 3h11a2 2 0 0 0 1.8-3L14 9.5V2M8.5 2h7M7 16h10"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  pr: '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7M6 9v12"/>',
+  merge: '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/>',
+  issue: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1.5"/>',
+  diff: '<path d="M12 3v14M5 10h14M5 21h14"/>',
+  art: '<path d="M8.3 10a.7.7 0 0 1-.63-1.08L11.4 3a.7.7 0 0 1 1.2-.04L16.3 8.900a.7.7 0 0 1-.57 1.100Z"/><rect x="3" y="14" width="7" height="7" rx="1"/><circle cx="17.500" cy="17.500" r="3.500"/>',
+  gh: '<path d="M15 22v-4a4.800 4.800 0 0 0-1-3.500c3 0 6-2 6-5.500.08-1.250-.27-2.480-1-3.500.28-1.150.28-2.350 0-3.500 0 0-1 0-3 1.500-2.640-.5-5.360-.5-8 0C6 2 5 2 5 2c-.3 1.150-.3 2.350 0 3.500A5.400 5.400 0 0 0 4 9c0 3.500 3 5.500 6 5.500-.39.49-.68 1.050-.85 1.650S8.930 17.380 9 18v4M9 18c-4.510 2-5-2-7-2"/>',
   book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.500 2H20v20H6.500a2.500 2.500 0 0 1 0-5H20"/>',
 };
 const ic = (n, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24">${ICONS[n] || ICONS.term}</svg>`;
@@ -238,8 +244,65 @@ function plotBody(p, w, h, t) {
   <polyline points="${pts}" fill="none" stroke="#d9480f" stroke-width="2"/><polyline points="${pts2}" fill="none" stroke="#1c7ed6" stroke-width="2"/>
   <text x="150" y="116" font-size="8" text-anchor="middle" fill="#222">step</text><text x="210" y="60" font-size="8" fill="#d9480f">eval acc</text><text x="210" y="72" font-size="8" fill="#1c7ed6">train acc</text></svg><div>${lineHtml(parse(P))}<b class="cur"></b></div></div>`;
 }
-const BODIES = { term: termBody, edit: editBody, md: mdBody, stl: stlBody, img: imgBody, web: webBody, vnc: vncBody, plot: plotBody };
-const KIND_ICON = { term: "term", edit: "file", md: "book", stl: "box", img: "image", web: "globe", vnc: "monitor", plot: "term" };
+
+// ── the GitHub panes, the diff, and what an agent draws ───────────────────
+const pill = (state) => { const [c, icn, label] = { open: ["g", "issue", "Open"], merged: ["m", "merge", "Merged"], closed: ["m", "check", "Closed"], propen: ["g", "pr", "Open"] }[state]; return `<i class="pill" style="color:var(--${c});background:color-mix(in srgb,var(--${c}) 18%,transparent)">${ic(icn)}${label}</i>`; };
+const avatar = (name, hue) => `<i class="av" style="background:hsl(${hue} 55% 45%)">${name[0].toUpperCase()}</i>`;
+const comment = (name, hue, when, html) => `<div class="ghc">${avatar(name, hue)}<div><div class="who"><b>${name}</b> ${when}</div>${html}</div></div>`;
+function issueBody(p) {
+  return `<div class="gh"><div class="ght">Pop-up forgets its size after a restart <i>#212</i></div>
+  <div class="ghm">${pill(p.closed ? "closed" : "open")}<i><b>mara-k</b> opened this 2 days ago · 3 comments</i><i class="lab" style="--c:var(--r)">bug</i><i class="lab" style="--c:var(--b)">restore</i></div>
+  ${comment("mara-k", 330, "2 days ago", "Resize a pop-up on the rail, quit, reopen. It comes back at <code>470×300</code> every time — the pane inside is restored, its box is not.")}
+  ${comment("devon", 200, "yesterday", "Same on macOS. <code>snapshotRail</code> never writes <code>w</code>/<code>h</code>, so there is nothing to read back.")}
+  ${comment("claude", 42, "just now", "On it — the snapshot drops the size and the decoder hard-codes it. Fix and a test coming as a PR.")}</div>`;
+}
+const CHECKS = [["types", "npx tsc -b", "14s"], ["test", "vitest · 413 passed", "31s"], ["build", "vite build", "22s"], ["cargo", "clippy · test", "1m 12s"]];
+function prBody(p, w, h, t) {
+  const done = p.checks ?? 4;
+  const rows = CHECKS.map(([name, what, took], i) => `<div class="chk">${i < done ? `<i class="g">${ic("check")}</i>` : `<i class="y spin" style="transform:rotate(${Math.floor(t * 8) * 45}deg)">${ic("spark")}</i>`}<b>${name}</b><i>${what}</i><u>${i < done ? took : "running"}</u></div>`).join("");
+  return `<div class="gh"><div class="ght">Remember a pop-up's size across restarts <i>#213</i></div>
+  <div class="ghm">${pill(p.merged ? "merged" : "propen")}<i><b>claude</b> wants to merge 1 commit into <code>main</code> from <code>fix/popup-size</code></i></div>
+  <div class="ghtabs"><b>Conversation</b><i>Checks <u>${done}/4</u></i><i>Files <u>2</u></i><span><i class="g">+9</i> <i class="r">−3</i></span></div>
+  ${comment("claude", 42, "1 minute ago", "Fixes <b style='color:var(--b)'>#212</b>. The rail's snapshot now carries <code>w</code> and <code>h</code>; the decoder clamps what it reads and falls back per field.")}
+  <div class="chks">${rows}</div>
+  <div class="ghb">${p.merged ? `<div class="btn" style="background:var(--m);color:#fff">${ic("merge")}Merged into main</div>` : `<div class="btn${p.press ? " press" : ""}"${done < 4 ? ' style="opacity:.45"' : ""}>${ic("merge")}Squash and merge</div>`}<div class="btn ghost">Check out</div><div class="btn ghost">${ic("globe")}Open</div></div></div>`;
+}
+function diffBody(p, w, h, t) {
+  const split = p.split ?? (w > 560 && rnd((p.dt || 0) + 3) < 0.5), n = p.n ?? 99;
+  const num = (v) => `<u>${v || ""}</u>`, cls = { "+": "dp", "-": "dm", "@": "dh", " ": "" };
+  const text = (k, s) => (k === "@" ? esc(s) : `<b>${k === " " ? " " : k === "-" ? "−" : "+"}</b>${esc(s)}`);
+  let rows = [];
+  if (!split) rows = DIFF.map(([k, a, b, s]) => `<div class="${cls[k]}">${k === "@" ? "" : num(a) + num(b)}${text(k, s)}</div>`);
+  else {
+    // Side by side: a run of removals sits across from the run of additions that replaced it.
+    const cell = (r, side) => r ? `<span class="half ${cls[r[0]]}">${num(side ? r[2] : r[1])}${text(r[0], r[3])}</span>` : '<span class="half dx"></span>';
+    for (let i = 0; i < DIFF.length;) {
+      const r = DIFF[i];
+      if (r[0] === "@") { rows.push(`<div class="dh">${esc(r[3])}</div>`); i++; continue; }
+      if (r[0] === " ") { rows.push(`<div>${cell(r, 0)}${cell(r, 1)}</div>`); i++; continue; }
+      const del = [], add = [];
+      while (i < DIFF.length && DIFF[i][0] === "-") del.push(DIFF[i++]);
+      while (i < DIFF.length && DIFF[i][0] === "+") add.push(DIFF[i++]);
+      for (let j = 0; j < Math.max(del.length, add.length); j++) rows.push(`<div>${cell(del[j], 0)}${cell(add[j], 1)}</div>`);
+    }
+  }
+  const seg = (label, on) => `<b class="chip${on ? " on" : ""}${p.press === label ? " press" : ""}" style="margin-left:0">${label}</b>`;
+  return `<div class="sub">${ic("diff")}<span>${esc(p.what || "working tree")} · 1 file</span><i class="g" style="flex:none">+9</i><i class="r" style="flex:none">−3</i>${seg("Unified", !split)}${seg("Split", split)}</div>
+  <div class="dfile">${ic("down")}<span>src/lib/rail.ts</span><i class="badge y">M</i></div><div class="df${split ? " sp" : ""}">${rows.slice(0, Math.max(0, Math.floor(n))).join("")}</div>`;
+}
+function artBody(p, w, h, t) {
+  const g = p.n == null ? 0.8 + 0.2 * Math.sin(t * 2.2 + (p.dt || 0)) : eout(clamp(p.n));
+  const win = (x, label, col, pw, ph, sub) => `<g transform="translate(${x} 0)"><rect width="200" height="124" rx="3" fill="var(--bg1)" stroke="var(--b2)"/><rect width="200" height="12" fill="var(--bg3)"/>
+    <rect x="${14}" y="${112 - ph}" width="${pw}" height="${ph}" fill="color-mix(in srgb,var(--${col}) 22%,transparent)" stroke="var(--${col})" stroke-width="1.5"/>
+    <text x="${14 + pw / 2}" y="${112 - ph / 2 + 4}" text-anchor="middle" font-size="10" fill="var(--${col})" font-family="var(--mono)">${sub}</text>
+    <text x="0" y="142" font-size="11" fill="var(--t2)" font-family="var(--sans)">${label}</text></g>`;
+  return `<div class="sub">${ic("art")}<span style="color:var(--t1)">${esc(p.title || "Pop-up geometry")}</span><i class="badge a" style="flex:none">HTML</i><b class="chip" style="margin-left:0">Source</b><b class="chip" style="margin-left:0">Save</b></div>
+  <div class="art"><h1>Pop-up geometry, before and after</h1><p>You resized the pop-up to <code>640×380</code> and quit. This is what reopening does.</p>
+  <svg viewBox="0 0 430 150" style="display:block;width:${Math.min(430, w - 36)}px;margin:10px 0 6px">${win(0, "before · resets", "r", 86, 54, "470×300")}${win(230, "after · as you left it", "g", lerp(86, 150, g), lerp(54, 84, g), g > 0.6 ? "640×380" : "…")}</svg>
+  <div class="arow"><i class="g">${ic("check")}</i>size survives a restart<u>rail.test.ts</u></div><div class="arow"><i class="g">${ic("check")}</i>a hostile size is clamped<u>snapshot.test.ts</u></div><div class="arow"><i class="g">${ic("check")}</i>old snapshots still load<u>snapshot.test.ts</u></div></div>`;
+}
+const BODIES = { pr: prBody, issue: issueBody, diff: diffBody, art: artBody, term: termBody, edit: editBody, md: mdBody, stl: stlBody, img: imgBody, web: webBody, vnc: vncBody, plot: plotBody };
+const KIND_ICON = { pr: "pr", issue: "issue", diff: "diff", art: "art", term: "term", edit: "file", md: "book", stl: "box", img: "image", web: "globe", vnc: "monitor", plot: "term" };
 
 function paneHtml(p, r, o = {}) {
   if (r.w < 3 || r.h < 3) return "";
@@ -252,7 +315,7 @@ function paneHtml(p, r, o = {}) {
 }
 
 // ── sidebar ───────────────────────────────────────────────────────────────
-const TOOLS = { files: ["folder", "Files"], search: ["search", "Search"], git: ["git", "Git"], agent: ["bot", "Agent"] };
+const TOOLS = { files: ["folder", "Files"], search: ["search", "Search"], git: ["git", "Git"], agent: ["bot", "Agent"], github: ["gh", "GitHub"] };
 function sideHtml(sb, t) {
   const head = (title, extra = "") => `<div class="sh"><div class="sw${sb.menu ? " on" : ""}">${ic(TOOLS[sb.tool][0])}${ic("down")}</div><span>${title}</span><div class="hb">${extra}</div></div>`;
   let body = "";
@@ -289,6 +352,11 @@ function sideHtml(sb, t) {
     } else body += `<div class="sec">Working tree clean</div>`;
     body += `<div class="field${sb.msg ? " focus" : ""}" style="white-space:normal;line-height:1.35">${sb.msg ? `<i>${esc(sb.msg)}<b class="cur" style="width:1px"></b></i>` : '<i class="d">Message</i>'}</div><div class="btn${sb.press ? " press" : ""}">${ic("check")}Commit</div>`;
     body += `<div class="sec">History</div>` + (done ? [["a91c3e7", "Restore unsubmitted input after a crash", 1]] : []).concat(GIT_LOG).slice(0, 7).map(([h, s, hot]) => `<div class="row${hot ? " hot" : ""}" style="padding-left:10px"><i class="y">${h}</i><i style="overflow:hidden;text-overflow:ellipsis">${esc(s)}</i></div>`).join("");
+  } else if (sb.tool === "github") {
+    const row = (icn, col, [num, title], hot) => `<div class="row${hot ? " hot" : ""}" style="padding-left:10px"><i class="${col}" style="display:flex">${ic(icn)}</i><i class="d">#${num}</i><i style="overflow:hidden;text-overflow:ellipsis;font-family:var(--sans)">${esc(title)}</i></div>`;
+    const prs = GH_PRS.slice(sb.prs ?? 0);
+    body = head("JacobFV/jterm", ic("plus")) + `<div class="sec">Pull requests · ${prs.length}</div>` + prs.map((r) => row("pr", "g", r, sb.hot === r[0])).join("") +
+      `<div class="sec">Issues · ${GH_ISSUES.length}</div>` + GH_ISSUES.map((r) => row("issue", "g", r, sb.hot === r[0])).join("");
   } else {
     body = head("claude · ~/jterm", ic("plus")) + `<div style="position:absolute;inset:28px 0 0 0;background:var(--termbg)"><div style="transform:scale(.86);transform-origin:0 0;width:116%;height:116%;position:relative">${termBody({ c: AGENT, n: sb.n }, 270, 760, t)}</div></div>`;
   }

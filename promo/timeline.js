@@ -3,7 +3,7 @@
 //
 // 150 BPM: a beat is 0.4 s, 24 frames at 60 fps. Everything is written in beats.
 
-const BEAT = 0.4, TOTAL = 52;
+const BEAT = 0.4, TOTAL = 58.4;
 const ICON = (s) => `<svg width="${s}" height="${s}" viewBox="0 0 1024 1024"><rect x="24" y="24" width="976" height="976" rx="179" fill="#050505" stroke="#2c2c2c" stroke-width="8"/><rect x="557" y="178" width="150" height="172" rx="12" fill="#f2cd6b"/><path d="M632 434V622Q632 782 502 782 366 782 396 727" fill="none" stroke="#f2cd6b" stroke-width="128" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const frac = (x) => x - Math.floor(x);
 
@@ -57,6 +57,10 @@ const CAT = {
   web: { k: "web", title: "localhost:5173" },
   vnc: { k: "vnc", title: "vnc://studio-mac" },
   plot: { k: "plot", title: "python plot.py", icon: "image" },
+  prv: { k: "pr", title: "#213 Remember a pop-up's size" },
+  issue: { k: "issue", title: "#212 Pop-up forgets its size" },
+  diffv: { k: "diff", title: "diff · working tree" },
+  art: { k: "art", title: "Pop-up geometry" },
 };
 /** A pane from the catalogue, `lt` beats into streaming its output. */
 const mk = (key, lt = 99, extra) => Object.assign({}, CAT[key], CAT[key].rate ? { n: Math.max(0, lt) * CAT[key].rate } : null, extra);
@@ -105,7 +109,7 @@ const LAYS = [
 ];
 const SLOTS = [2, 3, 3, 4, 3, 4, 5, 4, 3, 5];
 const TERMS = ["cargo", "vitest", "htop", "gitlog", "logs", "python", "claude", "codex", "ssh", "docker", "k8s", "ls", "fetch", "psql", "pytest", "nvim", "nvidia", "vite", "diff", "curl", "tmux", "make", "train", "rsync"];
-const VIEWS = ["rs", "tsx", "py", "md", "stl", "img", "web", "plot", "vnc"];
+const VIEWS = ["rs", "tsx", "py", "md", "stl", "img", "web", "plot", "vnc", "prv", "issue", "diffv", "art"];
 const MASH_THEMES = ["dark", "dark", "tokyo", "gruvbox", "dracula", "dark", "synthwave", "nord", "mocha", "phosphor", "dark", "rosepine", "latte", "kanagawa", "amber", "monokai", "everforest", "blueprint", "solarized"];
 const LIVING = ["aurora", "warp", "rain", "lorenz", "lava", "mandelbrot"];
 
@@ -145,7 +149,7 @@ function mashShot(i, lt, b, o = {}) {
   s.tabs = [{ title: names[0], icon: s.panes[0].icon || KIND_ICON[s.panes[0].k || "term"] }, TABS[1 + (i % 2)], { title: names[n - 1], icon: "term" }].slice(0, o.W ? 2 : 3);
   s.tab = i % (o.W ? 2 : 3) === 1 ? 1 : 0;
   if (!o.W && r(6) < 0.3) {
-    const tool = ["files", "search", "git", "agent"][Math.floor(r(7) * 4)];
+    const tool = ["files", "search", "git", "agent", "github"][Math.floor(r(7) * 5)];
     s.side = { tool, w: 240, open: { src: 1, comp: 1, shell: r(8) < 0.6 }, sel: "Workspace.tsx", q: "restore", n: 2 + lt * 8, staged: 2, msg: "Float a pane on the rail", n2: 0 };
     if (tool === "agent") s.side.n = 120 + lt * 260;
   }
@@ -354,7 +358,52 @@ function sidebarScene(F, b) {
   note(F, "← typed by the agent", 62.4, 610, 184, 64);
   // Lean in: the sidebar is small type.
   F.cam.s = lerp(1, 1.3, ease(seg(b, 48.2, 49)) * (1 - ease(seg(b, 63, 64)))); F.cam.ox = 0; F.cam.oy = 0;
-  if (b >= 63.5) F.fx.dim = 1 - 0.5 * seg(b, 63.5, 64);
+}
+
+// ── issue → artifact → diff → pull request, in one window ─────────────────
+const BENCH_LOG = [
+  [64, "«a:✱» «w:Claude Code» «d:· ~/jterm · jterm MCP connected»"], [64, ""],
+  [66.6, ""], [66.8, "«g:●» «w:Bash» gh issue view 212"], [67, "  «d:└ Pop-up forgets its size after a restart»"], [67.3, "«g:●» «w:Read» src/lib/rail.ts"], [67.6, "«g:●» «w:Edit» src/lib/rail.ts «g:+9» «r:−3»"],
+  [68, "«g:●» «w:jterm»·artifact_create(«y:\"Pop-up geometry\"», html)"], [68.2, "  «d:└ opened in a pane»"],
+  [70, "«g:●» «w:Bash» npm test"], [71, "  «d:└» «g:413 passed» «d:(413)»"],
+  [72, "«g:●» «w:Bash» git diff"], [72.2, "  «d:└ 1 file changed, 9 insertions(+), 3 deletions(-)»"],
+  [75, "«g:●» «w:Bash» git commit -am «y:\"Remember a pop-up's size\"»"], [75.5, "«g:●» «w:Bash» gh pr create --fill"], [76, "  «d:└ github.com/JacobFV/jterm/pull/213»"],
+  [78.2, ""], [78.2, "Opened «b:#213». Checks are green — it is yours to merge."],
+];
+function benchScene(F, b) {
+  const ask = "fix #212", typed = ask.slice(0, Math.floor(seg(b, 65.6, 66.4) * ask.length + 0.01));
+  const log = BENCH_LOG.filter(([k]) => b >= k).map(([, l]) => l);
+  log.splice(2, 0, "«d:>» " + typed);
+  const merged = b >= 79;
+  const s = {
+    tabs: [TABS[0], { title: "#213 Remember a pop-up's size", icon: "pr" }, TABS[2]], focus: b < 65 ? "t" : b < 68 ? "i" : b < 72 ? "a" : b < 76 ? "d" : "p",
+    side: { tool: "github", w: 240, prs: b >= 76 ? 0 : 1, hot: b >= 76 ? 213 : b >= 64.7 && b < 68 ? 212 : null },
+    panes: {
+      t: { title: "claude", icon: "spark", c: log, cur: b >= 65.4 && b < 66.6, blink: 1 },
+      i: mk("issue", 0, { closed: merged }), a: mk("art", 0, { n: seg(b, 68.6, 70) }),
+      d: mk("diffv", 0, { n: (b - 72.1) * 30, split: b >= 74, press: b >= 74 && b < 74.2 ? "Split" : null }),
+      p: mk("prv", 0, { checks: clamp(Math.floor((b - 76.2) * 2.4), 0, 4), merged, press: b >= 78.9 && b < 79 }),
+      w: mk("web"),
+    },
+  };
+  const bounds = wsBox(s), o = wsOrigin(s);
+  const K = [[64, "t"], [65, ["h", "t", "i"]], [68, ["h", "t", ["v", [0.42, 0.58], "i", "a"]]], [72, ["h", [0.4, 0.6], ["v", "t", "a"], "d"]], [76, ["h", [0.4, 0.6], ["v", "t", "w"], ["v", [0.6, 0.4], "p", "d"]]]];
+  s.rects = layoutAt(b, K, bounds, 0.45);
+  const R3 = rects(K[3][1], bounds), R4 = rects(K[4][1], bounds);
+  const chip = { x: o.x + R3.d.x + R3.d.w - 30, y: o.y + R3.d.y + 22 + 13 };
+  // The merge button: under the title, the meta line, the tabs, one comment and four checks.
+  const btn = { x: o.x + R4.p.x + 80, y: o.y + R4.p.y + 22 + 300 };
+  F.cursor = { ...track(b, [[64, 600, 300], [64.8, 150, 143], [65.1, 150, 143], [65.5, 420, 250], [71.5, 430, 260], [73.8, chip.x, chip.y], [74.3, chip.x, chip.y], [76.4, 150, 97], [77.6, 150, 97], [78.8, btn.x, btn.y], [80, btn.x, btn.y]]), click: since(b, [65, 74, 79]) };
+  F.wins = [s];
+  // Lean toward whichever pane the bar is about.
+  const part = Math.floor((b - 64) / 4), lt = b - 64 - part * 4, env = ease(seg(lt, 0.5, 1.3)) * (1 - ease(seg(lt, 3.5, 4)));
+  const aim = [[1.05, 640, 300], [1.3, 1160, 600], [1.22, 1280, 380], [1.24, 1280, 120]][part];
+  F.cam.s = lerp(1, aim[0], env); F.cam.ox = aim[1]; F.cam.oy = aim[2];
+  const tags = [["Issues", "one click in the sidebar. it is a pane like any other."], ["Artifacts", "the agent draws you a page instead of a wall of text."], ["Diffs", "unified or side by side — the tree, the index, any commit."], ["Pull requests", "checks, review, merge. your own <b style='color:var(--gold)'>gh</b> underneath."]][part];
+  tag(F, tags[0], 64 + part * 4, { s: 1.25 });
+  note(F, tags[1], 64 + part * 4 + 0.5, 40, 590);
+  if (merged) { F.fx.rgb = 9 * Math.exp(-(b - 79) * 4); F.fx.shake = 8 * Math.exp(-(b - 79) * 5); }
+  if (b >= 79.5) F.fx.dim = 1 - 0.5 * seg(b, 79.5, 80);
 }
 
 const CMD = "rsync -avz --partial ./renders/ deploy@prod-7:/srv/media/ --exclude '*.tmp'";
@@ -438,10 +487,10 @@ function themeScene(F, b) {
 // Cut lengths, in 16ths, for bars 22–27.
 const CUTS = [[2, 2, 2, 2, 2, 2, 2, 2], [2, 2, 2, 2, 2, 2, 1, 1, 1, 1], [2, 2, 2, 2, 2, 2, 2, 2], [2, 2, 1, 1, 2, 2, 1, 1, 2, 2], [2, 2, 2, 2, 1, 1, 1, 1, 2, 2], [2, 2, 2, 2, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]];
 const BAR_INFO = [
-  ["A pane can be anything", ["stl", "md", "tsx", "web", "img", "py"]],
+  ["A pane can be anything", ["stl", "prv", "art", "web", "diffv", "md", "issue", "img"]],
   ["Sixel · Markdown · STL · web", ["plot", "md", "stl", "web", "img", "rs"]],
   ["ssh · vnc · rdp · tmux", ["ssh", "vnc", "k8s", "tmux", "docker", "rsync"]],
-  ["Claude · Codex · Gemini", ["claude", "codex", "train", "diff", "pytest"]],
+  ["Claude · Codex · Gemini", ["claude", "art", "codex", "diffv", "prv", "pytest"]],
   ["As many windows as you like", null],
   ["And it survives the crash", null],
 ];
@@ -486,12 +535,12 @@ function mashScene(F, b) {
     const k = Math.floor((b - 111) * 8);
     F.wins = []; F.cursor = null; F.over = ""; F.amb = null;
     F.bg = `<div style="position:absolute;inset:0;background:${k % 2 ? "var(--gold)" : "#000"}"></div>`;
-    F.over = word(["SPLITS", "TABS", "POP-UPS", "THEMES", "AGENTS", "VIEWERS", "1.0", ""][k], 250, { color: k % 2 ? "#0b0900" : null, rot: (k % 3) - 1 });
+    F.over = word(["SPLITS", "POP-UPS", "DIFFS", "PRS", "ISSUES", "AGENTS", "1.0", ""][k], 250, { color: k % 2 ? "#0b0900" : null, rot: (k % 3) - 1 });
     F.cam = {};
   }
 }
 
-const FEATURES = ["remembers what you were typing", "splits like tmux", "panes that float", "files · search · git · agent", "thirty themes, ten alive", "sixel · markdown · stl", "ssh · vnc · rdp", "survives the crash"];
+const FEATURES = ["remembers what you were typing", "splits like tmux · panes that float", "files · search · git · agent", "pull requests · issues · diffs", "artifacts from your agent", "thirty themes, ten alive", "ssh · vnc · rdp · a browser", "survives the crash"];
 function outro(F, b) {
   const lt = b - 112;
   if (b < 120) {
@@ -525,13 +574,16 @@ const FLASH = [[16, 1], [20, 0.7], [28, 0.5], [36, 0.3], [40, 0.4], [48, 0.5], [
 const grooving = (b) => (b >= 16 && b < 63) || (b >= 80 && b < 124);
 
 function frame(t) {
-  const b = t / BEAT;
+  // The bench scene was cut in at beat 64; everything after it is written in
+  // the beats it had before, so it runs sixteen late.
+  const real = t / BEAT, b = real >= 80 ? real - 16 : real, bench = real >= 64 && real < 80;
   const F = { t, b, bg: "", wins: [], over: "", cam: {}, cursor: null, fx: {}, amb: null };
   if (b < 16) intro(F, b);
   else if (b < 20) logoScene(F, b);
   else if (b < 28) splitScene(F, b);
   else if (b < 40) dragScene(F, b);
   else if (b < 48) popupScene(F, b);
+  else if (bench) benchScene(F, b);
   else if (b < 64) sidebarScene(F, b);
   else if (b < 80) breakdown(F, b);
   else if (b < 88) themeScene(F, b);
@@ -541,9 +593,9 @@ function frame(t) {
   let flash = 0, hit = 0;
   for (const [fb, amt] of FLASH) if (b >= fb) { flash = Math.max(flash, amt * Math.exp(-(b - fb) * 5)); if (amt >= 0.6) hit = Math.max(hit, amt * Math.exp(-(b - fb) * 3.5)); }
   F.fx.flash = flash;
-  F.fx.rgb = Math.max(F.fx.rgb || 0, hit * 16, grooving(b) ? 1.6 * Math.exp(-frac(b) * 7) : 0);
+  F.fx.rgb = Math.max(F.fx.rgb || 0, hit * 16, (bench || grooving(b)) ? 1.6 * Math.exp(-frac(b) * 7) : 0);
   F.fx.shake = Math.max(F.fx.shake || 0, hit * 12);
-  if (grooving(b)) F.cam.s = (F.cam.s || 1) * (1 + 0.022 * Math.exp(-frac(b) * 6));
+  if (bench || grooving(b)) F.cam.s = (F.cam.s || 1) * (1 + 0.022 * Math.exp(-frac(b) * 6));
   return F;
 }
 

@@ -61,6 +61,7 @@
          background: var(--brand); color: var(--brandfg); font: 600 11px var(--sans); border-radius: 2px; }
   .btn.ghost { background: transparent; color: var(--t2); border: 1px solid var(--b2); }
   .btn.press { filter: brightness(1.5); transform: scale(.97); }
+  .btn.ghost { position: static; z-index: auto; box-shadow: none; font: 600 11px var(--sans); }
   .hit { font: 10.5px var(--mono); color: var(--t3); padding: 2px 8px 2px 26px; white-space: nowrap; overflow: hidden; }
   .hit em { font-style: normal; background: color-mix(in srgb, var(--brand) 30%, transparent); color: var(--t1); }
   .hit u { color: var(--t4); margin-right: 8px; }
@@ -82,6 +83,59 @@
   .sub { height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-bottom: 1px solid var(--b1);
          font: 10px var(--mono); color: var(--t3); white-space: nowrap; overflow: hidden; }
   .sub .chip { margin-left: auto; border: 1px solid var(--b2); padding: 1px 6px; color: var(--t1); border-radius: 2px; }
+
+  .sub .chip.on { background: var(--bg3); border-color: var(--brand); }
+  .sub .chip.press { filter: brightness(1.6); }
+  .sub svg.ic { width: 12px; height: 12px; }
+  .badge.a { color: var(--brand); border: 1px solid var(--b2); padding: 0 5px; font-size: 9px; letter-spacing: .08em; }
+
+  /* ── issue, pull request, diff, artifact ──────────────────────────── */
+  .gh { position: absolute; inset: 0; padding: 12px 14px; font: 12px/1.5 var(--sans); color: var(--t2); background: var(--bg0); }
+  .gh code, .art code { font: 11px var(--mono); background: var(--bg3); padding: 1px 4px; color: var(--y); }
+  .ght { font: 700 17px/1.25 var(--sans); color: var(--t1); letter-spacing: -.01em; }
+  .ght i { color: var(--t4); font-weight: 400; }
+  .ghm { display: flex; align-items: center; gap: 8px; margin: 7px 0 10px; padding-bottom: 9px; border-bottom: 1px solid var(--b1);
+         font-size: 11px; color: var(--t3); white-space: nowrap; overflow: hidden; }
+  .ghm b, .who b { color: var(--t1); font-weight: 600; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 7px; border-radius: 99px; font: 600 11px var(--sans); flex: none; }
+  .lab { padding: 0 7px; border-radius: 99px; font-size: 10px; color: var(--c); border: 1px solid var(--c); flex: none; }
+  .ghc { display: flex; gap: 9px; margin-bottom: 9px; }
+  .ghc > div { flex: 1; border: 1px solid var(--b1); background: var(--bg1); padding: 6px 10px 7px; }
+  .who { font-size: 10.5px; color: var(--t4); margin-bottom: 2px; }
+  .av { width: 22px; height: 22px; border-radius: 50%; flex: none; display: flex; align-items: center; justify-content: center;
+        font: 700 11px var(--sans); color: #fff; }
+  .ghtabs { display: flex; gap: 16px; align-items: center; margin: -2px 0 10px; font-size: 11.5px; color: var(--t3); }
+  .ghtabs b { color: var(--t1); font-weight: 600; box-shadow: 0 6px 0 -4px var(--brand); }
+  .ghtabs u { background: var(--bg3); padding: 0 6px; border-radius: 99px; font-size: 10px; color: var(--t2); }
+  .ghtabs span { margin-left: auto; font: 11px var(--mono); }
+  .chks { border: 1px solid var(--b1); margin-bottom: 10px; }
+  .chk { height: 24px; display: flex; align-items: center; gap: 8px; padding: 0 9px; font: 11px var(--mono); color: var(--t3);
+         border-bottom: 1px solid var(--b1); white-space: nowrap; }
+  .chk:last-child { border-bottom: 0; }
+  .chk b { color: var(--t1); width: 44px; }
+  .chk u { margin-left: auto; color: var(--t4); }
+  .chk i { display: flex; }
+  .ghb { display: flex; gap: 8px; }
+  .ghb .btn { margin: 0; padding: 0 14px; }
+  .dfile { height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 8px; background: var(--bg2);
+           border-bottom: 1px solid var(--b1); font: 11px var(--mono); color: var(--t1); }
+  .dfile .badge { margin-left: auto; }
+  .df { position: absolute; left: 0; right: 0; top: 48px; bottom: 0; overflow: hidden; background: var(--bg0);
+        font: 12px/17px var(--mono); white-space: pre; color: var(--fg); }
+  .df > div { height: 17px; overflow: hidden; }
+  .df u { display: inline-block; width: 28px; text-align: right; color: var(--t4); margin-right: 4px; font-size: 10.5px; }
+  .df b { display: inline-block; width: 18px; text-align: center; color: var(--t3); }
+  .df .dp { background: color-mix(in srgb, var(--g) 16%, transparent); }
+  .df .dm { background: color-mix(in srgb, var(--r) 17%, transparent); }
+  .df .dp b { color: var(--g); } .df .dm b { color: var(--r); }
+  .df .dh { background: color-mix(in srgb, var(--b) 13%, transparent); color: var(--t3); padding-left: 10px; font-size: 11px; }
+  .df .dx { background: var(--bg1); }
+  .df .half { display: inline-block; width: 50%; height: 17px; overflow: hidden; vertical-align: top; }
+  .df .half + .half { box-shadow: inset 1px 0 0 var(--b1); }
+  .art { position: absolute; inset: 26px 0 0 0; padding: 14px 18px; background: var(--bg0); font: 12px/1.5 var(--sans); color: var(--t2); }
+  .art h1 { font: 700 17px/1.2 var(--sans); color: var(--t1); letter-spacing: -.01em; margin-bottom: 4px; }
+  .arow { display: flex; align-items: center; gap: 8px; height: 22px; border-top: 1px solid var(--b1); font-size: 11.5px; color: var(--t1); }
+  .arow i { display: flex; } .arow u { margin-left: auto; font: 10px var(--mono); color: var(--t4); }
 
   .term { position: absolute; inset: 4px 8px; font: 13px/17px var(--mono); white-space: pre; color: var(--fg); }
   .term > div { height: 17px; }

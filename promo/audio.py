@@ -11,7 +11,7 @@ import numpy as np
 SR = 44100
 BEAT = int(SR * 0.4)
 STEP = BEAT // 4  # a 16th
-BARS = 32
+BARS = 36
 TAIL = int(SR * 1.2)
 N = BARS * 4 * BEAT + TAIL
 rng = np.random.default_rng(7)
@@ -194,8 +194,13 @@ ACID_ACC = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0]
 ARP = [24, 27, 31, 36, 34, 31, 27, 31, 24, 27, 31, 36, 39, 36, 34, 31]
 CHORDS = [[0, 3, 7], [0, 3, 7], [-4, 0, 3], [-2, 2, 5]]  # Am Am F G
 
-for bar in range(BARS):
-    phrase = bar % 4
+# Four bars were cut in after the first drop. `bar` is the part a slot plays,
+# numbered as the arrangement was first written; `slot` is where it sounds.
+ROLE = list(range(15)) + [11, 12, 13, 14, 15] + list(range(16, 32))
+
+for slot in range(BARS):
+    bar = ROLE[slot]
+    phrase = slot % 4
     root = ROOTS[phrase]
 
     # Kick.
@@ -203,21 +208,21 @@ for bar in range(BARS):
         for beat in range(4):
             if bar == 15 and beat == 3:
                 continue  # a hole before the breakdown
-            kick(at(bar, beat))
+            kick(at(slot, beat))
         if bar in (11, 27):
             for s in (1, 2, 3):
-                kick(at(bar, 3, s), 0.75)
+                kick(at(slot, 3, s), 0.75)
     elif bar in (2, 3):
         for beat in range(4):
-            kick(at(bar, beat), 0.8 + 0.1 * bar / 3, soft=bar == 2)
+            kick(at(slot, beat), 0.8 + 0.1 * bar / 3, soft=bar == 2)
     elif bar == 18:
-        kick(at(bar, 0), 0.8, soft=True)
-        kick(at(bar, 2), 0.8, soft=True)
+        kick(at(slot, 0), 0.8, soft=True)
+        kick(at(slot, 2), 0.8, soft=True)
     elif bar == 19:
         for beat in range(4):
-            kick(at(bar, beat), 0.9)
+            kick(at(slot, beat), 0.9)
     elif bar == 31:
-        kick(at(bar, 0), 1.1)
+        kick(at(slot, 0), 1.1)
 
     # Hats.
     if bar in GROOVE:
@@ -225,26 +230,26 @@ for bar in range(BARS):
             if bar == 15 and s >= 12:
                 break
             vel = (0.5, 0.22, 0.42, 0.26)[s % 4]
-            add(drums, HAT, at(bar, 0, s), vel * 0.5, pan=0.25 if s % 2 else -0.15)
+            add(drums, HAT, at(slot, 0, s), vel * 0.5, pan=0.25 if s % 2 else -0.15)
         if bar != 30:
             for beat in range(4):
                 if not (bar == 15 and beat == 3):
-                    add(drums, OHAT, at(bar, beat, 2), 0.42, pan=-0.2)
+                    add(drums, OHAT, at(slot, beat, 2), 0.42, pan=-0.2)
     elif bar in (0, 1, 2, 3):
         for s in range(0, 16, 2 if bar < 2 else 1):
-            add(drums, HAT, at(bar, 0, s), 0.1 + 0.07 * bar, pan=0.3 if s % 4 else -0.3)
+            add(drums, HAT, at(slot, 0, s), 0.1 + 0.07 * bar, pan=0.3 if s % 4 else -0.3)
 
     # Clap on two and four.
     if bar in GROOVE and bar != 30:
         for beat in (1, 3):
             if not (bar == 15 and beat == 3):
-                add(drums, CLAP, at(bar, beat), 0.62)
-                add(wet, CLAP, at(bar, beat), 0.25)
+                add(drums, CLAP, at(slot, beat), 0.62)
+                add(wet, CLAP, at(slot, beat), 0.25)
 
     # Ride through the back half of the second drop.
     if 24 <= bar <= 27:
         for s in range(0, 16, 2):
-            add(drums, RIDE, at(bar, 0, s), 0.2, pan=0.35)
+            add(drums, RIDE, at(slot, 0, s), 0.2, pan=0.35)
 
     # Rolling bass: the three 16ths the kick leaves empty.
     if bar in GROOVE:
@@ -252,7 +257,7 @@ for bar in range(BARS):
             if bar == 15 and beat == 3:
                 continue
             for s in (1, 2, 3):
-                add(music, make_bass(hz(root, 55.0)), at(bar, beat, s), 0.62 if s != 2 else 0.74)
+                add(music, make_bass(hz(root, 55.0)), at(slot, beat, s), 0.62 if s != 2 else 0.74)
 
     # Acid.
     if 8 <= bar <= 15 or 20 <= bar <= 27:
@@ -266,8 +271,8 @@ for bar in range(BARS):
             note = hz(ACID_NOTES[s] + root)
             sig = make_acid(note, ACID_ACC[s], openness, STEP * (1.7 if ACID_ACC[s] else 1.0))
             g = 0.3 if bar < 16 else 0.36
-            add(music, sig, at(bar, 0, s), g, pan=0.15 * np.sin(s))
-            add(wet, sig, at(bar, 0, s), g * 0.18)
+            add(music, sig, at(slot, 0, s), g, pan=0.15 * np.sin(s))
+            add(wet, sig, at(slot, 0, s), g * 0.18)
 
     # Stabs, with a dotted echo.
     if bar in (4, 5, 6, 7, 12, 13, 14, 15, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29):
@@ -277,8 +282,8 @@ for bar in range(BARS):
             if bar == 15 and s >= 12:
                 continue
             for echo in range(4):
-                add(music, stab, at(bar, 0, s + 3 * echo), 0.5 * 0.5**echo, pan=(-0.6, 0.6)[echo % 2] if echo else 0)
-            add(wet, stab, at(bar, 0, s), 0.3)
+                add(music, stab, at(slot, 0, s + 3 * echo), 0.5 * 0.5**echo, pan=(-0.6, 0.6)[echo % 2] if echo else 0)
+            add(wet, stab, at(slot, 0, s), 0.3)
 
     # Arp.
     if 12 <= bar <= 15 or 24 <= bar <= 29:
@@ -286,30 +291,30 @@ for bar in range(BARS):
             if bar == 15 and s >= 12:
                 break
             sig = make_pluck(hz(ARP[s] + root if phrase >= 2 else ARP[s]))
-            add(music, sig, at(bar, 0, s), 0.16, pan=0.5 * np.sin(s * 1.7))
-            add(wet, sig, at(bar, 0, s), 0.12)
+            add(music, sig, at(slot, 0, s), 0.16, pan=0.5 * np.sin(s * 1.7))
+            add(wet, sig, at(slot, 0, s), 0.12)
 
     # Intro: a drone and a few blips.
     if bar < 4:
         t = t_of(4 * BEAT)
         drone = np.tanh(np.sin(2 * np.pi * 55 * t) * 1.5) * (0.5 + 0.5 * np.sin(2 * np.pi * 2.5 * t) ** 2)
         drone *= np.minimum(t / 0.3, 1) * np.minimum((t[-1] - t) / 0.05, 1)
-        add(music, drone, at(bar), 0.22 + 0.06 * bar)
+        add(music, drone, at(slot), 0.22 + 0.06 * bar)
         for s in (0, 3, 6, 8, 11, 14) if bar < 2 else range(0, 16, 2):
             sig = make_pluck(hz(ARP[(s * 3 + bar) % 16]))
-            add(music, sig, at(bar, 0, s), 0.12 + 0.03 * bar, pan=np.sin(s))
-            add(wet, sig, at(bar, 0, s), 0.2)
+            add(music, sig, at(slot, 0, s), 0.12 + 0.03 * bar, pan=np.sin(s))
+            add(wet, sig, at(slot, 0, s), 0.2)
 
     # Breakdown: pad, half-time arp.
     if 16 <= bar <= 19:
         chord = [hz(c + 12) for c in CHORDS[(0, 2, 0, 3)[bar - 16]]] + [hz(CHORDS[(0, 2, 0, 3)[bar - 16]][0])]
         pad = make_pad(chord, 4 * BEAT)
-        add(music, pad, at(bar), 0.5)
-        add(wet, pad, at(bar), 0.5)
+        add(music, pad, at(slot), 0.5)
+        add(wet, pad, at(slot), 0.5)
         for s in range(0, 16, 2):
             sig = make_pluck(hz(ARP[s]), 0.4)
-            add(music, sig, at(bar, 0, s), 0.16, pan=0.6 * np.sin(s))
-            add(wet, sig, at(bar, 0, s), 0.25)
+            add(music, sig, at(slot, 0, s), 0.16, pan=0.6 * np.sin(s))
+            add(wet, sig, at(slot, 0, s), 0.25)
 
 
 def roll(bar, pattern):
@@ -323,14 +328,15 @@ def roll(bar, pattern):
 
 
 roll(3, [(0, 2), (1, 2), (2, 4), (3, 8)])
-roll(19, [(0, 2), (1, 4), (2, 4), (3, 8)])
-roll(27, [(3, 4)])
+roll(23, [(0, 2), (1, 4), (2, 4), (3, 8)])
+roll(31, [(3, 4)])
 roll(11, [(3, 4)])
+roll(15, [(3, 4)])
 
-for bar, beats in ((3, 4), (19, 4), (15, 2), (27, 2), (30, 4)):
+for bar, beats in ((3, 4), (23, 4), (15, 2), (19, 2), (31, 2), (34, 4)):
     length = beats * BEAT
     add(music, make_riser(length), at(bar + 1) - length, 0.5)
-for beat, gain in ((16, 1.0), (48, 0.6), (64, 0.8), (80, 1.0), (96, 0.6), (112, 1.0), (124, 1.1)):
+for beat, gain in ((16, 1.0), (48, 0.6), (64, 0.7), (80, 0.8), (96, 1.0), (112, 0.6), (128, 1.0), (140, 1.1)):
     add(drums, IMPACT, beat * BEAT, gain * 0.6)
     add(wet, IMPACT, beat * BEAT, gain * 0.25)
 
@@ -354,16 +360,16 @@ for ch in range(2):
 
 mix = drums * 0.95 + music
 
-# The power cut at beat 70: the tape slows to a stop, then nothing until 72.
-cut, n = 70 * BEAT, int(BEAT * 1.1)
+# The power cut at beat 86: the tape slows to a stop, then nothing until 88.
+cut, n = 86 * BEAT, int(BEAT * 1.1)
 src = mix[:, cut - BEAT // 2 : cut - BEAT // 2 + n].copy()
 rate = np.linspace(1, 0, n) ** 1.3
 pos = np.cumsum(rate)
 for ch in range(2):
     mix[ch, cut - BEAT // 2 : cut - BEAT // 2 + n] = np.interp(pos, np.arange(n), src[ch]) * np.linspace(1, 0.2, n)
-mix[:, cut - BEAT // 2 + n : 72 * BEAT] = 0
+mix[:, cut - BEAT // 2 + n : 88 * BEAT] = 0
 fade = int(SR * 0.004)
-mix[:, 72 * BEAT : 72 * BEAT + fade] *= np.linspace(0, 1, fade)
+mix[:, 88 * BEAT : 88 * BEAT + fade] *= np.linspace(0, 1, fade)
 
 # Fade the tail out.
 mix[:, -TAIL:] *= np.linspace(1, 0, TAIL) ** 1.5
