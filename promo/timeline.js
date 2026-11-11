@@ -176,7 +176,7 @@ function mashShot(i, lt, b, o = {}) {
 }
 
 // ── scenes ────────────────────────────────────────────────────────────────
-const HOOK = [["TERMINALS", "#000", "#f2cd6b"], ["FORGET.", "#f2cd6b", "#0b0900"], ["YOUR COMMAND.", "#0b0900", "#fff"], ["YOUR SCREEN.", "#fff", "#0b0900"], ["YOUR AGENT.", "#2a1466", "#f2cd6b"], ["40 MINUTES IN.", "#f2cd6b", "#0b0900"], ["ALL OF IT.", "#000", "#fff"], ["GONE.", "#e3342f", "#fff"]];
+const HOOK = [["TERMINALS", "#000", "#f2cd6b"], ["FORGET.", "#f2cd6b", "#0b0900"], ["YOUR COMMAND.", "#0b0900", "#fff"], ["YOUR SCREEN.", "#fff", "#0b0900"], ["YOUR AGENT.", "#2a1466", "#f2cd6b"], ["40 MIN IN.", "#f2cd6b", "#0b0900"], ["ALL OF IT.", "#000", "#fff"], ["GONE.", "#e3342f", "#fff"]];
 function intro(F, b) {
   if (b < 8) {
     // The hook: a word a beat, each on its own colour, over a product shot
@@ -188,9 +188,15 @@ function intro(F, b) {
     F.wins = [s]; F.amb = null; if (THEMES[s.theme].amb) s.theme = "dark";
     F.cam.s = 0.74 + 0.05 * lt + 0.12 * Math.exp(-lt * 9); F.cam.ry = (i % 2 ? -1 : 1) * (16 - 8 * lt); F.cam.rx = 5; F.cam.rz = (i % 2 ? 1 : -1) * 2.5;
     if (i === 7) { F.cam.sy = 1 - 0.9 * eout(lt * 1.6); F.fx.glitch = 70 * (1 - lt); }
-    const size = Math.min(250, 1560 / text.length), slam = 1 + 1.6 * Math.pow(1 - eout(lt * 4), 2);
-    F.over += `<div style="position:absolute;left:640px;top:${i === 7 ? 360 : 380}px;transform:translate(-50%,-50%) rotate(${i % 2 ? 3 : -3}deg) scale(${slam})"><div style="font:800 ${size}px/0.95 var(--disp);letter-spacing:-.045em;white-space:nowrap;color:${flick ? bg : fg};background:${flick ? fg : bg};padding:.04em .16em .1em;box-shadow:${14 * (i % 2 ? -1 : 1)}px 14px 0 ${fg}">${text}</div></div>`;
-    F.over += `<div style="position:absolute;left:34px;top:26px;font:700 20px var(--mono);color:${fg};background:${bg};padding:2px 10px;letter-spacing:.08em">${String(i + 1).padStart(2, "0")}/08</div>`;
+    if (i === 7) {
+      const slam = 1 + 1.6 * Math.pow(1 - eout(lt * 4), 2);
+      F.over += `<div style="position:absolute;left:640px;top:360px;transform:translate(-50%,-50%) rotate(-3deg) scale(${slam})"><div style="font:800 250px/0.95 var(--disp);letter-spacing:-.045em;white-space:nowrap;color:${flick ? bg : fg};background:${flick ? fg : bg};padding:.04em .16em .1em;box-shadow:14px 14px 0 ${fg}">${text}</div></div>`;
+    } else {
+      // The sentence piles up, a slab a beat, so there are three seconds to read it in.
+      const slab = (k) => { if (i < k) return ""; const a = b - k, p = 1 + 1.5 * Math.pow(1 - eout(a * 4), 2), gold = k % 2 === 0; return `<div style="font:800 88px/0.95 var(--disp);letter-spacing:-.04em;white-space:nowrap;color:${gold ? "#f2cd6b" : "#0b0900"};background:${gold ? "#0b0900" : "#f2cd6b"};padding:.05em .18em .12em;outline:5px solid ${gold ? "#f2cd6b" : "#0b0900"};box-shadow:10px 10px 0 #000;transform:rotate(${(k % 3) - 1.5}deg) scale(${p});transform-origin:0 50%;z-index:${k === i ? 2 : 1};position:relative">${HOOK[k][0]}</div>`; };
+      const row = (y, x, ...ks) => `<div style="position:absolute;left:${x}px;top:${y}px;display:flex;gap:26px;align-items:center">${ks.map(slab).join("")}</div>`;
+      F.over += row(58, 70, 0, 1) + row(178, 110, 2) + row(298, 70, 3) + row(418, 110, 4, 5) + row(538, 70, 6);
+    }
     F.fx.shake = 14 * Math.exp(-lt * 7); F.fx.rgb = 9 * Math.exp(-lt * 6);
     if (lt < 0.06) F.fx.glitch = 60;
     return;
@@ -622,7 +628,7 @@ const BURST = (n = 18, r0 = 0.72) => Array.from({ length: n * 2 }, (_, i) => { c
 const STAR = BURST();
 // [real beat, text, x, y, size, colours]
 const STICKERS = [[20, "NEW!", 1130, 120, 150], [24, "⌘D", 1140, 130, 130, 1], [28, "DRAG<br>IT", 1140, 560, 150], [36, "WOW", 150, 150, 140, 1], [40, "POP!", 1130, 130, 150], [48, "4 TOOLS", 1120, 130, 150, 1], [56, "git it?", 1130, 130, 140],
-  [64, "NEW<br>IN 1.0", 1140, 130, 170], [68, "NEW<br>IN 1.0", 1140, 130, 170, 1], [72, "NEW<br>IN 1.0", 150, 150, 170], [76, "NEW<br>IN 1.0", 150, 160, 170, 1], [88, "PHEW", 1130, 560, 150], [92, "✓✓✓✓", 1130, 140, 150, 1],
+  [64, "NEW<br>IN 1.0", 1140, 130, 170], [68, "AGENT<br>MADE", 1140, 130, 160, 1], [72, "+9 −3", 150, 150, 150], [76, "SHIP IT", 150, 160, 160, 1], [88, "PHEW", 1130, 560, 150], [92, "✓✓✓✓", 1130, 140, 150, 1],
   [96, "×30", 1130, 130, 170], [104, "ANY<br>THING", 1140, 130, 160, 1], [108, "SIXEL!", 150, 140, 150], [112, "REMOTE", 1130, 130, 150, 1], [116, "AGENTS", 150, 140, 150], [120, "MORE", 1130, 130, 150, 1], [124, "1.0", 150, 140, 160]];
 function spray(F, real, hitAge) {
   let h = "";
