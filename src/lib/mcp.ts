@@ -79,7 +79,7 @@ export const TOOLS: ToolDef[] = [
     name: "list_panes",
     title: "List tabs and panes",
     description:
-      "Every tab and pop-up in this jterm window, and the panes in each: id, kind (terminal, notepad, browser, image, media, model), title, and for terminals the working directory, the last command started and whether the shell has exited. `focused` marks the pane the user is typing into.",
+      "Every tab and pop-up in this jterm window, and the panes in each: id, kind (terminal, notepad, browser, image, media, model, vnc, rdp, diff), title, and for terminals the working directory, the last command started and whether the shell has exited. A diff pane shows a git diff and says what it compares under `diff`: the repository root, the source (worktree for unstaged changes and untracked files, staged, or commit), the revision for a commit, and the path when narrowed to one file. `focused` marks the pane the user is typing into.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -268,7 +268,18 @@ function describePane(pane: PaneState): Record<string, unknown> {
     if (pane.command) described.command = pane.command;
     described.exited = pane.exited === true;
   }
-  if ("path" in pane && typeof pane.path === "string" && pane.path) described.path = pane.path;
+  if (pane.kind === "diff") {
+    // Its own field rather than `path`, which for every other pane is an
+    // absolute file to open; here it is relative to the repository.
+    described.diff = {
+      root: pane.root,
+      source: pane.source,
+      ...(pane.source === "commit" ? { rev: pane.rev ?? "HEAD" } : {}),
+      ...(pane.path ? { path: pane.path } : {}),
+    };
+  } else if ("path" in pane && typeof pane.path === "string" && pane.path) {
+    described.path = pane.path;
+  }
   if (pane.kind === "browser") described.url = pane.url;
   return described;
 }

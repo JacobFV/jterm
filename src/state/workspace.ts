@@ -49,7 +49,16 @@ import {
   substituteTree,
 } from "./tree";
 
-export type PaneKind = "terminal" | "notepad" | "browser" | "image" | "media" | "model" | "vnc" | "rdp";
+export type PaneKind =
+  | "terminal"
+  | "notepad"
+  | "browser"
+  | "image"
+  | "media"
+  | "model"
+  | "vnc"
+  | "rdp"
+  | "diff";
 
 /** The sidebar's tools, in the order its menu lists them. */
 export type SidebarTab = "files" | "search" | "git" | "agent";
@@ -225,6 +234,30 @@ export interface RdpPaneState extends PaneCommon {
   scale?: "fit" | "actual";
 }
 
+/**
+ * A git diff, read in a pane. See `panes/DiffPane.tsx`.
+ *
+ * What is kept is a description of the comparison, never the diff: the text is
+ * read from git again every time the pane is shown, so a restored pane shows
+ * the repository as it is now rather than as it was when the session was
+ * saved — which for a working-tree diff is the only answer worth having.
+ */
+export interface DiffPaneState extends PaneCommon {
+  kind: "diff";
+  /** The repository — its top level, or any directory inside it. */
+  root: string;
+  /** Unstaged changes and untracked files, staged changes, or one commit. */
+  source: DiffSource;
+  /** For `commit`: the revision, as a full hash when it came from a log. */
+  rev?: string;
+  /** Narrowed to one path, relative to the repository's top level. */
+  path?: string;
+  /** Side by side rather than one column. A view preference, kept per pane. */
+  layout?: "split";
+}
+
+export type DiffSource = "worktree" | "staged" | "commit";
+
 export type PaneState =
   | TerminalPaneState
   | NotepadPaneState
@@ -233,7 +266,8 @@ export type PaneState =
   | MediaPaneState
   | ModelPaneState
   | VncPaneState
-  | RdpPaneState;
+  | RdpPaneState
+  | DiffPaneState;
 
 export interface Tab {
   id: string;
@@ -360,6 +394,10 @@ export function newPane(kind: PaneKind, seed?: Partial<PaneState>): PaneState {
       return { id, kind: "vnc", ...(seed as object) } as PaneState;
     case "rdp":
       return { id, kind: "rdp", ...(seed as object) } as PaneState;
+    // Only ever made with a seed that says what to compare — from the sidebar's
+    // Git tab. An empty root is a pane that says it has nothing to compare.
+    case "diff":
+      return { id, kind: "diff", root: "", source: "worktree", ...(seed as object) } as PaneState;
     // The viewers cannot exist without a file, and `newPane` is only reached
     // for them by way of `openFile`, which always supplies one.
     case "image":
@@ -500,9 +538,30 @@ export function paneLabel(pane: PaneState): string {
     case "media":
     case "model":
       return baseName(pane.path) || "File";
+    case "diff":
+      return diffLabel(pane);
     case "terminal":
       return "Terminal";
   }
+}
+
+/**
+ * What a diff pane is called before it has read anything: the file when it is
+ * narrowed to one, else what is being compared and in which repository.
+ */
+export function diffLabel(pane: DiffPaneState): string {
+  const rev = pane.rev ?? "HEAD";
+  const what =
+    pane.source === "commit"
+      ? // A hash from the log is forty characters; seven is what git shows.
+        /^[0-9a-f]{8,}$/i.test(rev)
+        ? rev.slice(0, 7)
+        : rev
+      : pane.source === "staged"
+        ? "Staged"
+        : "Changes";
+  const where = pane.path ? baseName(pane.path) : baseName(pane.root.replace(/[\\/]+$/, ""));
+  return where ? `${what} · ${where}` : what;
 }
 
 function baseName(path: string): string {

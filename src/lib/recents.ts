@@ -115,6 +115,10 @@ export function rememberPane(pane: PaneState): void {
     case "vnc":
     case "rdp":
       return;
+    // A diff is a view of a repository at a moment, not something anyone goes
+    // back to by name; the sidebar's Git tab is the way back in.
+    case "diff":
+      return;
     default: {
       // The file-backed panes. A note with no path exists only in the snapshot
       // that is about to stop mentioning it, so there is nothing to point at.

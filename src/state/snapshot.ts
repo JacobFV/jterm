@@ -42,6 +42,8 @@ const MAX_TABS = 64;
 const MAX_POPUPS = 12;
 /** A pop-up smaller than this is one nobody could aim at. */
 const MIN_POPUP_SIZE = 0.08;
+/** Long enough for any real path; a megabyte here is not one. */
+const MAX_PATH = 4096;
 
 export interface Snapshot {
   workspace: Workspace;
@@ -310,7 +312,17 @@ function decodeTheme(raw: unknown): ThemeChoice | undefined {
   return isThemeChoice(raw) ? raw : undefined;
 }
 
-const KINDS: PaneKind[] = ["terminal", "notepad", "browser", "image", "media", "model", "vnc", "rdp"];
+const KINDS: PaneKind[] = [
+  "terminal",
+  "notepad",
+  "browser",
+  "image",
+  "media",
+  "model",
+  "vnc",
+  "rdp",
+  "diff",
+];
 
 /**
  * One pane, validated.
@@ -471,7 +483,61 @@ function decodePane(id: string, raw: unknown): PaneState | null {
         scale: raw.scale === "actual" ? "actual" : undefined,
       };
     }
+    case "diff": {
+      // A diff pane is a description of a comparison, and without a repository
+      // there is nothing to compare and no way to be given one — dropped, like
+      // a viewer without its file.
+      if (typeof raw.root !== "string" || !raw.root || raw.root.length > MAX_PATH) return null;
+      const source =
+        raw.source === "staged" || raw.source === "commit" ? raw.source : "worktree";
+      // The revision and the path both end up as arguments to git. The backend
+      // checks them again, but a value that fails here is not passed on to be
+      // refused there.
+      const rev = source === "commit" && isSafeRev(raw.rev) ? raw.rev : undefined;
+      // A commit pane whose revision failed would quietly become `HEAD` — a
+      // different commit wearing this one's place. Better gone.
+      if (source === "commit" && rev === undefined && raw.rev !== undefined) return null;
+      return {
+        id,
+        kind: "diff",
+        title,
+        name,
+        theme,
+        profile,
+        fontSize,
+        root: raw.root,
+        source,
+        rev,
+        // A path that fails costs the narrowing, not the pane: the whole
+        // diff is still the right repository, and the header says what it is.
+        path: isRepoPath(raw.path) ? raw.path : undefined,
+        layout: raw.layout === "split" ? "split" : undefined,
+      };
+    }
   }
+}
+
+/** A revision git will not mistake for an option. Mirrors `checked_rev` in git.rs. */
+function isSafeRev(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 256 &&
+    !value.startsWith("-") &&
+    !/[\s\0]/.test(value)
+  );
+}
+
+/** A path inside a repository, as git names it. Mirrors `checked_paths` in git.rs. */
+function isRepoPath(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= MAX_PATH &&
+    !value.includes("\0") &&
+    !/^([\\/]|[A-Za-z]:)/.test(value) &&
+    !value.split(/[\\/]/).includes("..")
+  );
 }
 
 export function safeUrl(value: unknown): string | null {

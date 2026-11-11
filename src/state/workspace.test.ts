@@ -968,3 +968,20 @@ describe("peer/mirror", () => {
     expect(paneIds(peer.root)).toEqual([PB]);
   });
 });
+
+describe("a diff pane's name", () => {
+  const diff = (seed: Record<string, unknown>) =>
+    paneLabel({ id: "d", kind: "diff", root: "/home/me/repo/", source: "worktree", ...seed });
+
+  it("says what is compared and where", () => {
+    expect(diff({})).toBe("Changes · repo");
+    expect(diff({ source: "staged" })).toBe("Staged · repo");
+    expect(diff({ source: "staged", path: "src/lib/diff.ts" })).toBe("Staged · diff.ts");
+  });
+
+  it("shortens a commit's hash the way git does, and leaves a ref name alone", () => {
+    expect(diff({ source: "commit", rev: "0123456789abcdef0123" })).toBe("0123456 · repo");
+    expect(diff({ source: "commit", rev: "main~2" })).toBe("main~2 · repo");
+    expect(diff({ source: "commit" })).toBe("HEAD · repo");
+  });
+});

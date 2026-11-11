@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { decode, encode } from "./snapshot";
-import { type Workspace, emptyWorkspace, reduce } from "./workspace";
+import { type PaneState, type Workspace, emptyWorkspace, reduce } from "./workspace";
 import { windowTabId } from "@/lib/tmuxControl";
 import type { LeafNode } from "./tree";
 
@@ -327,5 +327,81 @@ describe("mirrored tabs", () => {
     const json = JSON.parse(encode(emptyWorkspace(), {}));
     json.peers = ["gb10", "-oProxyCommand=x", 3, "me@10.0.0.7"];
     expect(decode(JSON.stringify(json))!.peers).toEqual(["gb10", "me@10.0.0.7"]);
+  });
+});
+
+describe("diff panes", () => {
+  /** A one-tab workspace whose only pane is a diff pane seeded with `seed`. */
+  function withDiff(seed: Record<string, unknown>) {
+    const state = reduce(emptyWorkspace(), {
+      type: "tab/open",
+      kind: "diff",
+      seed: seed as Partial<PaneState>,
+    });
+    const tab = state.tabs[state.tabs.length - 1];
+    return { state, paneId: tab.focusedPaneId };
+  }
+
+  /** Encode, let `edit` play the hand-editor, decode, and find the pane again. */
+  function roundTrip(
+    seed: Record<string, unknown>,
+    edit?: (pane: Record<string, unknown>) => void,
+  ) {
+    const { state, paneId } = withDiff(seed);
+    const json = JSON.parse(encode(state, {}));
+    const tab = json.workspace.tabs[json.workspace.tabs.length - 1];
+    edit?.(tab.panes[paneId]);
+    const restored = decode(JSON.stringify(json))!.workspace;
+    return restored.tabs.flatMap((t) => Object.values(t.panes)).find((p) => p.id === paneId);
+  }
+
+  it("come back describing the same comparison, and nothing of the diff itself", () => {
+    const pane = roundTrip({
+      root: "/repo",
+      source: "commit",
+      rev: "0123456789abcdef0123456789abcdef01234567",
+      path: "src/main.rs",
+      layout: "split",
+    });
+    expect(pane).toMatchObject({
+      kind: "diff",
+      root: "/repo",
+      source: "commit",
+      rev: "0123456789abcdef0123456789abcdef01234567",
+      path: "src/main.rs",
+      layout: "split",
+    });
+    expect(Object.keys(pane!)).not.toContain("text");
+  });
+
+  it("are dropped without a repository, which nothing could supply later", () => {
+    expect(roundTrip({ root: "/repo" }, (raw) => delete raw.root)).toBeUndefined();
+    expect(roundTrip({ root: "/repo" }, (raw) => (raw.root = 42))).toBeUndefined();
+  });
+
+  it("fall back to the working tree for a source this build does not know", () => {
+    const pane = roundTrip({ root: "/repo", source: "staged" }, (raw) => (raw.source = "stash"));
+    expect(pane).toMatchObject({ kind: "diff", source: "worktree" });
+  });
+
+  it("are dropped rather than shown as HEAD when a commit's revision would be an option", () => {
+    // `--output=…` is a revision only to someone hoping git reads it as a flag.
+    const pane = roundTrip({ root: "/repo", source: "commit", rev: "abc" }, (raw) => {
+      raw.rev = "--output=/tmp/pwned";
+    });
+    expect(pane).toBeUndefined();
+  });
+
+  it("lose a path that climbs out of the repository, and keep the rest", () => {
+    for (const path of ["../../etc/passwd", "/etc/passwd", "C:\\Windows", "a/../../b", 7]) {
+      const pane = roundTrip({ root: "/repo", path: "ok.txt" }, (raw) => (raw.path = path));
+      expect(pane, String(path)).toMatchObject({ kind: "diff", root: "/repo" });
+      expect((pane as { path?: string }).path, String(path)).toBeUndefined();
+    }
+  });
+
+  it("keep only the one layout there is to choose", () => {
+    const pane = roundTrip({ root: "/repo" }, (raw) => (raw.layout = "sideways"));
+    expect((pane as { layout?: string }).layout).toBeUndefined();
   });
 });
