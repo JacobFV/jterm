@@ -94,6 +94,10 @@ runs on your behalf.
   panes, read what the build in the next pane just printed, type into a
   terminal, and open a terminal, a file or a page where you will see it. See
   *The agent and jterm's MCP server* below.
+- **Gives the agent somewhere to put a long answer.** A report, a table, a chart
+  or a diagram the agent makes for you opens as an *artifact* — a pane of its
+  own, beside your work — instead of scrolling past in a column forty
+  characters wide. See *Artifacts* below.
 - **Reads markdown as a document.** A `.md` file opens rendered — tables, code,
   images beside it on disk, and **mermaid** diagrams drawn in the pane's own
   palette — with **Raw** one click away and the editor still holding your undo
@@ -600,8 +604,33 @@ to it, under the name `jterm`. Its tools act on the window the agent is in:
 | `open_file` | a file, in the pane that suits it |
 | `open_url` | an http(s) page in a browser pane |
 | `focus_pane` | bring a pane forward and give it the keyboard |
+| `create_artifact` | show a document it wrote — HTML, markdown, SVG or Mermaid — in a pane of its own |
+| `update_artifact` | rewrite an artifact where it is, without opening another |
+| `read_artifact` | an artifact's title, format and source |
 
 Nothing in that list closes a pane or ends a process.
+
+### Artifacts
+
+An artifact is a document the agent made for you to look at: an HTML page, a
+markdown write-up, an SVG, or a Mermaid diagram. It opens in a pane like
+anything else — a tab, a split or a pop-up — and the agent can rewrite it in
+place as the conversation goes, so the pane you are reading redraws rather than
+a new one appearing beside it. The sidebar's agent is told to reach for one
+whenever an answer is better seen than read in the column.
+
+Markdown and Mermaid are drawn the way a `.md` file is, in the pane's own
+theme. HTML and SVG run in a sandboxed frame: their scripts work, so a chart
+can draw itself and a table can sort, but the page has no way into jterm, your
+files or the rest of the window, and a link in it opens in your real browser. A
+page that brings no styles of its own gets the theme's colours, so it is not a
+white slab in a dark window.
+
+The header has the rest: **Source** to read what was written, copy, **Save** to
+keep a copy as a file, and reload. An artifact is part of the session like a
+note is — it survives a crash and a restart, moves to another window with its
+pane, and is gone when you close the pane. One is capped at a megabyte;
+anything bigger is a file, and the agent is told to open it as one.
 
 The agent runs with its approvals off: Claude Code with
 `--dangerously-skip-permissions`, Codex with
