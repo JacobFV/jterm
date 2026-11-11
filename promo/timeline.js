@@ -59,7 +59,7 @@ const CAT = {
   plot: { k: "plot", title: "python plot.py", icon: "image" },
   prv: { k: "pr", title: "#213 Remember a pop-up's size" },
   issue: { k: "issue", title: "#212 Pop-up forgets its size" },
-  diffv: { k: "diff", title: "diff · working tree" },
+  diffv: { k: "diff", title: "Changes · rail.ts" },
   art: { k: "art", title: "Pop-up geometry" },
 };
 /** A pane from the catalogue, `lt` beats into streaming its output. */
@@ -364,7 +364,7 @@ function sidebarScene(F, b) {
 const BENCH_LOG = [
   [64, "«a:✱» «w:Claude Code» «d:· ~/jterm · jterm MCP connected»"], [64, ""],
   [66.6, ""], [66.8, "«g:●» «w:Bash» gh issue view 212"], [67, "  «d:└ Pop-up forgets its size after a restart»"], [67.3, "«g:●» «w:Read» src/lib/rail.ts"], [67.6, "«g:●» «w:Edit» src/lib/rail.ts «g:+9» «r:−3»"],
-  [68, "«g:●» «w:jterm»·artifact_create(«y:\"Pop-up geometry\"», html)"], [68.2, "  «d:└ opened in a pane»"],
+  [68, "«g:●» «w:jterm»·create_artifact(«y:\"Pop-up geometry\"», html)"], [68.2, "  «d:└ opened in a pane»"],
   [70, "«g:●» «w:Bash» npm test"], [71, "  «d:└» «g:413 passed» «d:(413)»"],
   [72, "«g:●» «w:Bash» git diff"], [72.2, "  «d:└ 1 file changed, 9 insertions(+), 3 deletions(-)»"],
   [75, "«g:●» «w:Bash» git commit -am «y:\"Remember a pop-up's size\"»"], [75.5, "«g:●» «w:Bash» gh pr create --fill"], [76, "  «d:└ github.com/JacobFV/jterm/pull/213»"],
