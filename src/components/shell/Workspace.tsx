@@ -118,7 +118,8 @@ interface WorkspaceProps {
   /** Closing may need to ask about unsaved work, which is the app's business
    *  rather than the layout's. Told only the pane: it may be in a tab or on
    *  the rail, and the app is the one that knows which. */
-  onClosePane: (paneId: string) => void;
+  /** `skipConfirm` is Shift held on the click: close without asking. */
+  onClosePane: (paneId: string, skipConfirm: boolean) => void;
   /** What a pane's kind icon offers. Replacing a pane closes the old one, which
    *  is the app's business for the same reason closing is. */
   paneMenu: PaneMenuActions;
@@ -674,12 +675,12 @@ export function Workspace({
 
                   <button
                     type="button"
-                    title="Close pane"
+                    title="Close pane (Shift-click to skip asking)"
                     aria-label={`Close ${paneLabel(pane)}`}
                     onPointerDown={(event) => event.stopPropagation()}
                     onClick={(event) => {
                       event.stopPropagation();
-                      onClosePane(paneId);
+                      onClosePane(paneId, event.shiftKey);
                     }}
                     className="shrink-0 rounded-sm p-0.5 text-ink-4 hover:bg-surface-2 hover:text-ink-1"
                   >

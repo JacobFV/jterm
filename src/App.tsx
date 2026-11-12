@@ -1039,8 +1039,29 @@ export function App() {
     return dialog.confirmDiscard(names);
   }, []);
 
+  /**
+   * Ask before closing a tab or pane at all.
+   *
+   * Closing ends whatever the shell was doing, and the close control sits close
+   * enough to everything else in a header that a stray click is easy. Holding
+   * Shift is the way past it for someone who meant it. An unsaved note is asked
+   * about by `confirmDiscard` instead — that question already covers this one,
+   * and two dialogs in a row for one click would be one too many — and it is
+   * still asked with Shift held, since it is the one close that loses work.
+   */
+  const confirmClose = useCallback(
+    async (panes: PaneState[], what: string, skip: boolean): Promise<boolean> => {
+      if (panes.some((pane) => pane.kind === "notepad" && pane.dirty)) {
+        return confirmDiscard(panes);
+      }
+      if (skip) return true;
+      return dialog.confirm(`Close ${what}? Hold Shift to close without asking.`, "Close");
+    },
+    [confirmDiscard],
+  );
+
   const closeTab = useCallback(
-    async (tabId: string) => {
+    async (tabId: string, skipConfirm = false) => {
       const tab = workspaceRef.current.tabs.find((candidate) => candidate.id === tabId);
       // Closing a tab mirrored from another jterm stops showing it here. It
       // never ends the shells: those are that machine's tabs, and someone may
@@ -1049,7 +1070,10 @@ export function App() {
         for (const key of controlKeysOfTab(tab)) controlSessionsRef.current.detach(key);
         return;
       }
-      if (tab && !(await confirmDiscard(Object.values(tab.panes)))) return;
+      if (tab) {
+        const panes = Object.values(tab.panes);
+        if (!(await confirmClose(panes, `“${tabLabel(tab)}”`, skipConfirm))) return;
+      }
       // Remembered on the way out: this is the only moment the pane's own
       // record of what it was running still exists.
       if (tab) for (const pane of Object.values(tab.panes)) rememberPane(pane);
@@ -1059,7 +1083,7 @@ export function App() {
       if (tab) await Promise.all(Object.values(tab.panes).map((pane) => disposePane(pane)));
       dispatch({ type: "tab/close", tabId });
     },
-    [confirmDiscard],
+    [confirmClose],
   );
 
   /**
@@ -1070,7 +1094,7 @@ export function App() {
    * which. `locatePane` answers that once, here, rather than at every call.
    */
   const closePane = useCallback(
-    async (paneId: string) => {
+    async (paneId: string, skipConfirm = false) => {
       const found = locatePane(workspaceRef.current, paneId);
       if (found === null) return;
       // The same rule for one pane of a mirrored tab.
@@ -1081,7 +1105,7 @@ export function App() {
           return;
         }
       }
-      if (!(await confirmDiscard([found.pane]))) return;
+      if (!(await confirmClose([found.pane], `“${paneLabel(found.pane)}”`, skipConfirm))) return;
       rememberPane(found.pane);
       await disposePane(found.pane);
       dispatch(
@@ -1090,7 +1114,7 @@ export function App() {
           : { type: "pane/close", tabId: found.tabId, paneId },
       );
     },
-    [confirmDiscard],
+    [confirmClose],
   );
 
   /* ── Changing what a pane is ──────────────────────────────────────── */
@@ -1373,7 +1397,9 @@ export function App() {
 
         case "pane.close":
           // Whatever has the keyboard: the pane floating over the tab if one
-          // does, else the focused pane of the tab underneath.
+          // does, else the focused pane of the tab underneath. Always asks:
+          // Shift is part of the default binding off macOS, so it cannot also
+          // mean "don't ask" here, and the dialog's Enter is one key anyway.
           if (current.focusedPopupId !== null) {
             void closePaneRef.current(current.focusedPopupId);
           } else if (paneId) {
@@ -1638,7 +1664,7 @@ export function App() {
           tabs={tabs}
           activeTabId={workspace.activeTabId}
           onSelect={(tabId) => dispatch({ type: "tab/select", tabId })}
-          onClose={(tabId) => void closeTab(tabId)}
+          onClose={(tabId, skipConfirm) => void closeTab(tabId, skipConfirm)}
           onNew={(kind) => dispatch({ type: "tab/new", kind })}
           // The label says "Open file…" under a new-tab button, so it makes a tab
           // whatever the preference says.
@@ -1690,7 +1716,7 @@ export function App() {
                 popups={workspace.popups}
                 focusedPopupId={workspace.focusedPopupId}
                 dispatch={dispatch}
-                onClosePane={(paneId) => void closePane(paneId)}
+                onClosePane={(paneId, skipConfirm) => void closePane(paneId, skipConfirm)}
                 paneMenu={paneMenu}
                 onOpenPane={openPane}
                 tabDrag={tabDrag}

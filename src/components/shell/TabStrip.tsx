@@ -82,7 +82,8 @@ interface TabStripProps {
   tabs: Tab[];
   activeTabId: string | null;
   onSelect: (tabId: string) => void;
-  onClose: (tabId: string) => void;
+  /** `skipConfirm` is Shift held on the click: close without asking. */
+  onClose: (tabId: string, skipConfirm: boolean) => void;
   onNew: (kind: PaneKind) => void;
   /** Show the file chooser and open whatever comes back. */
   onOpenFile: () => void;
@@ -281,7 +282,7 @@ export function TabStrip({
               }
               onSelect(tab.id);
             }}
-            onClose={() => onClose(tab.id)}
+            onClose={(skipConfirm) => onClose(tab.id, skipConfirm)}
             paneMenu={paneMenu}
           />
         ))}
@@ -354,7 +355,7 @@ function TabItem({
   register: (node: HTMLDivElement | null) => void;
   onPointerDown: (event: React.PointerEvent) => void;
   onSelect: () => void;
-  onClose: () => void;
+  onClose: (skipConfirm: boolean) => void;
   paneMenu: PaneMenuActions;
 }) {
   const menuRef = useRef<PaneMenuHandle | null>(null);
@@ -509,7 +510,7 @@ function TabItem({
           for a hover, since it is the one most likely wanted. */}
       <button
         type="button"
-        title="Close tab"
+        title="Close tab (Shift-click to skip asking)"
         aria-label={`Close ${tabLabel(tab)}`}
         className={cn(
           "shrink-0 rounded-sm p-0.5 text-ink-4 hover:text-ink-1 group-hover:opacity-100",
@@ -518,7 +519,7 @@ function TabItem({
         onClick={(event) => {
           // Closing a background tab must not select it on the way past.
           event.stopPropagation();
-          onClose();
+          onClose(event.shiftKey);
         }}
       >
         <X className="h-3 w-3" />
