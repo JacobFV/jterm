@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { SETUP_VERSION, decodeResume, shouldOfferSetup, stepsFor, tmuxOffer } from "./setup";
+import {
+  REEL_SOURCES,
+  SETUP_VERSION,
+  decodeResume,
+  reelOrder,
+  shouldOfferSetup,
+  stepsFor,
+  tmuxOffer,
+} from "./setup";
 
 describe("shouldOfferSetup", () => {
   it("offers itself until the current version has been seen", () => {
@@ -64,5 +72,27 @@ describe("decodeResume", () => {
     expect(decodeResume(null, steps)).toBe(0);
     expect(decodeResume("not-a-step", steps)).toBe(0);
     expect(decodeResume("tmux", stepsFor("windows"))).toBe(0);
+  });
+});
+
+describe("reelOrder", () => {
+  const mp4 = REEL_SOURCES[0];
+  const webm = REEL_SOURCES[1];
+
+  it("skips what the webview says it cannot play", () => {
+    // WebKitGTK on a machine with no H.264 decoder installed.
+    expect(reelOrder((type) => (type.includes("vp9") ? "probably" : ""))).toEqual([webm]);
+  });
+
+  it("puts a confident answer ahead of a hesitant one", () => {
+    expect(reelOrder((type) => (type.includes("vp9") ? "probably" : "maybe"))).toEqual([webm, mp4]);
+  });
+
+  it("keeps the listed order when the answers tie", () => {
+    expect(reelOrder(() => "probably")).toEqual([mp4, webm]);
+  });
+
+  it("leaves nothing to try when nothing plays, so the poster stays up", () => {
+    expect(reelOrder(() => "")).toEqual([]);
   });
 });

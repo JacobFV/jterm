@@ -45,6 +45,33 @@ const ALL_STEPS: Step[] = [
   { id: "updates", title: "Updates" },
 ];
 
+export interface ReelSource {
+  file: string;
+  /** What the file is, for the blob it gets loaded into. */
+  mime: string;
+  /** The same with its codec, which is what a webview can actually answer for. */
+  type: string;
+}
+
+/**
+ * The welcome clip, in both of the forms it ships in. Each platform's webview
+ * decodes what its system provides: WebKitGTK frequently has no H.264 at all,
+ * and older WebKit on macOS has no VP9. See `promo/reel.py`.
+ */
+export const REEL_SOURCES: ReelSource[] = [
+  { file: "setup-reel.mp4", mime: "video/mp4", type: 'video/mp4; codecs="avc1.64001f"' },
+  { file: "setup-reel.webm", mime: "video/webm", type: 'video/webm; codecs="vp9"' },
+];
+
+/** The forms worth trying here, best first; `canPlay` is `canPlayType`. */
+export function reelOrder(canPlay: (type: string) => string): ReelSource[] {
+  const rank = (answer: string) => (answer === "probably" ? 0 : 1);
+  return REEL_SOURCES.map((source) => ({ source, answer: canPlay(source.type) }))
+    .filter(({ answer }) => answer !== "")
+    .sort((a, b) => rank(a.answer) - rank(b.answer))
+    .map(({ source }) => source);
+}
+
 /** Whether the dialog should open by itself on this launch. */
 export function shouldOfferSetup(seen: number): boolean {
   return seen < SETUP_VERSION;
