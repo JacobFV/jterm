@@ -38,6 +38,7 @@ import { displayKeys, keysFor, labelFor, type ActionId } from "@/lib/keymap";
 import { isMacOS, isWindows } from "@/lib/platform";
 import {
   SETUP_VERSION,
+  reelOrder,
   rememberResume,
   stepsFor,
   takeResume,
@@ -247,6 +248,7 @@ function StepBody({
     case "welcome":
       return (
         <>
+          <WelcomeReel />
           <Heading>
             <Sparkles className="mr-1.5 inline h-4 w-4 text-brand" />
             Welcome to jterm
@@ -358,6 +360,79 @@ function StepBody({
         </>
       );
   }
+}
+
+/* ── The welcome clip ───────────────────────────────────────────────────── */
+
+/**
+ * Fifteen silent seconds of the app in use, across the top of the first step.
+ * Decoration: the poster is the same picture for anyone who does not get the
+ * motion, whether by asking for less of it or because nothing here decodes it.
+ *
+ * Read into a blob rather than pointed at by URL. The packaged app's files come
+ * from Tauri's own scheme, which does not answer byte-range requests, and WebKit
+ * asks for those when it streams a video. A blob is already all there.
+ */
+function WelcomeReel() {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const sources = reelOrder((type) => video.canPlayType(type));
+    let live = true;
+    let attempt = -1;
+    let url: string | null = null;
+
+    // A form that claims to play can still fail once it is really tried, which
+    // is the usual way a missing system codec shows up. Fall through to the next.
+    const next = async () => {
+      const mine = ++attempt;
+      const source = sources[mine];
+      if (!source) return;
+      const failed = () => {
+        if (live && attempt === mine) void next();
+      };
+      try {
+        const response = await fetch(`/${source.file}`);
+        if (!response.ok) throw new Error(String(response.status));
+        const bytes = await response.arrayBuffer();
+        if (!live) return;
+        if (url) URL.revokeObjectURL(url);
+        url = URL.createObjectURL(new Blob([bytes], { type: source.mime }));
+        video.onerror = failed;
+        video.src = url;
+        await video.play();
+      } catch {
+        failed();
+      }
+    };
+    void next();
+
+    return () => {
+      live = false;
+      video.onerror = null;
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, []);
+
+  return (
+    <video
+      ref={videoRef}
+      aria-hidden
+      poster="/setup-reel.webp"
+      width={1280}
+      height={720}
+      muted
+      loop
+      playsInline
+      className="-mx-5 -mt-4 mb-4 block aspect-video w-[calc(100%+2.5rem)] max-w-none border-b border-border bg-black"
+    />
+  );
 }
 
 /* ── App Management ─────────────────────────────────────────────────────── */
