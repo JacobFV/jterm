@@ -329,7 +329,8 @@
            frame's own edges. */
         box-shadow: 0 40px 90px -50px rgba(0, 0, 0, 0.95);
       }
-      .shot-frame img {
+      .shot-frame img,
+      .shot-frame video {
         display: block;
         width: 100%;
         height: auto;
@@ -635,13 +636,23 @@
           </p>
           <figure class="shot wide">
             <div class="shot-frame">
-              <img
-                src="multitask.webp"
+              <!-- Started by the script below, only while it is on screen, and
+                   never for a reader who has asked for less motion: they get
+                   the poster, which is the loop's first frame. -->
+              <video
+                id="multitask-video"
+                poster="multitask.webp"
                 width="2880"
                 height="1800"
-                loading="lazy"
-                alt="Illustration of one jterm tab split into 25 panes, each running Claude Code in a different directory: some editing code, some running tests, some waiting for approval, some finished."
-              />
+                muted
+                loop
+                playsinline
+                preload="none"
+                role="img"
+                aria-label="Animated illustration of one jterm tab split into 25 panes, each running Claude Code in a different directory: some editing code, some running tests, some waiting for approval, some finished."
+              >
+                <source src="multitask.mp4" type="video/mp4" />
+              </video>
             </div>
             <figcaption>
               One tab, <b>25 Claude Code sessions</b>, 25 directories. An illustration, with
@@ -752,6 +763,22 @@
       }
       document.getElementById("film").addEventListener("click", playFilm);
       document.getElementById("watch").addEventListener("click", playFilm);
+
+      // The wall of agents plays only while it can be seen, so a visitor who
+      // never scrolls this far does not download it.
+      (function () {
+        const video = document.getElementById("multitask-video");
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        if (!("IntersectionObserver" in window)) return;
+        new IntersectionObserver(function (entries) {
+          if (entries[entries.length - 1].isIntersecting) {
+            // A refused autoplay simply leaves the poster up.
+            video.play().catch(function () {});
+          } else {
+            video.pause();
+          }
+        }, { threshold: 0.15 }).observe(video);
+      })();
 
       /* ── Animated ASCII fractals, at three grains ────────────────────
          Escape-time Julia sets, `z ← z² + c`, drawn as characters into <pre>
