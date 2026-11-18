@@ -436,6 +436,20 @@
         letter-spacing: -0.02em;
       }
 
+      h2 em { font-style: italic; color: var(--gold); }
+
+      /* The one picture allowed past the text column: it is a wall of panes, and
+         the wall is the point. Centred on the column and overflowing it equally
+         on both sides, down to the page gutter on anything narrower. */
+      #multitask .sec-head { display: block; margin-bottom: 16px; }
+      #multitask .prose { margin-bottom: 8px; }
+      figure.shot.wide {
+        width: min(calc(100vw - 2 * var(--gutter)), 1560px);
+        margin: 36px 0 0 50%;
+        transform: translateX(-50%);
+      }
+      figure.shot.wide figcaption { max-width: none; }
+
       .features {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
@@ -613,6 +627,29 @@
       </div>
 
       <div class="wrap">
+        <section id="multitask">
+          <div class="sec-head"><h2>Multitasking <em>to the extreme.</em></h2></div>
+          <p class="prose">
+            Every split is its own shell in its own directory, so every split can hold its own
+            agent. Rearrange them as they work: moving a pane never restarts what is running in it.
+          </p>
+          <figure class="shot wide">
+            <div class="shot-frame">
+              <img
+                src="multitask.webp"
+                width="2880"
+                height="1800"
+                loading="lazy"
+                alt="Illustration of one jterm tab split into 25 panes, each running Claude Code in a different directory: some editing code, some running tests, some waiting for approval, some finished."
+              />
+            </div>
+            <figcaption>
+              One tab, <b>25 Claude Code sessions</b>, 25 directories. An illustration, with
+              made-up projects.
+            </figcaption>
+          </figure>
+        </section>
+
         <section id="what">
           <div class="sec-head"><span class="sec-num">01</span><h2>What it does</h2></div>
           <div class="features">
