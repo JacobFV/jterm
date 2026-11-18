@@ -5,7 +5,8 @@ const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const lerp = (a, b, p) => a + (b - a) * p;
 const ease = (p) => { p = clamp(p); return p * p * (3 - 2 * p); };
 const eout = (p) => 1 - Math.pow(1 - clamp(p), 3);
-const eback = (p) => { p = clamp(p); const c = 1.9; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); };
+// The film's springy overshoot. The setup reel asks for plain easing instead.
+const eback = (p) => { p = clamp(p); if (window.calmMotion) return ease(p); const c = 1.9; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); };
 const seg = (b, a, z) => clamp((b - a) / (z - a));
 const rnd = hash;
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

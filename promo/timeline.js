@@ -658,8 +658,9 @@ function spray(F, real, hitAge) {
 }
 
 const $ = (id) => document.getElementById(id);
-function renderAt(t) {
-  const F = frame(t), frameNo = Math.round(t * 60);
+function renderAt(t) { paint(frame(t), t, Math.round(t * 60)); }
+/** Puts a described frame on screen. `F.clean` leaves the film's grade off it. */
+function paint(F, t, frameNo) {
   $("bg").innerHTML = F.bg;
   $("ui").innerHTML = F.wins.map((w) => winHtml(w, t)).join("");
   const amb = $("amb");
@@ -690,7 +691,7 @@ function renderAt(t) {
   }
   if (F.fx.invert) filters.push("invert(1) hue-rotate(180deg)");
   stage.style.filter = filters.join(" ") || "none";
-  $("post").innerHTML = (F.spray || "") + `<div class="scan"></div><div class="vig"></div>` + (F.fx.flash > 0.01 ? `<div style="position:absolute;inset:0;background:#fff;opacity:${(F.fx.flash * 0.85).toFixed(3)}"></div>` : "");
+  $("post").innerHTML = F.clean ? "" : (F.spray || "") + `<div class="scan"></div><div class="vig"></div>` + (F.fx.flash > 0.01 ? `<div style="position:absolute;inset:0;background:#fff;opacity:${(F.fx.flash * 0.85).toFixed(3)}"></div>` : "");
 }
 window.renderAt = renderAt;
 if (location.hash) renderAt(parseFloat(location.hash.slice(1)));

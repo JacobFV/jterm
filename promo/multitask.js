@@ -617,7 +617,10 @@ function live(line, at, frame) {
   return l;
 }
 
-BODIES.cc = function (p, w, h, frame) {
+BODIES.cc = function (p, w, h, t) {
+  // The loop passes its frame number as the time; the reel, whose clock is the
+  // film's, sets it on the pane instead.
+  const frame = p.frame ?? t;
   const s = SESSIONS[p.c], cols = Math.floor((w - 16) / measureCell()), rows = Math.floor((h - 8) / CC_ROW_PX);
   const at = ((frame + p.offset) % LOOP_FRAMES) / LOOP_FRAMES;
   const { st, lines } = moment(s, at, frame);
@@ -648,10 +651,9 @@ const LAYOUT = ["h", [0.185, 0.185, 0.26, 0.185, 0.185],
 // the wall of terminals has some landmarks in it.
 const DRESSED = { c: "tokyo", g: "gruvbox", l: "dracula", o: "nord", t: "mocha", w: "kanagawa", n: "rosepine" };
 
-window.paintMultitask = function (W, H) {
+function multitaskScene(W, H) {
   const style = document.createElement("style");
   style.textContent = `
-    html, body, #cam { width: ${W}px !important; height: ${H}px !important; }
     .ccterm { position: absolute; inset: 4px 8px; overflow: hidden; color: var(--fg); white-space: pre;
               font: ${CC_FONT_PX}px/${CC_ROW_PX}px var(--mono); }
     .ccterm > div { height: ${CC_ROW_PX}px; overflow: hidden; }
@@ -667,12 +669,19 @@ window.paintMultitask = function (W, H) {
   Object.keys(SESSIONS).forEach((id, i) => {
     panes[id] = { k: "cc", c: id, icon: "bot", title: SESSIONS[id].dir, theme: DRESSED[id], focus: id === "i", offset: Math.floor(hash(i * 3.7 + 1) * LOOP_FRAMES) };
   });
-  const scene = {
+  return {
     W, H, theme: "dark", panes, focus: "i",
     rects: rects(LAYOUT, { x: 0, y: 0, w: W, h: H - 34 }),
     tabs: [{ title: `${SESSIONS.i.dir} +${Object.keys(panes).length - 1}`, icon: "bot" }, { title: "~/work" }, { title: "staging logs" }, { title: "notes.md", icon: "file" }],
   };
+}
+
+window.paintMultitask = function (W, H) {
+  const sized = document.createElement("style");
+  sized.textContent = `html, body, #cam { width: ${W}px !important; height: ${H}px !important; }`;
+  document.head.appendChild(sized);
+  const scene = multitaskScene(W, H);
   window.paintFrame = (frame) => { document.getElementById("ui").innerHTML = winHtml(scene, frame); };
   paintFrame(0);
-  return Object.keys(panes).length;
+  return Object.keys(scene.panes).length;
 };

@@ -18,6 +18,10 @@ Needs `numpy`, `Pillow`, `playwright` (with its Chromium) and `imageio-ffmpeg`.
 panes (`docs/multitask.mp4`, and its poster `docs/multitask.webp`) with the same
 mock. `multitask.js` holds what they say and how each one moves.
 
+`python3 reel.py` cuts the 15-second clip at the top of the setup dialog
+(`public/setup-reel.*`) from the film's scenes and that wall, with the film's
+effects, captions and camera moves left out. `reel.js` is the shot list.
+
 - `content.js` — what the fake terminals, editors and sidebar say
 - `ui.js` — themes, the layout engine, pane bodies and the window chrome
 - `timeline.js` — the scenes, cut to a 150 BPM grid (one beat = 24 frames)
