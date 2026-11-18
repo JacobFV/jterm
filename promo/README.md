@@ -14,8 +14,9 @@ python3 sheet.py out.png 1 2 3 # a contact sheet of those seconds
 
 Needs `numpy`, `Pillow`, `playwright` (with its Chromium) and `imageio-ffmpeg`.
 
-`python3 multitask.py` draws the download page's wall of 25 agent panes
-(`docs/multitask.webp`) with the same mock. `multitask.js` holds what they say.
+`python3 multitask.py` draws the download page's five-second loop of 25 agent
+panes (`docs/multitask.mp4`, and its poster `docs/multitask.webp`) with the same
+mock. `multitask.js` holds what they say and how each one moves.
 
 - `content.js` — what the fake terminals, editors and sidebar say
 - `ui.js` — themes, the layout engine, pane bodies and the window chrome

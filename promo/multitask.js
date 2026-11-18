@@ -1,13 +1,19 @@
-// One still for the download page: a single jterm tab split into 25 panes, each
-// with Claude Code at work somewhere else on the disk.
+// Five looping seconds for the download page: a single jterm tab split into 25
+// panes, each with Claude Code at work somewhere else on the disk.
 //
 // All of it is drawn. Nothing here starts jterm, a shell or an agent, and every
 // project, path and number is invented. It is painted by the film's own `ui.js`,
 // so the window chrome cannot drift away from the film's, and it adds only the
 // one pane body the film did not need: an agent session that fits whatever width
 // its split happens to give it. Loaded on top of index.html by multitask.py.
+//
+// The loop has no seam because no pane is ever asked to end where it began in
+// any way the eye can catch. Each runs its own cycle of the same length from its
+// own starting offset, and is a pure function of the frame number, so frame 150
+// is frame 0 exactly. A pane's jump back to the start of its cycle lands at a
+// different moment from everyone else's and reads as one more screen redraw.
 
-const CC_FONT_PX = 12, CC_ROW_PX = 16;
+const CC_FONT_PX = 12, CC_ROW_PX = 16, LOOP_FRAMES = 150;
 
 // Claude Code colours inline code rather than printing the backticks.
 const say = (s) => "«w:●» " + s.replace(/`([^`]+)`/g, "«b:$1»");
@@ -25,9 +31,7 @@ const todo = (rows) => [tool("Update Todos", "").replace("()", "")].concat(rows.
   if (st === "x") return `${lead}«g:☒» «d:${s}»`;
   return st === ">" ? `${lead}«cco:☐» «w:${s}»` : `${lead}«d:☐ ${s}»`;
 }));
-const spin = (glyph, verb, took, extra = "") => ({
-  clip: 1, t: `«cco:${glyph} ${verb}…» «d:(${took}${extra ? " · " + extra : ""} · esc to interrupt)»`,
-});
+const spin = (verb, took, extra = "") => ({ spin: { verb, took, extra } });
 
 // What a session has usually been doing before the part worth showing. Panes
 // differ in height, and an agent's terminal is never half empty, so each one is
@@ -59,9 +63,9 @@ const SESSIONS = {
       add(42, "  ?? deriveKey(order.id, order.total);"),
       "",
       busy("Bash", "npm test -- charge"),
-      out("«d:Running… 38 of 112»"),
+      out("«d:Running… {38..97} of 112»"),
       "",
-      spin("✻", "Reconciling", "1m 52s", "↓ 6.1k tokens"),
+      spin("Reconciling", "1m 52s", "↓ 6.1k tokens"),
     ],
   },
   b: {
@@ -97,7 +101,7 @@ const SESSIONS = {
       "",
       busy("Write", "reports/guidance.png"),
       "",
-      spin("✶", "Plotting", "48s", "↑ 1.2k tokens"),
+      spin("Plotting", "48s", "↑ 1.2k tokens"),
     ],
   },
   d: {
@@ -127,7 +131,7 @@ const SESSIONS = {
       "",
       busy("Write", "tests/fov_symmetry.rs"),
       "",
-      spin("✽", "Shadowcasting", "3m 07s", "↓ 11.4k tokens"),
+      spin("Shadowcasting", "3m 07s", "↓ 11.4k tokens"),
     ],
   },
   f: {
@@ -145,7 +149,7 @@ const SESSIONS = {
       tool("Update", "App.xcodeproj/project.pbxproj"),
       out("Updated with «g:2» additions"),
       "",
-      spin("✻", "Compiling", "6m 40s", "↓ 21k tokens"),
+      spin("Compiling", "6m 40s", "↓ 21k tokens"),
     ],
   },
   g: {
@@ -163,7 +167,7 @@ const SESSIONS = {
       "",
       busy("Update", "models/marts/orders.sql"),
       "",
-      spin("✶", "Deduplicating", "2m 03s"),
+      spin("Deduplicating", "2m 03s"),
     ],
   },
   h: {
@@ -214,15 +218,15 @@ const SESSIONS = {
       say("One miss: `closeUpvalues` writes into an old closure. Fixed."),
       "",
       busy("Bash", "make && ./run-tests --gc-stress"),
-      out("«G:✓» 214 passed  «d:running test/gc/cycles.lox…»"),
+      out("«G:✓» {196..214} passed  «d:running test/gc/cycles.lox…»"),
       "",
-      spin("✻", "Collecting", "12m 18s", "↓ 48.6k tokens"),
+      spin("Collecting", "12m 18s", "↓ 48.6k tokens"),
     ],
   },
   j: {
     dir: "~/oss/tiny-http", branch: "main", left: 91, mode: "welcome", grep: "parseRequest",
     files: ["src/parser.rs", "src/lib.rs"],
-    log: [],
+    log: [], first: "why is parseRequest so slow?",
   },
   k: {
     dir: "~/work/web/storefront", branch: "a11y-pass", left: 44, mode: "edits", grep: "aria-label",
@@ -236,7 +240,7 @@ const SESSIONS = {
       tool("Update", "components/Stepper.tsx"),
       out("Updated with «g:4» additions and «r:2» removals"),
       "",
-      spin("✽", "Labelling", "4m 26s", "↓ 15k tokens"),
+      spin("Labelling", "4m 26s", "↓ 15k tokens"),
     ],
   },
   l: {
@@ -248,7 +252,7 @@ const SESSIONS = {
       tool("Bash", "helm template . | kubeconform"),
       out("«G:Summary:» 14 resources, 14 valid"),
       "",
-      "«cco:✶» «w:Compacting conversation…» «d:(esc to cancel)»",
+      spin("Compacting conversation", "14s"),
     ],
   },
   m: {
@@ -280,9 +284,9 @@ const SESSIONS = {
       say("`sqrt` of a zero distance on masked residues. Adding an epsilon."),
       "",
       busy("Bash", "python train.py --steps 6000"),
-      out("«d:step 4210  loss 1.873  lr 3e-4»"),
+      out("«d:step {4210..4385}  loss 1.873  lr 3e-4»"),
       "",
-      spin("✻", "Folding", "21m 09s", "↓ 33k tokens"),
+      spin("Folding", "21m 09s", "↓ 33k tokens"),
     ],
   },
   o: {
@@ -309,7 +313,7 @@ const SESSIONS = {
       "",
       busy("Update", "tokens/color.json"),
       "",
-      spin("✶", "Recolouring", "37s"),
+      spin("Recolouring", "37s"),
     ],
   },
   q: {
@@ -322,11 +326,8 @@ const SESSIONS = {
       out("Reduced «y:9,412» lines to «G:23»"),
       "",
       say("Two candidates are left. Which compiler do you ship with?"),
-      "",
-      "  «cco:❯ 1.» clang 19",
-      "    2. gcc 14",
-      "    3. Both",
     ],
+    choices: ["clang 19", "gcc 14", "Both"],
   },
   r: {
     dir: "~/sec/audit-q4", branch: "findings", left: 35, mode: "plan", grep: "verify_signature",
@@ -341,7 +342,7 @@ const SESSIONS = {
       busy("Task", "Look for algorithm confusion"),
       out("«d:Read services/auth/keys.py»"),
       "",
-      spin("✽", "Auditing", "7m 55s", "↓ 62k tokens"),
+      spin("Auditing", "7m 55s", "↓ 62k tokens"),
     ],
   },
   s: {
@@ -374,7 +375,7 @@ const SESSIONS = {
       "",
       busy("Bash", "wasm-pack build --release"),
       "",
-      spin("✻", "Reverberating", "1m 28s"),
+      spin("Reverberating", "1m 28s"),
     ],
   },
   u: {
@@ -388,7 +389,7 @@ const SESSIONS = {
       "",
       busy("Update", "onboarding/first-week.md"),
       "",
-      spin("✶", "Proofreading", "2m 44s", "↓ 5.3k tokens"),
+      spin("Proofreading", "2m 44s", "↓ 5.3k tokens"),
     ],
   },
   v: {
@@ -403,9 +404,9 @@ const SESSIONS = {
       tool("Bash", "cargo miri test spsc"),
       out("«G:test result: ok.» 41 passed"),
       "",
-      "«r:⎿  API Error (overloaded) · Retrying in 8 seconds… (attempt 3/10)»",
+      "«r:⎿  API Error (overloaded) · Retrying in {8..1} seconds… (attempt 3/10)»",
       "",
-      spin("✽", "Waiting", "5m 12s"),
+      spin("Waiting", "5m 12s"),
     ],
   },
   w: {
@@ -423,7 +424,7 @@ const SESSIONS = {
       "",
       busy("Update", "src/api/client.ts"),
       "",
-      spin("✻", "Untangling", "3m 33s", "↓ 9.8k tokens"),
+      spin("Untangling", "3m 33s", "↓ 9.8k tokens"),
     ],
   },
   x: {
@@ -455,7 +456,7 @@ const SESSIONS = {
       busy("Bash", "kicad-cli pcb drc kb.kicad_pcb"),
       out("«y:2» clearance warnings so far"),
       "",
-      spin("✶", "Routing", "6m 02s", "↓ 12k tokens"),
+      spin("Routing", "6m 02s", "↓ 12k tokens"),
     ],
   },
 };
@@ -475,7 +476,8 @@ function cellsHtml(row) {
 }
 /** A real terminal wraps rather than clips, and hangs the text under its marker. */
 function wrap(line, cols) {
-  const l = typeof line === "string" ? { t: line } : line, all = cells(l.t);
+  const l = typeof line === "string" ? { t: line } : line;
+  const all = l.n == null ? cells(l.t) : cells(l.t).slice(0, l.n);
   if (l.clip || all.length <= cols) return [{ cls: l.cls, html: cellsHtml(all.slice(0, cols)) }];
   let hang = 0;
   while (hang < all.length && all[hang][0] === " ") hang++;
@@ -503,14 +505,14 @@ const MODE_LINE = {
   compact: "«d:? for shortcuts»", error: "«d:? for shortcuts»",
 };
 
-function footer(s, cols) {
+function footer(s, cols, st) {
   const rule = { cls: "ccrule", clip: 1, t: "─".repeat(cols) };
   const where = `«b:${s.dir}»` + (s.branch ? ` «d:on» «m:${s.branch}»` : "");
-  const room = `«${s.left < 15 ? "r" : "d"}:${s.left}% left»`;
+  const room = `«${st.left < 15 ? "r" : "d"}:${st.left}% left»`;
   const status = { clip: 1, t: where };
-  const mode = { clip: 1, t: MODE_LINE[s.mode] };
+  const mode = { clip: 1, t: MODE_LINE[st.mode] };
   const gauge = { clip: 1, t: room };
-  if (s.ask) return [
+  if (st.ask) return [
     rule,
     { clip: 1, t: `«w:${s.ask.title}»` },
     ...[`  ${s.ask.cmd}`, `  «d:${s.ask.why}»`],
@@ -520,7 +522,7 @@ function footer(s, cols) {
     "  3. No «d:(esc)»",
     status,
   ];
-  return [rule, { clip: 1, t: `«d:>» ${s.draft || ""}§` }, rule, status, cols > 58 ? { clip: 1, t: MODE_LINE[s.mode] + "   " + room } : (s.left < 15 ? gauge : mode)];
+  return [rule, { clip: 1, t: `«d:>» ${st.draft}§` }, rule, status, cols > 58 ? { clip: 1, t: MODE_LINE[st.mode] + "   " + room } : (st.left < 15 ? gauge : mode)];
 }
 function welcome(s) {
   return [
@@ -545,19 +547,90 @@ function measureCell() {
   return cellW;
 }
 
-BODIES.cc = function (p, w, h) {
+// ── a session at one moment of its cycle ──────────────────────────────────
+// `at` runs 0 to 1 over the pane's own cycle; `frame` is the film's. Everything
+// periodic divides LOOP_FRAMES evenly, or it would hiccup where the video wraps.
+function spinLine({ verb, took, extra }, at, frame) {
+  const glyph = "✢✳✶✻✽"[Math.floor(frame / 3) % 5];
+  const [, m, sec] = took.match(/(?:(\d+)m )?(\d+)s/);
+  const total = (+m || 0) * 60 + +sec + Math.floor(at * 5);
+  const clock = total >= 60 ? `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, "0")}s` : `${total}s`;
+  const more = extra.replace(/([\d.]+)k/, (_, n) => (+n + at * 0.7).toFixed(1) + "k");
+  return { clip: 1, t: `«cco:${glyph} ${verb}…» «d:(${clock}${more ? " · " + more : ""} · esc to interrupt)»` };
+}
+const typed = (text, at, from, to) => text.slice(0, Math.floor(text.length * clamp((at - from) / (to - from))));
+
+function moment(s, at, frame) {
+  const st = { mode: s.mode, ask: false, draft: typed(s.draft || "", at, 0.2, 0.7), left: s.left - Math.floor(at * 2) };
+  let log = s.log.slice(), tail = null;
+  const last = log[log.length - 1];
+  if (last && last.spin) tail = log.pop();
+
+  if (s.mode === "welcome") {
+    const sent = at >= 0.62;
+    st.draft = sent ? "" : typed(s.first, at, 0.14, 0.56);
+    log = welcome(s);
+    if (sent) log.push(you(s.first), "", busy("Search", 'pattern: "parseRequest"'));
+    tail = sent ? spin("Exploring", "1s") : null;
+  } else if (s.mode === "done") {
+    const worked = log.pop();
+    tail = at < 0.84 ? spin("Finishing up", "8s") : worked;
+  } else if (s.mode === "compact" && at >= 0.72) {
+    tail = "«d:✻ Conversation compacted»";
+    st.left = 71;
+  } else if (s.ask) {
+    st.ask = at < 0.62;
+    if (!st.ask) { log.push("", busy("Bash", s.ask.cmd)); tail = spin("Running", "1s"); }
+  } else if (s.choices) {
+    if (at < 0.68) {
+      const pick = at < 0.36 ? 0 : 1;
+      log.push("", ...s.choices.map((c, i) => (i === pick ? `  «cco:❯ ${i + 1}.» ${c}` : `    ${i + 1}. ${c}`)));
+    } else {
+      log.push("", you(s.choices[1]), "", busy("Bash", "gcc-14 -O2 -fsanitize=address main.c"));
+      tail = spin("Bisecting", "2s");
+      st.mode = "edits";
+    }
+  }
+
+  // The newest few entries arrive during the cycle, and an agent's own sentences
+  // are written out rather than appearing whole. Welcome and answered prompts
+  // have just been composed above and need none of this.
+  const scripted = s.mode !== "welcome";
+  const hidden = scripted ? (s.reveal ?? Math.min(6, Math.floor(s.log.length / 2))) : 0;
+  const first = log.length - hidden, lines = [];
+  log.forEach((l, i) => {
+    let shown = l;
+    if (i >= first && i < s.log.length) {
+      const due = 0.06 + (0.7 * (i - first)) / hidden;
+      if (at < due) return;
+      if (typeof l === "string" && l.startsWith("«w:●»")) shown = { t: l, n: 4 + Math.floor((at - due) * 420) };
+    }
+    lines.push(shown);
+  });
+  if (tail) lines.push("", tail.spin ? spinLine(tail.spin, at, frame) : tail);
+  return { st, lines };
+}
+function live(line, at, frame) {
+  const l = typeof line === "string" ? { t: line } : { ...line };
+  l.t = l.t.replace(/\{(\d+)\.\.(\d+)\}/g, (_, a, b) => String(Math.round(lerp(+a, +b, at))));
+  if (Math.floor(frame / 15) % 2) l.t = l.t.replace("«cco:●»", "«d:●»");
+  return l;
+}
+
+BODIES.cc = function (p, w, h, frame) {
   const s = SESSIONS[p.c], cols = Math.floor((w - 16) / measureCell()), rows = Math.floor((h - 8) / CC_ROW_PX);
-  const lay = (ls) => ls.flatMap((l) => (l === "" ? [{ html: "" }] : wrap(l, cols)));
-  const foot = lay(footer(s, cols));
-  let body = lay(s.mode === "welcome" ? welcome(s) : s.log);
+  const at = ((frame + p.offset) % LOOP_FRAMES) / LOOP_FRAMES;
+  const { st, lines } = moment(s, at, frame);
+  const lay = (ls) => ls.flatMap((l) => (l === "" ? [{ html: "" }] : wrap(live(l, at, frame), cols)));
+  const foot = lay(footer(s, cols, st));
   const room = rows - foot.length;
-  if (s.mode !== "welcome" && body.length < room) body = lay(earlier(s, room - body.length + 2)).concat(body);
-  const shown = body.slice(-room);
+  // Always there rather than added to fit, so a pane's history does not change
+  // underneath it as new lines push the old ones up.
+  const past = s.mode === "welcome" ? [] : lay(earlier(s, room + 2));
+  const shown = past.concat(lay(lines)).slice(-room);
   while (shown.length < room) shown.push({ html: "" });
-  const html = shown.concat(foot).map((r) => {
-    const line = (r.html || " ").replace("§", p.focus ? '<b class="cur"></b>' : '<b class="cur off"></b>');
-    return `<div${r.cls ? ` class="${r.cls}"` : ""}>${line}</div>`;
-  }).join("");
+  const caret = p.focus && frame % 30 < 18 ? '<b class="cur"></b>' : '<b class="cur off"></b>';
+  const html = shown.concat(foot).map((r) => `<div${r.cls ? ` class="${r.cls}"` : ""}>${(r.html || " ").replace("§", caret)}</div>`).join("");
   return `<div class="ccterm">${html}</div>`;
 };
 
@@ -591,13 +664,15 @@ window.paintMultitask = function (W, H) {
   document.head.appendChild(style);
 
   const panes = {};
-  for (const id in SESSIONS)
-    panes[id] = { k: "cc", c: id, icon: "bot", title: SESSIONS[id].dir, theme: DRESSED[id], focus: id === "i" };
+  Object.keys(SESSIONS).forEach((id, i) => {
+    panes[id] = { k: "cc", c: id, icon: "bot", title: SESSIONS[id].dir, theme: DRESSED[id], focus: id === "i", offset: Math.floor(hash(i * 3.7 + 1) * LOOP_FRAMES) };
+  });
   const scene = {
     W, H, theme: "dark", panes, focus: "i",
     rects: rects(LAYOUT, { x: 0, y: 0, w: W, h: H - 34 }),
     tabs: [{ title: `${SESSIONS.i.dir} +${Object.keys(panes).length - 1}`, icon: "bot" }, { title: "~/work" }, { title: "staging logs" }, { title: "notes.md", icon: "file" }],
   };
-  document.getElementById("ui").innerHTML = winHtml(scene, 0);
+  window.paintFrame = (frame) => { document.getElementById("ui").innerHTML = winHtml(scene, frame); };
+  paintFrame(0);
   return Object.keys(panes).length;
 };
